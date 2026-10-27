@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
+import { lockPath } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -37,7 +38,7 @@ async function boot(extraShell: Record<string, unknown> = {}) {
   model.script([{ text: 'A answer.' }], [{ text: 'B answer.' }]);
   const ui = await bootApp(model, 130, 34, undefined, { sessions: { dir: sessions }, shell: { roots: [root], ...extraShell }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
   await ui.press('F');
-  return { ui, root, model };
+  return { ui, root, model, sessions };
 }
 
 test('`!sleep 60 &` runs in the background: no block, the field is free, a tree row and the footer count appear', async () => {
@@ -274,3 +275,136 @@ test('x on an ended shell asks nothing: there is nothing to kill', async () => {
   expect(frameOf(ui)).not.toContain('kill sh-1?');
   ui.app.unmount();
 });
+
+test('the pager shows the whole output of a long job: all 400 lines are reachable by paging', async () => {
+  const { ui } = await boot();
+  await ui.type('!');
+  await ui.type('seq -f "row%g" 1 400; sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('400 lines'));
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('│ row1'));
+  expect(frameOf(ui)).not.toContain('lines cut');
+  let seen = false;
+  for (let i = 0; i < 80 && !seen; i++) { await ui.press('pagedown'); await settle(1); seen = /│ row400\b/.test(frameOf(ui)); }
+  expect(seen).toBe(true);
+  expect(frameOf(ui)).not.toContain('lines cut');
+  ui.app.unmount();
+}, 30_000);
+
+test('`!cmd &` while a turn runs starts the job and leaves the turn alone', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-person-sh-')));
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'slow answer.' }]);
+  const ui = await bootApp(model, 130, 34, undefined, { shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'a slow question');
+  await settleUntil(() => model.held);
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  expect(frameOf(ui)).not.toContain('still running');
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('slow answer.'));
+  expect(frameOf(ui)).toContain('slow answer.');
+  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  ui.app.unmount();
+}, 20_000);
+
+test('/resume n with a shell running asks the same question, and k switches', async () => {
+  const { ui } = await boot();
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await ask(ui, '/resume 2');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60 running');
+  await ui.press('k');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  expect(frameOf(ui)).toContain('A answer.');
+  ui.app.unmount();
+}, 20_000);
+
+test('the leave panel survives its jobs ending while it is open: k and s still leave', async () => {
+  const { ui } = await boot();
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ui.type('!');
+  await ui.type('sleep 1 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 1'));
+  await ask(ui, '/new');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  await settleUntil(() => frameOf(ui).includes('sh-1 exited 0 after'), 4000);
+  expect(frameOf(ui)).toContain('Background shells are running');
+  await ui.press('s');
+  await settleUntil(() => !frameOf(ui).includes('A answer.'));
+  expect(frameOf(ui)).not.toContain('Background shells are running');
+  expect(frameOf(ui)).not.toContain('A answer.');
+  ui.app.unmount();
+}, 20_000);
+
+test('a switch refused after the question (the session is open in another process) brings the picker back with its notice', async () => {
+  const { ui, sessions } = await boot();
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(3);
+  const rows = frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
+  const at = rows.findIndex((r) => r.includes('session A question'));
+  for (let i = 0; i < at; i++) { await ui.press('down'); await settle(1); }
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  // Meanwhile another process takes session A.
+  const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const aFile = walk(sessions).find((f) => { if (!f.endsWith('.json')) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
+  fs.writeFileSync(lockPath(path.dirname(aFile), path.basename(aFile, '.json')), JSON.stringify({ pid: process.ppid, host: os.hostname(), token: 'another-process', at: new Date().toISOString() }));
+  await ui.press('k');
+  await settleUntil(() => frameOf(ui).includes('is open in another flow-assist process'));
+  expect(frameOf(ui)).toContain('is open in another flow-assist process');
+  expect(frameOf(ui)).toContain('Sessions');
+  ui.app.unmount();
+}, 20_000);
+
+test('/resume n refused after the question leaves the chat as it was: no picker opens', async () => {
+  const { ui, sessions } = await boot();
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await ask(ui, '/resume 2');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const aFile = walk(sessions).find((f) => { if (!f.endsWith('.json')) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
+  fs.writeFileSync(lockPath(path.dirname(aFile), path.basename(aFile, '.json')), JSON.stringify({ pid: process.ppid, host: os.hostname(), token: 'another-process', at: new Date().toISOString() }));
+  await ui.press('k');
+  await settleUntil(() => frameOf(ui).includes('is open in another flow-assist process'));
+  expect(frameOf(ui)).toContain('is open in another flow-assist process');
+  expect(frameOf(ui)).toContain('B answer.');
+  expect(frameOf(ui)).not.toContain('Sessions ·');
+  ui.app.unmount();
+}, 20_000);

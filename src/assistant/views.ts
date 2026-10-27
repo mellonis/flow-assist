@@ -106,6 +106,9 @@ export interface ViewRecord {
   callId?: string;
   seq?: number;
   turn?: number;
+  // How many rows the block may take, where the host's own reader (the pager of a background
+  // shell) shows the whole text; absent: `VIEW_CAPS.rows`.
+  rows?: number;
 }
 
 // A colour is a TOKEN of the chat palette (`ok`, `warn`, `accent`, `shell`, `text`,
@@ -195,7 +198,7 @@ export function frameView(
     return fallback(rec.kind, e instanceof Error ? e.message : String(e));
   }
   if (!Array.isArray(lines) || lines.some((l) => !Array.isArray(l))) return fallback(rec.kind, 'not a list of lines');
-  return (lines as ViewLine[]).slice(0, VIEW_CAPS.rows).map((line) => {
+  return (lines as ViewLine[]).slice(0, Number.isInteger(rec.rows) && rec.rows! > 0 ? rec.rows : VIEW_CAPS.rows).map((line) => {
     let room = ctx.width;
     let chrome = 0;
     let leading = true;

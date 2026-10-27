@@ -46,6 +46,9 @@ export interface ConsoleData {
   // How many lines the output had when the view kept only its last `VIEW_CAPS.lines`
   // — present only when it was cut, so the folded line can say it holds a tail.
   lines?: number;
+  // The pager of a background shell: the block shows all of `text` when open, not the last
+  // `ctx.lines` lines of it.
+  whole?: boolean;
 }
 
 // The tail of a text, capped in every direction: each line, the number of lines, the
@@ -109,6 +112,25 @@ export function capConsoleData(raw: unknown): ConsoleData {
     ...(v.note ? { note: oneLine(String(v.note), 80) } : {}),
     ...(v.interactive === true ? { interactive: true } : {}),
     ...((n) => (n ? { lines: n } : {}))(linesOf(String(v.text ?? ''), v.lines)),
+    ...(v.whole === true ? { whole: true } : {}),
+  };
+}
+
+// A background shell as its pager shows it: everything the job's ring buffer holds, with no
+// view cap (the buffer has its own, `shell.jobChars`), and a first line saying so when the
+// buffer itself dropped the head of the output. The tree row and an inline block keep the
+// small cap.
+export function jobConsoleData(job: { command: string; cwd: string; ms: number; running: boolean; statusText: string; status: { state: string; code?: number | null }; droppedChars: number; read(since: number): { text: string } }): ConsoleData {
+  const body = sanitizeViewText(job.read(0).text).replace(/\n+$/, '');
+  const text = job.droppedChars > 0 ? `… the first ${job.droppedChars} characters of the output were dropped (the job keeps the last ones)\n${body}` : body;
+  const s = job.status;
+  return {
+    command: capCommand(job.command, VIEW_CAPS.command),
+    cwd: tildePath(job.cwd),
+    text,
+    showCwd: true,
+    whole: true,
+    ...(s.state === 'running' ? {} : { exitCode: s.state === 'exited' ? (s.code ?? null) : null, ms: job.ms, status: job.statusText }),
   };
 }
 
@@ -181,7 +203,7 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
     const cmd = cutStep(foldedCommand, ctx.width - restWidth);
     return [[{ text: cmd }, ...marker, { text: ' · ', dim: true }, ...tail, ...size]];
   }
-  const max = Math.max(1, ctx.lines);
+  const max = d.whole ? Math.max(1, all.length) : Math.max(1, ctx.lines);
   const cutN = all.length > max ? all.length - max : 0;
   const bar: ViewSpan = { text: '│ ', chrome: true, dim: true };
   // The command is kept WHOLE in the RECORD, never cut with an ellipsis: it is

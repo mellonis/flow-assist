@@ -179,7 +179,11 @@ test('a model job whose wake is held (a turn runs) toasts its end at once and th
   model.release();
   await turn;
   await rig.until(() => rig.toasts.some((t) => t.endsWith('— waking the model')));
+  // The wake does not say the end a second time.
   expect(rig.toasts.filter((t) => t.startsWith('sh-1 '))).toHaveLength(2);
+  expect(rig.toasts.at(-1)).toBe('sh-1 — waking the model');
+  expect((rig.conv as unknown as { toldWake: Set<string>; toastedEnd: Set<string> }).toldWake.size).toBe(0);
+  expect((rig.conv as unknown as { toldWake: Set<string>; toastedEnd: Set<string> }).toastedEnd.size).toBe(0);
 });
 
 test('`!cmd &` starts a job of the person\'s: whole environment, the conversation\'s directory, the field free, ↑ keeps the line', async () => {

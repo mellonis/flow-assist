@@ -128,7 +128,7 @@ export const hostConfigSchema = z.object({
   // click acts on — a fold line in the chat, a row of the session picker or a command's
   // panel — is underlined under it (src/config/mouse.ts). `config set ui.hover false`
   // keeps the mouse and drops the motion reports, for a terminal or a link that feels them.
-  // `agentRows` (4; 0 — none) — how many rows the conversation's live subagents and tasks
+  // `agentRows` (4; 0 — none) — how many rows the conversation's live subagents, tasks and background shells
   // may take under the field (src/assistant/agent-tree.ts).
   // `verbs` — the words the chat's status line picks from while the model works (one
   // per request, src/assistant/verbs.ts); an empty list keeps the built-in ones.

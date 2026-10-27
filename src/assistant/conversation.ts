@@ -984,10 +984,17 @@ export class Conversation {
   private tellJobEnd(job: ShellJob, by: JobKilledBy | null): void {
     if (by === 'exit' || by === 'clear' || by === 'parent') return;
     if (this.toldWake.delete(job.id)) return;
-    try { this.deps.showMessage(`${job.id} ${jobHow(job)} after ${formatDuration(job.ms)}`); } catch { /* a toast is never fatal */ }
+    try {
+      this.deps.showMessage(`${job.id} ${jobHow(job)} after ${formatDuration(job.ms)}`);
+      // A wake that comes later (held by a turn) need not say the end again.
+      if (job.by === 'model') this.toastedEnd.add(job.id);
+    } catch { /* a toast is never fatal */ }
   }
-  // The jobs whose wake toast has said their end already.
+  // The jobs whose wake toast has said their end already (the wake came first), and the
+  // model's jobs whose end was toasted before their wake: each is dropped when the other
+  // toast would have been the second.
   private readonly toldWake = new Set<string>();
+  private readonly toastedEnd = new Set<string>();
   // The end of a job goes to the inbox of the conversation that takes results, framed as
   // data (`frameItem`): the exit code or the kill, how long, the last lines. A kill the
   // person or the model asked for is quiet (a row, no turn), and the ends a closing
@@ -998,9 +1005,10 @@ export class Conversation {
     const killedBy = s.state === 'killed' ? s.by : null;
     if (killedBy === 'exit' || killedBy === 'clear' || killedBy === 'parent') return;
     // To the owner itself, never re-routed: the conversation that holds the job is the one
-    // that can read and end it. A subagent's model reads it only while its turn is still
-    // going (at its next round); a job end that lands after that turn is read by nobody
-    // there, and the person's toast tells (`tellJobEnd`). One that has ended had its jobs
+    // that can read and end it. A subagent that does not stay reads it only while its turn
+    // is still going (at its next round); a job end that lands after that turn is read by
+    // nobody there, and the person's toast tells (`tellJobEnd`). One that stays reads it at
+    // its next turn. One that has ended had its jobs
     // killed with it, so there is no end to deliver.
     const to = this;
     const quiet = killedBy !== null && killedBy !== 'signal';
@@ -1635,8 +1643,11 @@ export class Conversation {
         const ended = this.jobById(i.job?.id ?? i.from.key);
         const end = ended ? `${ended.id} ${jobHow(ended)} after ${formatDuration(ended.ms)}` : `${i.from.label} ended`;
         try {
-          this.deps.showMessage(woken ? `${end} — waking the model` : `${end} — the model was not woken (woken ${MAX_WAKES} times in a row without a message from you)`);
-          this.toldWake.add(i.job?.id ?? i.from.key);
+          const id = i.job?.id ?? i.from.key;
+          const endTold = this.toastedEnd.delete(id);
+          const how = woken ? 'waking the model' : `the model was not woken (woken ${MAX_WAKES} times in a row without a message from you)`;
+          this.deps.showMessage(endTold ? `${id} — ${how}` : `${end} — ${how}`);
+          if (!endTold) this.toldWake.add(id);
         } catch { /* a toast is never fatal */ }
       }
       const away = this.deps.current?.();

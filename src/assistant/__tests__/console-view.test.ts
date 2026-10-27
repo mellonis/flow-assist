@@ -1,6 +1,6 @@
 // The host's own renderer: a command, folded to one line, opened to its last lines.
 import { expect, test } from 'bun:test';
-import { capConsoleData, capConsoleText, consoleTail, renderConsole, type ConsoleData } from '../console-view';
+import { capConsoleData, capConsoleText, consoleTail, jobConsoleData, renderConsole, type ConsoleData } from '../console-view';
 import { frameView, VIEW_CAPS, type ViewRecord, type ViewRenderCtx } from '../views';
 
 const base: ViewRenderCtx = { width: 60, folded: true, live: false, failed: false, elapsedMs: 0, lines: 3, moreKey: '^o' };
@@ -167,4 +167,29 @@ test('capConsoleData caps movedTo and note the way it caps every other field', (
   // Absent stays absent — no field a session file has to carry for every command.
   expect(capConsoleData({ command: 'x', cwd: '~' }).movedTo).toBeUndefined();
   expect(capConsoleData({ command: 'x', cwd: '~' }).note).toBeUndefined();
+});
+
+
+test('a job\'s pager data is its whole buffer, flagged whole, with a first line when the ring buffer dropped the head', () => {
+  const job = (text: string, dropped: number) => ({ command: 'tail -f x', cwd: '/tmp', ms: 5, running: true, statusText: 'running', status: { state: 'running' }, droppedChars: dropped, read: () => ({ text }) });
+  const many = Array.from({ length: 400 }, (_, i) => `row${i + 1}`).join('\n') + '\n';
+  const whole = jobConsoleData(job(many, 0));
+  expect(whole.whole).toBe(true);
+  expect(whole.text.split('\n')).toHaveLength(400);
+  expect(whole.text.startsWith('row1\n')).toBe(true);
+  const cut = jobConsoleData(job('tail\n', 1234));
+  expect(cut.text).toBe('… the first 1234 characters of the output were dropped (the job keeps the last ones)\ntail');
+  // Open, the renderer draws every line of a whole block, not the last ctx.lines.
+  const ctx = { width: 80, folded: false, live: true, failed: false, elapsedMs: 0, lines: 20, moreKey: '' };
+  const lines = renderConsole(whole, ctx);
+  expect(lines.filter((l) => String(l[1]?.text ?? '').startsWith('row'))).toHaveLength(400);
+  expect(renderConsole({ ...whole, whole: undefined }, ctx).filter((l) => String(l[1]?.text ?? '').startsWith('row'))).toHaveLength(20);
+});
+
+test('a view record may raise the row cap for the host\'s own reader', () => {
+  const rows = Array.from({ length: VIEW_CAPS.rows + 50 }, (_, i) => [{ text: `r${i}` }]);
+  const rec = (extra: object) => ({ kind: 'k', data: null, phase: 'done', startedAt: 0, ...extra }) as ViewRecord;
+  const ctx = { width: 40, folded: false, live: false, failed: false, elapsedMs: 0, lines: 20, moreKey: '' };
+  expect(frameView(rec({}), { k: () => rows }, ctx, {})).toHaveLength(VIEW_CAPS.rows);
+  expect(frameView(rec({ rows: VIEW_CAPS.rows + 50 }), { k: () => rows }, ctx, {})).toHaveLength(VIEW_CAPS.rows + 50);
 });

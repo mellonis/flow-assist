@@ -29,7 +29,7 @@ import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assist
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
-import { capConsoleData, renderConsole } from '../assistant/console-view.js';
+import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
 import { backgroundCommand } from '../assistant/background-bang.js';
 import { formatDuration } from '../assistant/duration.js';
 import type { ShellJob } from '../assistant/shell-job.js';
@@ -145,12 +145,9 @@ const JOB_PAGER_ID = '0:view:0';
 // That list: one `!command`-like message with a console view of what the job has printed
 // (its tail, as a view keeps it), live while it runs.
 function jobMessages(job: ShellJob): ChatMsg[] {
-  const s = job.status;
-  const data = capConsoleData({
-    command: job.command, cwd: tildePath(job.cwd), text: job.read(0).text, showCwd: true,
-    ...(s.state === 'running' ? {} : { exitCode: s.state === 'exited' ? s.code : null, ms: job.ms, status: job.statusText }),
-  });
-  return [{ role: 'shell', content: '', command: job.command, views: [{ kind: 'console', data, phase: s.state === 'running' ? 'live' : 'done', startedAt: job.startedAt, callId: `job#${job.id}`, turn: 0 }] } as unknown as ChatMsg];
+  const data = jobConsoleData(job);
+  const rows = data.text.split('\n').length + VIEW_CAPS.commandRows + 4;
+  return [{ role: 'shell', content: '', command: job.command, views: [{ kind: 'console', data, phase: job.running ? 'live' : 'done', startedAt: job.startedAt, callId: `job#${job.id}`, turn: 0, rows }] } as unknown as ChatMsg];
 }
 
 // The tree cursor's state (AGENTS.md (agent tree)).
@@ -1193,7 +1190,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (`reclaimLive`); any other is read from its file (`openFromFile`).
           // true — switched.
           // `dir` — the directory its file is in (a list's row says).
-          const openSession = (id: string, title: string, dir: string): boolean => {
+          const openSession = (id: string, title: string, dir: string, fromPicker = false): boolean => {
             const prev = convRef.current!;
             if (!sessDir) return false;
             prev.save();
@@ -1209,6 +1206,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return askLeave(prev, () => {
               const live = registryRef.current!.bySession(id);
               return live ? reclaimLive(prev, live) : openFromFile(prev, id, title, dir);
+            }, () => {
+              // The question took the picker's place; the switch was refused after it (the
+              // session is open in another process): the picker comes back with the notice.
+              if (!fromPicker) return;
+              const rows = pickerRows();
+              const now = rows.find((r) => r.id === id);
+              setPicker(pickerReload(pickerStart(rows, conv.currentProject()), rows, now?.lock === 'held' ? `"${title || id}" is open in another flow-assist process — it cannot be opened here` : ''));
             });
           };
           // A session left while it works or waits is still loaded here, holding its lock: the
@@ -1320,7 +1324,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'close': setPicker(null); return;
               case 'new': if (startNew()) setPicker(null); return;
               case 'open': {
-                if (openSession(a.id, titleOf(a.id), dirOf(a.id))) { setPicker(null); return; }
+                if (openSession(a.id, titleOf(a.id), dirOf(a.id), true)) { setPicker(null); return; }
                 // Taken by another process since the list was read: the picker stays,
                 // re-read.
                 const rows = pickerRows();
@@ -1392,13 +1396,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // picker — and Esc stays where it is. Without any it just goes. `go` is the leave;
           // the answer runs it. true while the question is up too: the switch is taken over by
           // it (a picker closes), not refused.
-          const askLeave = (prev: Conversation, go: () => boolean): boolean => {
+          const askLeave = (prev: Conversation, go: () => boolean, refused?: () => void): boolean => {
             if (!prev.shownJobs().length) return go();
             if (prev.confirm || prev.question) { setError('background shells are running — answer the question that waits first, then leave'); return false; }
             const done = (stop: boolean) => {
               if (stop) for (const j of prev.shownJobs()) (j.owner as Conversation).killJob(j, 'person');
               setPanel(null);
-              go();
+              if (!go()) refused?.();
               host.notify();
             };
             openPanel({

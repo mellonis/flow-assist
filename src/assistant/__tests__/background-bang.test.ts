@@ -29,3 +29,11 @@ test('a quote closed before the & does not hide it, and a backslash before a quo
   expect(backgroundCommand("echo it\\'s &")).toBe("echo it\\'s");
   expect(backgroundCommand("echo 'a\\' &")).toBe("echo 'a\\'");
 });
+
+test('a & after a # that starts a comment is part of the comment; a # inside a word is not a comment', () => {
+  expect(backgroundCommand('echo hi # note &')).toBeNull();
+  expect(backgroundCommand('# all comment &')).toBeNull();
+  expect(backgroundCommand('echo $# &')).toBe('echo $#');
+  expect(backgroundCommand('echo a#b &')).toBe('echo a#b');
+  expect(backgroundCommand('echo "# not a comment" &')).toBe('echo "# not a comment"');
+});
