@@ -3,6 +3,7 @@
 import type { PreloadedSkill } from './agent-skills.js';
 import type { AgentOpts, AgentResult, ChatMessage } from './agent.js';
 import type { ChildSlots } from './registry.js';
+import type { ShellJobs } from './shell-job.js';
 import type { AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
 import type { ContextItem } from './screen-context.js';
@@ -211,6 +212,8 @@ export interface ConversationDeps {
   // The host's slots for background tasks (src/assistant/registry.ts). Absent: no
   // background tasks.
   children?: ChildSlots;
+  // The host's background shells (src/assistant/shell-job.ts). Absent: none can start.
+  jobs?: ShellJobs;
 }
 
 // A child a conversation starts: the `subagent` tool's task, or a subagent. `summary` is

@@ -170,9 +170,11 @@ export const hostConfigSchema = z.object({
   // `roots` — the directories commands start in (the first) and may `cd` within — and
   // `autoRun`, the person's second consent that lets the auto mode's `all` answer
   // run_command (src/assistant/auto.ts) — and `passEnv`, the secret variables the
-  // person lets the model's commands see (src/assistant/secrets.ts). On the leash with
+  // person lets the model's commands see (src/assistant/secrets.ts) — and `maxBackground`,
+  // how many background shells run at once in the process, and `jobChars`, how many
+  // characters of each one's output are kept (src/assistant/shell-job.ts). On the leash with
   // the rest of `shell`, so the model can never set either; read live, per command.
-  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean(), passEnv: z.array(z.string()) }).partial().optional(),
+  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean(), passEnv: z.array(z.string()), maxBackground: z.number().int().positive(), jobChars: z.number().int().positive() }).partial().optional(),
   // Agent files (src/assistant/agent-start.ts): `maxAuto`, the highest auto mode an agent
   // file may run in whatever its `auto` says. On the leash: the model can never raise it.
   agents: z.object({ maxAuto: z.enum(['ask', 'reads', 'all']) }).partial().optional(),

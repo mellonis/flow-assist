@@ -250,6 +250,13 @@ export function withPwdTrailer(cmd: string, pwdFile: string): string {
   return `${cmd}\n__fa_rc=$?\npwd -P > '${pwdFile.replace(/'/g, `'\\''`)}' 2>/dev/null\nexit $__fa_rc`;
 }
 
+// The environment a command starts from: `base` (absent — the process's whole one), with
+// the pager and prompt variables that keep a program from waiting on a terminal nobody
+// sees. Shared by every runner here.
+export function commandEnv(base?: Record<string, string | undefined>): Record<string, string | undefined> {
+  return { ...(base ?? process.env), PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' };
+}
+
 export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> {
   const timeoutMs = opts.timeoutMs ?? SHELL_DEFAULTS.timeoutMs;
   const maxChars = opts.maxChars ?? SHELL_DEFAULTS.maxChars;
@@ -291,7 +298,7 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
       cwd: opts.cwd,
       detached: true, // its own process group: `kill(-pid)` reaches everything it started
       stdio: [opts.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-      env: { ...(opts.env ?? process.env), PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
+      env: commandEnv(opts.env),
     });
     const killGroup = () => {
       if (child.pid == null) return;

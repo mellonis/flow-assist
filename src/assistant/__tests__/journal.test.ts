@@ -398,3 +398,39 @@ test('/export words a skill load by the person and by an agent', () => {
   expect(md).toContain('*Skill «notes» loaded by you (project, /p/notes/SKILL.md, content abcdef012345)*');
   expect(md).toContain('*Skill «notes» loaded by an agent (project, /p/notes/SKILL.md, content abcdef012345)*');
 });
+
+test('/export draws a background shell once, where it started, with its output stitched by id and how it ended', () => {
+  const events = [
+    { t: 'row', role: 'user', text: 'start two servers' },
+    { t: 'job-start', id: 'sh-1', command: 'npm run dev', cwd: '~/app', by: 'model' },
+    { t: 'job-start', id: 'sh-2', command: 'tail -f log', cwd: '~/app', by: 'person' },
+    { t: 'job-out', id: 'sh-1', text: 'ready on :3000\n' },
+    { t: 'job-out', id: 'sh-2', text: 'line a\n' },
+    { t: 'row', role: 'assistant', text: 'both are up' },
+    { t: 'job-out', id: 'sh-1', text: 'GET /\n' },
+    { t: 'job-out', id: 'sh-2', capped: true, total: 9_000_000 },
+    { t: 'job-end', id: 'sh-1', ms: 65_000, killed: true, by: 'person' },
+    { t: 'job-end', id: 'sh-2', ms: 1000, code: 0, by: 'self' },
+  ];
+  const md = exportMarkdown(events, { title: 't', id: 's' });
+  const first = md.indexOf('npm run dev');
+  const second = md.indexOf('tail -f log');
+  expect(first).toBeGreaterThan(md.indexOf('start two servers'));
+  expect(second).toBeGreaterThan(first);
+  expect(md.indexOf('both are up')).toBeGreaterThan(second);
+  expect(md).toContain('background sh-1, started by the model');
+  expect(md).toContain('background sh-2, started by you');
+  expect(md).toContain('```console\nready on :3000\nGET /\n```');
+  expect(md).toContain('```console\nline a\n```');
+  expect(md).toContain('9000000 bytes in all');
+  expect(md).toContain('*killed (by you) · 1m 5s*');
+  expect(md).toContain('*exit 0 · 1s*');
+  expect(md).not.toContain('did not finish');
+});
+
+test('/export says a background shell never ended when the journal has no end for it', () => {
+  const md = exportMarkdown([{ t: 'job-start', id: 'sh-1', command: 'sleep 99', cwd: '~', by: 'model' }, { t: 'job-out', id: 'sh-1', text: 'hi\n' }], { title: 't', id: 's' });
+  expect(md).toContain('sleep 99');
+  expect(md).toContain('hi');
+  expect(md).toContain('*did not finish — the journal has no end for this job*');
+});

@@ -49,11 +49,25 @@ test('the host schema carries no mark under the model\'s leash, and may-save is 
 });
 
 test('the leash: ai, shell, web, the legacy fs roots, a plugin\'s roots — and every key holding one', () => {
-  for (const key of ['ai', 'ai.disabledTools', 'ai.baseUrl', 'ai.tokenEnv', 'shell.roots', 'shell.autoRun', 'shell', 'agents.maxAuto', 'web.allowlist', 'fs.roots', 'plugins.repo.roots', 'plugins.repo.roots.0', 'plugins.repo', 'plugins']) {
+  for (const key of ['ai', 'ai.disabledTools', 'ai.baseUrl', 'ai.tokenEnv', 'shell.roots', 'shell.autoRun', 'shell.maxBackground', 'shell.jobChars', 'shell', 'agents.maxAuto', 'web.allowlist', 'fs.roots', 'plugins.repo.roots', 'plugins.repo.roots.0', 'plugins.repo', 'plugins']) {
     expect({ key, leash: isLeashKey(key) }).toEqual({ key, leash: true });
   }
   for (const key of ['ui.verbs', 'ui.mouse', 'sessions.resume', 'plugins.assistant.mode', 'plugins.repo.rootsNote']) {
     expect({ key, leash: isLeashKey(key) }).toEqual({ key, leash: false });
+  }
+});
+
+test('the background shell keys are in the schema as positive whole numbers, and the model may not set either', () => {
+  const ok = hostConfigSchema.safeParse({ shell: { maxBackground: 2, jobChars: 1000 } });
+  expect(ok.success).toBe(true);
+  for (const bad of [{ maxBackground: 0 }, { maxBackground: 1.5 }, { jobChars: -1 }, { jobChars: '10' }]) {
+    expect({ bad, ok: hostConfigSchema.safeParse({ shell: bad }).success }).toEqual({ bad, ok: false });
+  }
+  const walked = nodes(hostConfigSchema);
+  for (const key of ['shell.maxBackground', 'shell.jobChars']) {
+    const hits = walked.filter((n) => n.path === key);
+    expect(hits.length).toBeGreaterThan(0);
+    for (const { node } of hits) { expect(modelMaySet.has(node)).toBe(false); expect(modelMaySave.has(node)).toBe(false); }
   }
 });
 

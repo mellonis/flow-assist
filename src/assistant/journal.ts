@@ -34,6 +34,14 @@
 //            screen and the model keep — up to OUTPUT_CAP per command; past it, one
 //            last `shell-out` with `capped` and the `total` bytes the command printed
 //   shell-end  how it ended: `status` (the exit), `ms`
+//   job-start  a background shell started: `id` (`sh-N`), `command`, `cwd`, `by` (`model` or
+//            `person`)
+//   job-out  its output as it arrives (`id`, `text`), whole, up to OUTPUT_CAP per job, with the
+//            same note past it; `/export` stitches it by `id`
+//   job-end  how it ended: `id`, `ms`, and either `code` (it exited; `by` is `self`) or
+//            `killed` with `by` — `person`, `model`, `clear`, `exit` (the process exited: this
+//            line is written before the group is killed) or `signal` (something else
+//            ended it); `error` when the shell could not be started
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
@@ -351,6 +359,19 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
   };
   // A call's output, stitched the same way, by the call's key.
   const callOut = new Map<string, { text: string; note: string }>();
+  // A background shell is drawn once, where it started; its end (or the end of the journal)
+  // fills the place, with the output stitched by its id.
+  const jobs = new Map<string, { slot: number; start: JournalEvent; text: string; note: string }>();
+  const jobBlock = (j: { start: JournalEvent; text: string; note: string }, end: JournalEvent | null): string => {
+    const lines = [`**${runMark()} ${nd(String(j.start.command ?? ''))}** — background ${nd(String(j.start.id ?? ''))}, started ${j.start.by === 'person' ? 'by you' : 'by the model'}${when(j.start.at)}`, ''];
+    if (j.text) lines.push(block(j.text, 'console'), '');
+    if (j.note) lines.push(j.note, '');
+    const how = !end ? 'did not finish — the journal has no end for this job'
+      : end.killed ? `killed (${nd(stoppedByText(String(end.by ?? 'signal')))})`
+        : end.error ? `could not start: ${nd(String(end.error))}` : `exit ${String(end.code ?? '?')}`;
+    lines.push(`*${how}${end && typeof end.ms === 'number' ? ` · ${formatDuration(end.ms)}` : ''}*`, '');
+    return lines.join('\n');
+  };
   const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.subagent ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
   for (const ev of events) {
     const at = when(ev.at);
@@ -411,6 +432,21 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         flushOutput();
         out.push(`*${nd(String(ev.status ?? 'ended'))}${typeof ev.ms === 'number' ? ` · ${formatDuration(ev.ms)}` : ''}*`, '');
         break;
+      case 'job-start': jobs.set(String(ev.id ?? ''), { slot: out.length, start: ev, text: '', note: '' }); out.push('', ''); break;
+      case 'job-out': {
+        const j = jobs.get(String(ev.id ?? ''));
+        if (!j) break;
+        if (typeof ev.text === 'string') j.text += ev.text;
+        if (ev.capped) j.note = `*the journal keeps the first ${formatBytes(OUTPUT_CAP)} of this output — ${String(ev.total)} bytes in all*`;
+        break;
+      }
+      case 'job-end': {
+        const j = jobs.get(String(ev.id ?? ''));
+        if (!j) break;
+        out[j.slot] = jobBlock(j, ev);
+        jobs.delete(String(ev.id ?? ''));
+        break;
+      }
       case 'markup': out.push(`*Note${at}:* ${nd(String(ev.note ?? ''))} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(nd(String(ev.summary ?? ''))), '', '---', ''); break;
       case 'subagent': {
@@ -449,6 +485,7 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
     }
   }
   if (shellOpen) flushOutput(true);
+  for (const j of jobs.values()) out[j.slot] = jobBlock(j, null);
   for (const [k, o] of open) { const c = callOut.get(k); out[o.slot] = callBlock(c ? { ...o.start, output: c.text, outputNote: c.note } : o.start, o.confirm, nd); }
   return out;
 }

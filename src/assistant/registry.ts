@@ -8,6 +8,9 @@ import type { ConfirmPolicy } from './confirm-policy.js';
 import { wholeOrDefault } from './rounds.js';
 import type { CloseReason, ConversationDeps, ConversationKind, ConversationStatus } from './conversation-types.js';
 import { hostDeps, type DepsSource } from './host-deps.js';
+import path from 'node:path';
+import { hostStateDir } from '../config/load.js';
+import { ShellJobs } from './shell-job.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
 
 // The host's bookkeeping for background tasks, shared by every conversation it makes
@@ -44,6 +47,10 @@ export interface RegistryInit extends Omit<DepsSource, 'lockToken' | 'current'> 
   // task still counted says in its session's journal that it stopped, and all of them
   // close.
   exitHook?: boolean;
+  // Where the running background shells are listed for the next start (a courtesy for
+  // finding what a crash left); null — nowhere. Absent: `shell-jobs.json` in the host's
+  // state directory.
+  jobsFile?: string | null;
 }
 
 export class ConversationRegistry {
@@ -57,10 +64,16 @@ export class ConversationRegistry {
   // Tasks run at most `max(1, sessions.maxRunning - 1)` at a time (default 4, so three): a
   // session's own turn keeps the slot the count leaves it and never waits on a task.
   readonly children: ChildSlots = this.makeSlots();
+  // The background shells of every conversation of this host: one counter, one limit.
+  readonly jobs: ShellJobs;
   private unhookExit: (() => void) | null = null;
 
   constructor(private readonly init: RegistryInit) {
     this.canAsk = init.canAsk;
+    this.jobs = new ShellJobs({
+      config: () => init.config() as { shell?: unknown },
+      stateFile: () => (init.jobsFile === undefined ? path.join(hostStateDir(), 'shell-jobs.json') : init.jobsFile),
+    });
     if (init.exitHook) this.unhookExit = flushOnExit(() => this.closeAll('exit'));
   }
 
@@ -117,8 +130,8 @@ export class ConversationRegistry {
 
   // What a conversation of this host is handed; `current` is the one the chat draws.
   deps(): ConversationDeps {
-    const { exitHook: _exitHook, ...src } = this.init;
-    return { ...hostDeps({ ...src, lockToken: this.lockToken, current: () => this.onScreen }), said: this.said, children: this.children };
+    const { exitHook: _exitHook, jobsFile: _jobsFile, ...src } = this.init;
+    return { ...hostDeps({ ...src, lockToken: this.lockToken, current: () => this.onScreen }), said: this.said, children: this.children, jobs: this.jobs };
   }
 
   private track(c: Conversation): Conversation {
@@ -219,6 +232,8 @@ export class ConversationRegistry {
   //   started is still there, idle between its turns included: the session stays loaded so
   //   the person who comes back finds the subagent in the same conversation and can write
   //   to it;
+  // - `jobs`: a background shell it started still runs, so a session left with a dev
+  //   server going stays loaded rather than be put away under it;
   // - `confirm`, `question`: a y/n or a question waits for the person;
   // - `queue`: a message waits for the turn's end. The drain shifts the queue and the turn
   //   it starts sets `busy` in the same synchronous step, so `queue.length || busy` covers
@@ -226,7 +241,7 @@ export class ConversationRegistry {
   // - `configAsk`: the settings-file ask is in flight. It clears a microtask after its
   //   y/n's answer, and its loop may park the next change before that.
   quiescent(c: Conversation): boolean {
-    return !c.busy && c.children.size === 0 && !c.confirm && !c.question && c.queue.length === 0 && !c.configAsk;
+    return !c.busy && c.children.size === 0 && c.jobs.size === 0 && !c.confirm && !c.question && c.queue.length === 0 && !c.configAsk;
   }
   // What parks each conversation kept headless once it is quiescent: one "off" per
   // conversation, dropping every listener of its watch.
@@ -467,6 +482,9 @@ export class ConversationRegistry {
     // written; before `close`, which clears the handlers. The stop key names the
     // reason, so the journal and the export say the run stopped at exit, not by Esc; a
     // pending y/n is left as it is (unlike `stop`, which declines it).
+    // Every background shell: its end line is written, then its group gets SIGKILL — a
+    // group left would outlive us.
+    this.jobs.killAll(reason);
     for (const c of deepestFirst) {
       try { if (c.abort) { c.stopKey = reason; c.abort.abort(); } } catch { /* exiting */ }
     }

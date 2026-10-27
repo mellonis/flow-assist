@@ -7,7 +7,7 @@ import type { AutoMode } from './auto.js';
 import { parkedAt, type ConfirmPolicy } from './confirm-policy.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
-import type { JournalEvent } from './journal.js';
+import { outputJournal, type JournalEvent } from './journal.js';
 import { keptAfterClear, type MemoryLists } from './memory-command.js';
 import { readFacts } from './memory-store.js';
 import { markFacts, memoryRecordNotes } from './memory-trust.js';
@@ -19,6 +19,7 @@ import { wholeOrDefault } from './rounds.js';
 import { redactSecrets } from './secrets.js';
 import { unseenAnswer, type Session, type SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
+import { MAX_ENDED_JOBS, type JobKilledBy, type JobSpec, type ShellJob } from './shell-job.js';
 import { baseStatic, memoryBlock, planBlock, projectBlock, summaryBlock } from './system-prompt.js';
 import { createToolSet, toolLoadingMode, type ToolSet } from './tool-loading.js';
 import { pickVerb, verbList } from './verbs.js';
@@ -90,6 +91,12 @@ export class Conversation {
   // timer of each one still armed.
   readonly children = new Set<Conversation>();
   readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
+  // The background shells started from this conversation that still run, by id, in the
+  // order they started — a sibling of `children`, not a kind of child: a job has no turn,
+  // no inbox and no conversation of its own. And the last twenty that ended, record and
+  // buffer kept; emptied by /clear.
+  readonly jobs = new Map<string, ShellJob>();
+  private endedJobs: ShellJob[] = [];
   // The last twenty children whose result came in here, as plain data; emptied by /clear.
   private ended: EndedChild[] = [];
   // A child's place in the host's schedule, set by `scheduleChild`: when its delay ends,
@@ -583,11 +590,17 @@ export class Conversation {
     // The questions asked of it get no answer; a clear or a stop of its parent stops the
     // children that asked, which says so itself, and an exit leaves them as a pending y/n is left.
     if (reason !== 'clear' && reason !== 'parent' && reason !== 'exit') this.settleAsksTo(this);
-    if (reason === 'clear') this.ended = [];
+    if (reason === 'clear') { this.ended = []; this.endedJobs = []; }
     // The children it started are stopped and a pending y/n declined first, so their
     // closing lines precede this conversation's own closing `end`.
     if (reason === 'clear' || reason === 'parent') this.stopChildren(by);
     else if (reason === 'park' && this.parent) this.handChildrenUp();
+    // Its background shells end with it: SIGTERM then SIGKILL for a clear or a stop, SIGKILL
+    // at once for an exit (nothing waits for a grace period there); a subagent that ends
+    // on its own hands the ones still running up, as it hands up its tasks.
+    if (reason === 'clear' || reason === 'parent') this.killJobs(by);
+    else if (reason === 'exit') for (const j of [...this.jobs.values()]) j.killNow('exit');
+    else if (reason === 'park' && this.parent) this.handJobsUp();
     if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.parent)) {
       this.abort?.abort();
       this.abort = null;
@@ -692,6 +705,7 @@ export class Conversation {
     // the closing `end` of its file; that line is written before the abort, which would
     // end the turn in the stop key's name.
     this.stopChildren('person');
+    this.killJobs('person');
     if (this.canStop() && this.confirm) this.answerConfirm(false, 'stop');
     if (this.canStop() && this.parentAsk) this.answerParentAsk('', 'stop');
     if (this.subJournalId) closeOwnFile(this, 'person');
@@ -708,6 +722,7 @@ export class Conversation {
   // Something this conversation started is at work: a child that is not idle, or an idle
   // one with work of its own below it (a task it started delivers to it).
   get hasWorkingChildren(): boolean {
+    if (this.jobs.size) return true;
     for (const c of this.children) if (!c.idle || c.hasWorkingChildren) return true;
     return false;
   }
@@ -805,6 +820,67 @@ export class Conversation {
     this.childTimers.clear();
     this.emit({ type: 'children', count: 0 });
     this.treeChanged(this);
+  }
+
+  // ── background shells
+  // Starts a background shell owned by this conversation, or says why not (the host's
+  // limit, or no host support). Its journal lines — `job-start`, `job-out` as it prints,
+  // `job-end` — go where this conversation's own go; the end line is written before the
+  // group dies at an exit. The job is returned running: the caller adds its own listeners
+  // (`onEnd` for the model's inbox, `onOutput` for a view).
+  startJob(spec: JobSpec): { job: ShellJob } | { refused: string } {
+    const jobs = this.deps.jobs;
+    if (!jobs) return { refused: 'background shells are not available here' };
+    if (this.isClosed) return { refused: 'this conversation has ended' };
+    const started = jobs.start(spec);
+    if ('refused' in started) return started;
+    const job = started.job;
+    job.owner = this;
+    this.jobs.set(job.id, job);
+    const journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by }, { person: spec.by === 'person' });
+    const out = outputJournal((ev) => this.journalTo(journalId, { ...ev, t: 'job-out', id: job.id }));
+    job.onOutput((chunk) => out.push(chunk));
+    job.onEnd((j) => {
+      out.end();
+      const s = j.status;
+      this.journalTo(journalId, {
+        t: 'job-end', id: j.id, ms: j.ms,
+        ...(s.state === 'killed' ? { killed: true, by: s.by } : { code: s.state === 'exited' ? s.code : null, by: 'self' }),
+        ...(j.error ? { error: j.error } : {}),
+      });
+      (j.owner as Conversation).jobEnded(j);
+    });
+    this.childrenChanged();
+    this.treeChanged(this);
+    return { job };
+  }
+  // A job of this conversation ended: its record and buffer move to the ended ones, unless
+  // the conversation is closed (a /clear keeps nothing).
+  private jobEnded(job: ShellJob): void {
+    this.jobs.delete(job.id);
+    if (!this.isClosed) this.endedJobs = [...this.endedJobs, job].slice(-MAX_ENDED_JOBS);
+    this.childrenChanged();
+    this.treeChanged(this);
+  }
+  // The last twenty jobs that ended here, oldest first.
+  get endedShellJobs(): readonly ShellJob[] { return this.endedJobs; }
+  // A job of this conversation, running or among the ended ones.
+  jobById(id: string): ShellJob | undefined {
+    return this.jobs.get(id) ?? this.endedJobs.find((j) => j.id === id);
+  }
+  // Ends every running job: SIGTERM, SIGKILL two seconds later. Each one's end comes when
+  // its pipes close.
+  killJobs(by: JobKilledBy): void {
+    for (const j of [...this.jobs.values()]) j.kill(by);
+  }
+  // A subagent that ends hands the jobs still running to its parent.
+  private handJobsUp(): void {
+    const up = this.parent;
+    if (!up || !this.jobs.size) return;
+    for (const j of this.jobs.values()) { j.owner = up; up.jobs.set(j.id, j); }
+    this.jobs.clear();
+    up.childrenChanged();
+    up.treeChanged(up);
   }
 
   // A task that ends hands the children still live to its parent: their results go to the
@@ -956,7 +1032,7 @@ export class Conversation {
     // system prompt, and a compaction of a long run folds it into the next one.
     if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
     child.inheritedProject = this.currentProject();
-    const kept = new Set(['call-start', 'confirm', 'call', 'ask-parent', 'ask-answer']);
+    const kept = new Set(['call-start', 'confirm', 'call', 'ask-parent', 'ask-answer', 'job-start', 'job-out', 'job-end']);
     const keeps = (ev: JournalEvent): boolean => kept.has(ev.t);
     // A task's lines carry `task: <label>`, a subagent's `subagent: <label>`.
     const tag = (ev: JournalEvent): JournalEvent => (spec.kind === 'subagent' ? { subagent: spec.label, ...ev } : { task: spec.label, ...ev });

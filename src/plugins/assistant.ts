@@ -985,6 +985,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                 }
               } catch (e) { (host.services as Record<string, any>).pushLog?.(`[memory] moving memory.json failed: ${(e as Error).message}`); }
+              // Background shells an earlier run left running (a crash): named once, never
+              // stopped — a pid may have been reused since (src/assistant/shell-job.ts).
+              try {
+                registry.jobs.scanLeftovers();
+                const left = registry.jobs.leftoverNote();
+                if (left) { convRef.current!.pushNote(left); host.notify(); }
+              } catch (e) { (host.services as Record<string, any>).pushLog?.(`[shell] reading the background shells' state failed: ${(e as Error).message}`); }
             }, 0);
             return () => clearTimeout(t);
           }, []);
