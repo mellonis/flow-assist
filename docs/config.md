@@ -106,7 +106,9 @@ of MCP servers, reached over Streamable HTTP or started as a command (Safari's
 `safaridriver --mcp`), each call asked about first
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
 `config set plugins.<name>.<key> <value>`. `repo` reads and writes only inside
-`plugins.repo.roots`, and without it inside the shell's `shell.roots`. A config that
+`plugins.repo.roots`, and without it inside the shell's `shell.roots`; it also carries
+the skill `repo/change-discipline`, rules for a code change from the ticket to the merge
+request (docs/usage.md, "Skills"). A config that
 still sets the roots as `fs.roots` works for one more
 release, and the log (`L`) says where to move it.
 

@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The `repo` plugin carries a skill, `repo/change-discipline`.** Rules for a code change from
+  the ticket to the merge request: find every consumer of shared code before changing it and
+  list them in the merge request; keep the reach the behaviour had and widen it only on the
+  person's word, preferring a parameter from the consumer; a ticket describes the problem and
+  its acceptance criteria, not the place in the code; an open question stops the change — ask,
+  or choose the existing behaviour and say so; a test for every "must not", at the consumer when
+  the behaviour depends on it; nothing outside the task (formatter changes to other files, an
+  altered environment); a review against the ticket before publishing.
 - **Skills: instructions the assistant loads on demand.** A directory with a `SKILL.md` (a
   header with `name` and `description`, then the instructions; other keys are ignored, so a skill
   written for another assistant loads as it is) in the project's `.flow-assist/skills/`, in
