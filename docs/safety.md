@@ -42,6 +42,10 @@ you also said so yourself: `config set shell.autoRun true` (or `:config set --se
 shell.autoRun true` for this run) together with `auto: writes` lets commands run without
 the y/n, and the hint line then says `auto: writes + commands`.
 Either alone changes nothing, and the assistant can never set `shell.autoRun` itself.
+A command the assistant starts in the background (`run_command` with `background: true`) asks
+the same y/n and is freed the same way, and so is its `shell_kill`, which asks naming the command;
+it can stop only a shell of its own conversation. `shell.maxBackground` and `shell.jobChars`
+are yours too, out of the assistant's reach.
 A subagent that an agent file describes asks for a mode of its own (`auto:` in the file), and
 `agents.maxAuto` (`reads` unless you set it) is the most it gets; the assistant can never set
 that key either (docs/usage.md, "Agent files").
@@ -100,6 +104,28 @@ screen, the saved session and its journal only ever see the mark. A command the
 assistant runs starts without those variables, and the assistant is told their names
 once; `config set shell.passEnv '["GH_TOKEN"]'` lets its commands see the ones you
 list. Your own `!command` keeps the whole environment.
+
+## Background shells
+
+A background shell is a command that runs on after the call that started it, so the y/n is the
+guard for the whole of its life, not for one answer. The assistant's shell has the withheld
+environment, the directory and the `shell.roots` fence of any command it runs; a `!command &` of
+yours has the whole environment, like your other `!command`s. A shell's stdin is closed.
+
+What a shell prints reaches the assistant as program data, in a frame of its own with a nonce, never as
+something you said; its end (exit code, duration, the last 20 lines) comes the same way. The end of a
+shell the assistant started can start a turn of its own, and that is the one place the assistant acts
+without a message from you. It is held by guards: the conversation must be idle with no y/n or
+question drawn, and the session must be the one on screen; a shell you started never wakes it; the
+turn runs under the conversation's own auto mode and round cap, so a write there still asks unless
+the mode frees it; and after three such turns in a row without a message from you the next end only
+tells you (a toast and a row), the assistant reading it with your next message. The toast names the shell
+that woke it.
+
+A shell ends with its conversation: `/clear` and the close of the subagent that started it stop it
+(SIGTERM, SIGKILL after 2 seconds), and quitting kills it at once. Leaving a session with shells
+running asks whether to stop or keep them. If flow-assist is killed, its shells are not: the next start
+lists the ones still alive with their pids and never stops them, since a pid may have been reused.
 
 ## Settings changed behind the app's back
 

@@ -195,7 +195,7 @@ screen, which gets only a toast naming it, and no turn starts for it. `/clear` s
 cleared session's tasks. A task stopped by `/clear` or by quitting says so in its
 session's journal, and `/export` shows it with its time (`*<label> stopped (exit)*`).
 Quitting also stops a `!command` or an assistant `run_command` still running in any
-conversation.
+conversation, and every background shell (see Shell commands, "Commands that run on").
 
 ## Subagents you start
 
@@ -765,6 +765,79 @@ A command the assistant runs may read an earlier tool result on its stdin — th
 exactly as the tool returned it, never cut — so it can count, search or save data it
 already has without typing it out again; the confirmation says where the stdin comes
 from (`stdin: result of search (call_3)`).
+
+### Commands that run on: background shells
+
+A command that does not end by itself — a dev server, a watcher, `tail -f` — would
+be killed at `shell.timeoutMs` and would hold the conversation until then. Started as a
+background shell it runs on while you go on talking. It has an id (`sh-1`, `sh-2`, …),
+no stdin, and its own process group.
+
+**You start one** with a bare `&` at the end of a `!command`: `!bun run dev &`. It runs
+at once with your whole environment (as any `!command`), in the conversation's directory,
+and does not hold the field or a turn; a toast says it started and the line is kept for ↑.
+Only a trailing, unquoted `&` counts: `a && b`, `a \&`, `a '&'`, a `&` inside a word-initial
+`#` comment and `a & b` in the middle are left to the shell as plain commands. `!!command &`
+stays an interactive command. A shell is a background shell for as long as it runs; a
+running `!command` cannot be sent there.
+
+**The assistant starts one** with `run_command` and `background: true`. It asks the same
+y/n as any command (the line reads `[background] bun run dev`), and `shell.autoRun` with
+the auto mode frees it the same way; the directory, the `shell.roots` fence and the withheld
+environment are the same. The call waits 2 seconds (Esc ends the wait, never the shell) and
+answers with the id and the lines printed so far. A command that ends within those 2 seconds
+is an ordinary result and leaves no shell behind. Without `background` a command still waits
+for its end and is killed at its timeout. The assistant then has three more tools:
+
+- `shell_output` reads what a shell printed: by default what came after the last read (the
+  first read starts after the lines `run_command` already returned), `since` from a cursor an
+  earlier answer ended with, `tail` the last lines, `grep` the lines holding a literal,
+  case-sensitive piece of text (not a pattern; at most 100 lines, and the answer says how
+  many more there are). The output reaches the assistant as program data, and the answer says
+  how much the buffer dropped when it could not keep it all.
+- `shell_kill` stops a shell of this conversation. It asks y/n, naming the command, and is
+  one of the calls `shell.autoRun` frees (docs/safety.md).
+- `shell_list` lists the conversation's shells, running and the last ended ones, with status,
+  age and lines.
+
+**Limits.** `shell.maxBackground` (4) shells run at once in the whole process; a fifth is
+refused, with the list of the running ones. Each keeps its last `shell.jobChars` (64000)
+characters of output, as a ring: the oldest text goes first. A subagent you started can start
+shells too; a task cannot, since it cannot run commands.
+
+**When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
+data, to the conversation that started it, at its next round or turn. You see a toast
+(`sh-3 exited 1 after 4m`) and the row below. A shell you stopped yourself, or the assistant
+stopped, ends quiet. The end of a shell the assistant started can also start a turn of its own,
+so it reports without waiting for you. It does that only when
+
+- the conversation is idle, no question or y/n is drawn, and it is the session on screen (a
+  session you left keeps the end for its next turn);
+- the end is of a shell the assistant started (one you started with `&` never wakes it);
+- the turn runs under the conversation's own auto mode and round cap, so its writes still ask;
+- fewer than three such turns have run in a row without a message from you: at the third the
+  next end only reaches you as a row and a toast, and the assistant reads it with your next message.
+
+The toast says when the assistant was woken, and by which shell. A subagent's shell reports to
+that subagent, which reads it in its next turn.
+
+**The row.** Shells stand in the tree under the field beside subagents:
+`○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
+counts as working. ↓ on an empty line steps into the rows; ⏎ opens the output in the pager,
+the whole kept buffer (a first line says how many characters were dropped), growing while
+you look; `x` asks `kill sh-3? y yes · n no` and `y` stops it: SIGTERM to the whole process
+group, SIGKILL after 2 seconds. `x` does nothing on an ended shell. The last 20 ended shells
+stay in `/agents`, with their output; an ended shell you have not opened reads as `answered`
+until you do. The footer's background count includes running shells.
+
+**Leaving.** `/new`, a switch from the picker and `/resume` with shells running in the
+session ask first: `s` stops them, `k` keeps them running in the session you leave (it stays
+open here, `working` in the picker), Esc stays. `/clear` stops them without asking, and so does
+closing the subagent that started them. Quitting kills every shell at once (SIGKILL). A shell
+never survives a restart; if flow-assist itself is killed, its shells keep running, and the next
+start lists the ones still alive with their pids in a note, without stopping them.
+
+`/export` and the session's journal keep each shell's command, output and end by its id.
 
 ### Moving the directory: `cd` and `/cd`
 

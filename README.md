@@ -53,7 +53,7 @@ bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
 
 - [docs/usage.md](docs/usage.md) — working in the chat: sessions, memory, background
   work, agent files and skills, folds, docking, images, compaction and limits, shell
-  commands.
+  commands and background shells.
 - [docs/safety.md](docs/safety.md) — what the assistant may do: the y/n, the auto
   mode, the one-shot prompt, secrets, the settings guard, and their limits.
 - [docs/config.md](docs/config.md) — config, scopes, the model, environment, plugins.

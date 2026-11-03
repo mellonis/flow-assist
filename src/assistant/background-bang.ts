@@ -1,7 +1,7 @@
 // `!command &`: a line whose last character is an unquoted `&` starts a background shell
 // (./shell-job.ts) instead of a command that is waited for. Only that trailing `&` counts:
 // `&&`, a `\&`, a `&` inside quotes, a `&` in the middle (`a & b`) and a redirection such as
-// `2>&1 &`'s own `>&` and a `&` inside a `#` comment are left to the shell, as a plain `!command` has always been.
+// `2>&1 &`'s own `>&` and a `&` inside a `#` comment are left to the shell as a plain `!command`.
 
 // The command with its trailing `&` taken off, or null when the line is not one.
 export function backgroundCommand(line: string): string | null {

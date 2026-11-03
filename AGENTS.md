@@ -1232,6 +1232,70 @@ A saved history that holds calls under the name `background` is sent as it is. T
   message that says more — a step of its own, a call, a change, reasoning — is never
   folded into one. A call that left a view is shown by its view and never a second
   time as a trail line.
+- **A background shell is a job beside the children** (`src/assistant/shell-job.ts`; the
+  tools in `src/loader/tools-shell.ts`). `run_command({command, background: true})` starts a
+  `ShellJob` — a record beside the owning conversation's `children`, not a degenerate
+  `Conversation` — through `ctx.jobs` (`conv.jobPort()`). The consent is the foreground call's
+  (the same y/n, the `shell.autoRun` lift, the cwd and `shell.roots` fence, the withheld
+  environment and its once-per-conversation note); `stdinFrom` with it throws. The job is a
+  *probe* until the settle (`BACKGROUND_SETTLE_MS`, 2 s, cut short by the turn's signal — Esc
+  ends the wait, never the job): one that ended in the settle answers as a foreground result
+  and leaves no job, no journal line, no inbox item; one still running is *kept* (`keepJob`) and
+  answers `sh-N` with the lines so far in a nonce-fenced `<program-output>` and a `next:` cursor.
+  The process is `/bin/sh -c` in its own group, stdin ignored, stdout and stderr in one ring
+  buffer of `shell.jobChars` (64000) characters, secrets removed per pipe before anything sees
+  them; it ends when the pipes close. `shell.maxBackground` (4) bounds the running jobs of the
+  process (`registry.jobs`, one counter `sh-N`; a job being killed does not count; a refusal
+  lists the running ones). Both keys are on the `shell` leash. A subagent may start jobs; a task
+  cannot, having no `run_command`.
+  `shell_output(id, {since?, tail?, grep?})` reads from `job.told` (set to the cursor
+  `run_command` returned) and advances it; `since` and `grep` take an explicit cursor (grep from
+  0), `tail` leaves the cursor alone. `grep` is a literal, case-sensitive substring, never a
+  pattern, at most `GREP_LINES` (100) lines and `shell.maxChars` characters, with `N more … not
+  shown` and a cursor that stops at the last line returned. Answers are fenced as data and say
+  how much the ring buffer dropped. `shell_kill(id)` is `write: true`, in `NEVER_AUTO` and in
+  the `shell.autoRun` lift (host def only, `isHostShellTool`), shows `kill sh-2: <command>`, and
+  reaches only jobs of the calling conversation (`jobById`); `shell_list()` is read-only.
+  **Ends of life.** `kill(by)` is SIGTERM to the group, SIGKILL after `JOB_KILL_GRACE_MS` (2 s,
+  a straggler is killed when the job ends after a kill); `killNow` announces the end first, then
+  SIGKILL, all synchronously — the exit path (`registry.closeAll` kills jobs first, before the
+  aborts). `/clear`, the close of a subagent (a closing subagent's jobs are killed, not handed
+  up) and the person's stop kill with the grace; leaving a session asks (below). The last
+  `MAX_ENDED_JOBS` (20) ended jobs stay as record plus buffer (`endedShellJobs`), emptied by
+  `/clear`. A state file (`shell-jobs.json` in the host state dir; entries `owner`, `id`,
+  `pgid`, `startedAt`, `command`) lets the next start list jobs whose owner is dead and whose
+  group is alive (`scanLeftovers`, `leftoverNote`, one note row at chat start); it never kills
+  them — a pid may have been reused.
+  **A job's end goes to its owner** (`deliverJobEnd`: `to = this`, no `resultRecipient`): an inbox
+  item framed as data (`what: 'shell'`, the last `END_LINES` (20) lines, a nonce). Kills by the
+  person or the model are quiet (a row, no turn); kills by exit, clear and parent deliver
+  nothing. A subagent that does not stay never reads an end that lands after its turn, so the
+  person's toast covers it; one that stays reads it in its next turn. **The wake** is in
+  `takeInbox` and only for a job with `by: 'model'` delivered to a session: `mayWake()` needs
+  `wakeRun < MAX_WAKES` (3) and the host's shown conversation to be this one; the inbox holds
+  (`inboxHeld`: busy, y/n, question, queue) and a headless conversation starts no inbox turn
+  at all. A woken turn is the ordinary `send(…, {fromInbox: true})`, so it runs under the
+  conversation's own auto mode and round cap; it counts `wakeRun++`, adds a `note` row and the
+  event `shell-wake {job, command, woke}`, and a `send()` from the person resets the count. At
+  the cap the end lands as a row with a note and `shell-wake {woke: false}`. `plugins/assistant.ts`
+  toasts every kept job end through `deps.showMessage` (so a left session's shows too).
+  **The person's side.** `!cmd &` (`background-bang.ts`, `backgroundCommand`) takes only a bare
+  trailing `&` — not `&&`, `|&`, `>&`, `\&`, not inside quotes, not after a word-initial `#` —
+  and starts a `by: 'person'` job with the whole environment in the conversation's directory,
+  without holding the field. `Conversation.tree()` makes kept jobs `TreeNode`s of
+  `kind: 'shell'` (`key job:sh-N`) after the children of their level: running ranks as `working`,
+  an ended unread one as `idle` + `answered` until opened (`readJob`); `x` then `y` is
+  `killJob`. The pager of a job reads the WHOLE ring buffer at each draw (`jobConsoleData`,
+  `whole`, `ViewRecord.rows` raising `frameView`'s 400-row cap), not the view caps.
+  `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells in a panel: `s` stops them
+  and leaves, `k` leaves the session headless with its jobs, Esc stays, and a pending y/n or
+  question blocks the leave; a refused switch from the picker brings the picker back with its
+  notice. The footer's `N in background` adds `registry.shellCount()`.
+  **Journal**: `job-start {id, command, cwd, by}` (stamped `at` with the spawn time),
+  `job-out` (coalesced as `shell-out`, capped as it, by id) and `job-end {id, ms, code, by:
+  'self'}` or `{killed: true, by: person | model | clear | exit | parent | signal}`; a
+  child's route keeps all three. `/export` draws a job at its start, stitches the output by id
+  and ends it `exit N · dur`, `killed (by) · dur` or `did not finish`.
 - **`cd` moves the shell's directory for the model** (`src/loader/tools-shell.ts`, the
   `shell` group, so `ai.disabledTools: ["shell"]` takes it too). `{ path }`, relative to
   the conversation's directory or absolute (`~` the home). It is held to `shell.roots`
@@ -3188,7 +3252,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   redraw nor the others.
   `leftRunning()` counts the `session` conversations that are `headless` with a running
   turn; the chat's `N in background` is `children.backgroundCount()` (tasks, unchanged)
-  plus it, and `track` redraws on a headless session's `turn-end` (whether it is put away
+  plus it and `shellCount()` (running background shells), and `track` redraws on a headless session's `turn-end` (whether it is put away
   stays the watch's).
   **What the person is owed** (`attention()`, `forget(id)`): the registry keeps
   the ids of sessions it put away while their status read `done`, read after the inbox

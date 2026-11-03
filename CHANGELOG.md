@@ -5,6 +5,25 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Background shells: a command that runs on while the conversation goes on.** `!bun run dev &`
+  (a trailing, unquoted `&`; `&&`, `\&`, quoted ones and `#` comments stay plain) starts one with your
+  whole environment, and the assistant starts one with `run_command` and `background: true`, after the
+  same y/n and under the same `shell.autoRun` and `shell.roots` rules. The assistant's call waits
+  2 seconds and answers with an id (`sh-1`) and the lines so far; a command that ends sooner is an
+  ordinary result. `shell_output` reads a shell (new lines, `since`, `tail`, or `grep` for a literal,
+  100 lines at most), `shell_kill` stops one of its conversation after a y/n (SIGTERM, SIGKILL after
+  2 seconds; `shell.autoRun` frees it as it frees `run_command`) and `shell_list` lists them.
+  `shell.maxBackground` (4) shells run at once and each keeps its last `shell.jobChars` (64000)
+  characters. A shell is a row in the tree under the field (`○ sh-3 · bun run dev · running 4m · 312
+  lines`): ⏎ opens its whole kept output in the pager, `x` then `y` stops it, and the last 20 ended
+  ones stay in `/agents`. A shell's end (exit code, duration, last 20 lines) goes to the conversation
+  that started it, as data, with a toast. The end of a shell the assistant started wakes it to a turn of
+  its own only when the conversation is idle with nothing asked, the session is the one on screen, the
+  turn runs under its own auto mode and round cap, and fewer than three such turns have run without a
+  message from you. Leaving a session with shells running asks (`s` stop, `k` keep, Esc); `/clear` and
+  the close of the subagent that started them stop them, quitting kills them, and shells that outlive a
+  killed flow-assist are listed in a note at the next start, never stopped. The journal and `/export`
+  record `job-start`, `job-out` and `job-end` by id.
 - **The `repo` plugin carries a skill, `repo/change-discipline`.** Rules for a code change from
   the ticket to the merge request: find every consumer of shared code before changing it and
   list them in the merge request; keep the reach the behaviour had and widen it only on the
