@@ -52,7 +52,7 @@ Ctrl+R renames, Ctrl+P moves it into the current project (its file and journal w
 Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened, renamed, moved nor deleted
 from here, and your own open session refuses a move too — switch away from it first. A
-`here` one can be opened and renamed, but not moved or deleted until it is put away (when its turn and its children have ended, and any subagent you started is stopped).
+`here` one can be opened and renamed, but not moved or deleted until it is put away (when its turn, its children and its background shells have ended, and any subagent you started is stopped).
 
 ### Naming, `/new`, `/clear` and `/resume`
 
@@ -806,20 +806,25 @@ characters of output, as a ring: the oldest text goes first. A subagent you star
 shells too; a task cannot, since it cannot run commands.
 
 **When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
-data, to the conversation that started it, at its next round or turn. You see a toast
+data, to the conversation that started it, in its next turn. You see a toast
 (`sh-3 exited 1 after 4m`) and the row below. A shell you stopped yourself, or the assistant
 stopped, ends quiet. The end of a shell the assistant started can also start a turn of its own,
 so it reports without waiting for you. It does that only when
 
-- the conversation is idle, no question or y/n is drawn, and it is the session on screen (a
-  session you left keeps the end for its next turn);
-- the end is of a shell the assistant started (one you started with `&` never wakes it);
+- the conversation is idle, no question or y/n is drawn, no message of yours is queued, and it is
+  the session on screen (a session you left keeps the end for its next turn);
+- the end is of a shell the assistant started, that ended on its own or by a signal nobody here
+  sent (one you started with `&` never wakes it);
 - the turn runs under the conversation's own auto mode and round cap, so its writes still ask;
 - fewer than three such turns have run in a row without a message from you: at the third the
   next end only reaches you as a row and a toast, and the assistant reads it with your next message.
 
+`config set ai.backgroundFollowUp false` turns every such wake off: the ends then land as rows and
+are read with your next message.
+
 The toast says when the assistant was woken, and by which shell. A subagent's shell reports to
-that subagent, which reads it in its next turn.
+that subagent: one that stays reads it in its next turn, one that does not stay never reads it
+(the toast tells you).
 
 **The row.** Shells stand in the tree under the field beside subagents:
 `○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
@@ -827,12 +832,15 @@ counts as working. ↓ on an empty line steps into the rows; ⏎ opens the outpu
 the whole kept buffer (a first line says how many characters were dropped), growing while
 you look; `x` asks `kill sh-3? y yes · n no` and `y` stops it: SIGTERM to the whole process
 group, SIGKILL after 2 seconds. `x` does nothing on an ended shell. The last 20 ended shells
-stay in `/agents`, with their output; an ended shell you have not opened reads as `answered`
-until you do. The footer's background count includes running shells.
+stay in `/agents` with their status, and ⏎ opens their output in the pager; an ended shell you
+have not opened reads as `answered` until you do. The footer's background count includes running shells.
 
 **Leaving.** `/new`, a switch from the picker and `/resume` with shells running in the
 session ask first: `s` stops them, `k` keeps them running in the session you leave (it stays
-open here, `working` in the picker), Esc stays. `/clear` stops them without asking, and so does
+open here, `working` in the picker), Esc stays. The question lists the shells of subagents too. A
+command the assistant started with `background: true` is a shell only after its 2-second settle:
+leaving before that asks nothing, and the session stays open because its turn is still running.
+`/clear` stops them without asking, and so does
 closing the subagent that started them. Quitting kills every shell at once (SIGKILL). A shell
 never survives a restart; if flow-assist itself is killed, its shells keep running, and the next
 start lists the ones still alive with their pids in a note, without stopping them.

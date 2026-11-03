@@ -165,3 +165,16 @@ test('killing a shell asks to kill it, and /agents lists it with its state in th
   ]);
   expect(agentsPanelRows([shell('sh-3')], [], 0)[0]).toMatchObject({ text: '○ sh-3 · bun run dev', detail: 'running 4m · 312 lines' });
 });
+
+test('/agents lists the ended shells after the ended children, with the job\'s words, time and lines', () => {
+  const ended = [{ label: 'a', kind: 'subagent' as const, outcome: 'answer' as const, ms: 1000, tokens: 0 }];
+  const rows = agentsPanelRows([], ended, 0, null, [
+    { id: 'sh-1', command: 'bun   run dev', state: 'killed (person)', ms: 65_000, lines: 12 },
+    { id: 'sh-2', command: 'make', state: 'exited 2', ms: 3000, lines: 1 },
+  ]);
+  expect(rows.map((r) => [r.id, r.text, r.detail])).toEqual([
+    ['ended:0', 'a', 'done · 1s'],
+    ['endedjob:sh-1', '○ sh-1 · bun run dev', 'killed · 1m 5s · 12 lines'],
+    ['endedjob:sh-2', '○ sh-2 · make', 'exited 2 · 3s · 1 line'],
+  ]);
+});

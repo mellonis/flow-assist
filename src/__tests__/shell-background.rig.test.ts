@@ -2,6 +2,7 @@
 // it wakes the model by itself and every guard on that, the y/n of run_command and
 // shell_kill, and the model's own tools end to end. Real processes, a scripted model.
 import { afterEach, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ShellJob } from '../assistant/shell-job.ts';
 import { ScriptedModel } from './helpers/scripted';
@@ -521,3 +522,83 @@ test('the cap note names what blocks the wake: the cap, and the session not bein
   expect(notes(rig).at(-1)).toContain('woken 3 times in a row without a message from you and this is not the session on screen, so it reads this with your next message');
   other.close('exit');
 });
+
+test('a model job killed by a signal nobody here sent is not quiet: its end may wake the model, unlike a kill by the person or the model', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'It was killed from outside.' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const seen = wakes(rig.conv);
+  const j = job(rig.conv, 'sleep 30');
+  await rig.until(() => j.pid != null);
+  process.kill(-j.pid!, 'SIGKILL');
+  await j.wait(5000);
+  expect(j.status).toEqual({ state: 'killed', by: 'signal' });
+  await rig.until(() => model.requests.length === 2);
+  await rig.idle();
+  expect(String(rig.sent(1).at(-1)!.content)).toContain('sh-1 · sleep 30 — killed (signal)');
+  expect(seen).toEqual([{ job: 'sh-1', woke: true }]);
+});
+
+test('a send the host makes for itself (hostAsk) does not start the count of woken turns again; the person\'s does', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'w1' }], [{ text: 'w2' }], [{ text: 'w3' }], [{ text: 'host ask answered' }], [{ text: 'after the person' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const seen = wakes(rig.conv);
+  for (let n = 1; n <= 3; n++) {
+    job(rig.conv, `echo run${n}`);
+    await rig.until(() => model.requests.length === 1 + n);
+    await rig.idle();
+  }
+  await rig.conv.send('look at this', { hostAsk: true });
+  await rig.idle();
+  const fourth = job(rig.conv, 'echo run4');
+  await fourth.wait(3000);
+  await rig.until(() => seen.length === 4);
+  await settleTick();
+  expect(seen.at(-1)).toEqual({ job: 'sh-4', woke: false });
+  expect(model.requests).toHaveLength(5);
+  // The person's own message does start it again.
+  await rig.conv.send('and now?');
+  await rig.idle();
+  job(rig.conv, 'echo run5');
+  await rig.until(() => seen.length === 5);
+  expect(seen.at(-1)).toEqual({ job: 'sh-5', woke: true });
+});
+
+test('leaving a session during the settle of the model\'s background command asks nothing: the session stays loaded and headless, and the job is kept in it', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo up; sleep 30', background: true } }], [{ text: 'Running.' }]);
+  const rig = conversationRig(model);
+  const left = rig.conv;
+  const turn = left.send('start it');
+  await rig.until(() => rig.pending() !== null);
+  rig.answerNext(true);
+  await rig.until(() => left.jobs.size === 1);
+  // The job is a probe still: it is no row, and no question about it exists to ask.
+  expect(left.shownJobs()).toEqual([]);
+  const { outcome } = rig.switchTo();
+  expect(outcome).toBe('kept');
+  expect(left.headless).toBe(true);
+  await turn;
+  const j = left.jobs.get('sh-1')!;
+  strays.push(j);
+  expect(j.running).toBe(true);
+  expect(left.shownJobs()).toEqual([j]);
+  expect(rig.registry.statusOf(left.sessionId)).toBe('working');
+}, 20_000);
+
+test('a background run_command that ends within the settle while a program of its group runs on ends that group too', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'sleep 7311 >/dev/null 2>&1 & echo launched', background: true } }], [{ text: 'Done.' }]);
+  const rig = conversationRig(model);
+  const turn = rig.conv.send('launch it');
+  await rig.until(() => rig.pending() !== null);
+  rig.answerNext(true);
+  await turn;
+  expect(rig.conv.jobs.size).toBe(0);
+  const alive = () => execFileSync('ps', ['-axo', 'command']).toString().split('\n').some((l) => l.startsWith('sleep 7311'));
+  await rig.until(() => !alive(), 5000);
+  expect(alive()).toBe(false);
+}, 20_000);

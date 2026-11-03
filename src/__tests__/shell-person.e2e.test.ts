@@ -408,3 +408,79 @@ test('/resume n refused after the question leaves the chat as it was: no picker 
   expect(frameOf(ui)).not.toContain('Sessions ·');
   ui.app.unmount();
 }, 20_000);
+
+test('/agents keeps the shells that ended: one the person killed and one already opened stay listed, and ⏎ opens their output in the pager', async () => {
+  const { ui } = await boot();
+  await ui.type('!');
+  await ui.type('echo killed-out; sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('1 line'));
+  await ui.type('!');
+  await ui.type('echo opened-out &');
+  await ui.press('return');
+  await settleUntil(() => rowWith(ui, '○ sh-2 ·').includes('exited 0'));
+  // The person kills sh-1 (never unread), and opens sh-2 once (read).
+  await ui.press('down');
+  await ui.press('x');
+  await ui.press('y');
+  await settleUntil(() => !rowWith(ui, '○ sh-1 ·'));
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('│ opened-out'));
+  await ui.press('escape');
+  await settleUntil(() => !rowWith(ui, '○ sh-2 ·'));
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Agents'));
+  expect(rowWith(ui, '○ sh-1 · echo killed-out')).toContain('killed');
+  expect(rowWith(ui, '○ sh-2 · echo opened-out')).toContain('exited 0');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('│ killed-out'));
+  expect(frameOf(ui)).toContain('│ killed-out');
+  ui.app.unmount();
+}, 30_000);
+
+test('leaving a session whose only running shell belongs to a subagent asks, and listing it names the shell', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-person-sh-')));
+  const model = new ScriptedModel();
+  const child = model.when((req) => /SUBSH/.test(String(req.messages.findLast((m: { role: string }) => m.role === 'user')?.content ?? '')));
+  child.script([{ tool: 'run_command', args: { command: 'sleep 60', background: true } }], [{ text: 'sub done' }]);
+  model.script([{ text: 'A answer.' }]);
+  const ui = await bootApp(model, 130, 34, undefined, { shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ask(ui, '/subagent SUBSH go');
+  await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
+  await wait(800);
+  await ui.press('y');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  await ask(ui, '/new');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60 running');
+  await ui.press('escape');
+  ui.app.unmount();
+}, 30_000);
+
+test('the picker\'s delete refusal of a session kept open for a running shell names the shell', async () => {
+  const { ui } = await boot();
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A answer.'));
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await ask(ui, '/new');
+  await settleUntil(() => frameOf(ui).includes('Background shells are running'));
+  await ui.press('k');
+  await settleUntil(() => !frameOf(ui).includes('A answer.'));
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(3);
+  const rows = frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
+  const at = rows.findIndex((r) => r.includes('session A question'));
+  for (let i = 0; i < at; i++) { await ui.press('down'); await settle(1); }
+  ui.backend.press({ name: 'x', ctrl: true });
+  await settleUntil(() => frameOf(ui).includes('cannot be deleted'));
+  expect(frameOf(ui).replace(/[│\s]+/g, ' ')).toContain('its turn, its children and its background shells have ended');
+  ui.app.unmount();
+}, 30_000);

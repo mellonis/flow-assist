@@ -41,7 +41,8 @@
 //   job-end  how it ended: `id`, `ms`, and either `code` (it exited; `by` is `self`) or
 //            `killed` with `by` — `person`, `model`, `clear`, `exit` (the process exited: this
 //            line is written before the group is killed) or `signal` (something else
-//            ended it); `error` when the shell could not be started
+//            ended it); `error` when the shell could not be started; `leftover` when the job
+//            ended on its own with part of its group still alive, which was then ended
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off

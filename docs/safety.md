@@ -116,11 +116,15 @@ What a shell prints reaches the assistant as program data, in a frame of its own
 something you said; its end (exit code, duration, the last 20 lines) comes the same way. The end of a
 shell the assistant started can start a turn of its own, and that is the one place the assistant acts
 without a message from you. It is held by guards: the conversation must be idle with no y/n or
-question drawn, and the session must be the one on screen; a shell you started never wakes it; the
+question drawn, no message of yours queued, and the session must be the one on screen; a shell you
+started never wakes it, and neither does one that you or the assistant stopped; the
 turn runs under the conversation's own auto mode and round cap, so a write there still asks unless
 the mode frees it; and after three such turns in a row without a message from you the next end only
 tells you (a toast and a row), the assistant reading it with your next message. The toast names the shell
-that woke it.
+that woke it. `config set ai.backgroundFollowUp false` turns every wake off.
+
+A shell that ends on its own while a program of its group is still running (one that redirected all its
+output and went on) has that group ended too, and the journal's end line says `leftover`.
 
 A shell ends with its conversation: `/clear` and the close of the subagent that started it stop it
 (SIGTERM, SIGKILL after 2 seconds), and quitting kills it at once. Leaving a session with shells

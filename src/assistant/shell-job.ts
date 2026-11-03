@@ -99,6 +99,10 @@ export class ShellJob {
   private baseAtLine = true;
   private lastChar = '';
   private killedBy: JobKilledBy | null = null;
+  // The job ended on its own with part of its group still alive (a program that redirected
+  // all its stdio and went on): the group was sent SIGTERM (SIGKILL after the grace), and
+  // the journal's end line says so.
+  leftover = false;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
   private reapTimer: ReturnType<typeof setTimeout> | null = null;
   private exitCode: number | null = null;
@@ -295,6 +299,14 @@ export class ShellJob {
     for (const s of this.secrets) this.take(s.flush());
     this.state = status;
     this.endedAt = Date.now();
+    // A job that ends by itself leaves no program of its group behind: one that redirected
+    // its stdio and went on is ended now. A live group's id cannot belong to anyone else.
+    if (!this.killedBy && this.pid != null && alive(this.pid, true)) {
+      this.leftover = true;
+      this.signalGroup('SIGTERM');
+      const t = setTimeout(() => { if (this.pid != null && alive(this.pid, true)) this.signalGroup('SIGKILL'); }, this.graceMs);
+      t.unref?.();
+    }
     if (this.killTimer) { clearTimeout(this.killTimer); this.killTimer = null; }
     if (this.reapTimer) { clearTimeout(this.reapTimer); this.reapTimer = null; }
     this.outputs.clear();

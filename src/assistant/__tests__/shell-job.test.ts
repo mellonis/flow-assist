@@ -493,3 +493,29 @@ test('an ended job holds no output listeners', async () => {
   await j.wait(3000);
   expect((j as unknown as { outputs: Set<unknown> }).outputs.size).toBe(0);
 });
+
+test('a job that ends on its own with a program of its group still alive (stdio redirected) ends that group, and says so', async () => {
+  const { job } = jobs();
+  const j = job('sleep 37 >/dev/null 2>&1 & echo started');
+  await j.wait(5000);
+  expect(j.status).toEqual({ state: 'exited', code: 0 });
+  expect(j.leftover).toBe(true);
+  expect(await gone(j.pid!)).toBe(true);
+});
+
+test('a job whose whole group ended with it is not marked leftover', async () => {
+  const { job } = jobs();
+  const j = job('echo plain');
+  await j.wait(5000);
+  expect(j.leftover).toBe(false);
+});
+
+test('a leftover that ignores SIGTERM is sent SIGKILL after the grace', async () => {
+  const set = new ShellJobs({ config: () => ({ shell: {} }), stateFile: () => null });
+  const r = set.start({ command: "(trap '' TERM; sleep 37) >/dev/null 2>&1 & sleep 0.3", cwd: tmp(), by: 'model' });
+  if (!('job' in r)) throw new Error(r.refused);
+  jobsMade.push(r.job);
+  await r.job.wait(5000);
+  expect(r.job.leftover).toBe(true);
+  expect(await gone(r.job.pid!, 6000)).toBe(true);
+});

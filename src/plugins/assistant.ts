@@ -1353,7 +1353,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
-                  : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away (when its turn and its children have ended, and any subagent you started is stopped)`
+                  : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away (when its turn, its children and its background shells have ended, and any subagent you started is stopped)`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
                 setPicker(pickerReload(p, pickerRows(), notice));
                 return;
@@ -1374,7 +1374,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const notice = outcome === 'moved' ? `Moved «${titleOf(a.id)}» to ${dest ? tildePath(dest) : 'no project'}`
                   : outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be moved`
-                  : outcome === 'ours' && a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be moved until it is put away (when its turn and its children have ended, and any subagent you started is stopped)`
+                  : outcome === 'ours' && a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be moved until it is put away (when its turn, its children and its background shells have ended, and any subagent you started is stopped)`
                   : outcome === 'ours' ? `"${titleOf(a.id)}" is the session in this chat — switch away first`
                   : outcome === 'here' ? `"${titleOf(a.id)}" is already in this project`
                   : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
@@ -1805,7 +1805,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   key: 'x', label: 'stop',
                   run: (id) => {
                     if (id === null) return undefined;
-                    if (id.startsWith('ended:')) return 'it has ended — nothing to stop';
+                    if (id.startsWith('ended:') || id.startsWith('endedjob:')) return 'it has ended — nothing to stop';
                     if (id.startsWith('job:') && !asked.jobByKey(id)?.job.running) return 'it has ended — nothing to stop';
                     asking = id;
                     return undefined;
@@ -1816,7 +1816,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   key: 'return', label: 'watch',
                   run: (id) => {
                     if (id === null) return undefined;
-                    const node = id.startsWith('ended:') ? null : asked.nodeByKey(id);
+                    const node = id.startsWith('ended') ? null : asked.nodeByKey(id);
+                    const gone = id.startsWith('endedjob:') ? asked.endedShellById(id.slice('endedjob:'.length)) : null;
+                    if (gone) { openJobView(gone.job, gone.owner); setPanel(null); return undefined; }
                     const shell = id.startsWith('job:') ? asked.jobByKey(id) : null;
                     if (shell) { openJobView(shell.job, shell.owner); setPanel(null); return undefined; }
                     if (!node) return 'it has ended — nothing to watch';
@@ -1833,7 +1835,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   title: 'Agents',
                   follow: true,
                   empty: 'no subagents here',
-                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending()),
+                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending(), asked.endedShellsListed().map((j) => ({ id: j.id, command: j.command, state: j.statusText, ms: j.ms, lines: j.lines }))),
                   get keys() { return pending() !== null ? answerKeys : [...stopKeys, watchKey]; },
                 });
                 return;

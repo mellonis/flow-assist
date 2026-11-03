@@ -318,3 +318,18 @@ test('a rig lists no job in the shared state directory', async () => {
   await start(rig.conv, 'sleep 30');
   expect(fs.existsSync(path.join(hostStateDir(), 'shell-jobs.json'))).toBe(false);
 });
+
+test('a job that ends on its own with a program of its group left running ends that group and journals `leftover`', async () => {
+  const rig = rigWith();
+  const c = rig.conv;
+  const j = await start(c, 'sleep 37.1 >/dev/null 2>&1 & echo started');
+  await j.wait(5000);
+  await rig.until(() => jobEvents(rig, c, 'job-end').length === 1);
+  expect(jobEvents(rig, c, 'job-end')[0]).toMatchObject({ id: 'sh-1', code: 0, by: 'self', leftover: true });
+  expect(await gone(j.pid!, 4000)).toBe(true);
+  // A job whose group ended with it says nothing of the kind.
+  const k = await start(c, 'echo plain');
+  await k.wait(5000);
+  await rig.until(() => jobEvents(rig, c, 'job-end').length === 2);
+  expect(jobEvents(rig, c, 'job-end')[1]!.leftover).toBeUndefined();
+});

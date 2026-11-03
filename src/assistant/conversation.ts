@@ -911,6 +911,7 @@ export class Conversation {
         t: 'job-end', id: job.id, ms: job.ms,
         ...(killedBy ? { killed: true, by: killedBy } : s.state === 'killed' ? { killed: true, by: s.by } : { code: s.state === 'exited' ? s.code : null, by: 'self' }),
         ...(job.error ? { error: job.error } : {}),
+        ...(job.leftover ? { leftover: true } : {}),
       });
     };
     this.endWriters.set(job, writeEnd);
@@ -998,18 +999,17 @@ export class Conversation {
   // The end of a job goes to the inbox of the conversation that takes results, framed as
   // data (`frameItem`): the exit code or the kill, how long, the last lines. A kill the
   // person or the model asked for is quiet (a row, no turn), and the ends a closing
-  // conversation causes say nothing. Only a job the model started, ended on its own, may
-  // wake the model (`takeInbox`).
+  // conversation causes say nothing. Only a job the model started, that ended on its own or
+  // by a signal nobody here sent, may wake the model (`takeInbox`).
   private deliverJobEnd(job: ShellJob): void {
     const s = job.status;
     const killedBy = s.state === 'killed' ? s.by : null;
     if (killedBy === 'exit' || killedBy === 'clear' || killedBy === 'parent') return;
     // To the owner itself, never re-routed: the conversation that holds the job is the one
-    // that can read and end it. A subagent that does not stay reads it only while its turn
-    // is still going (at its next round); a job end that lands after that turn is read by
-    // nobody there, and the person's toast tells (`tellJobEnd`). One that stays reads it at
-    // its next turn. One that has ended had its jobs
-    // killed with it, so there is no end to deliver.
+    // that can read and end it. A subagent that stays reads it in its next turn. One that
+    // does not stay never reads it: an inbox never lands inside its turn, and at the end of
+    // its run what waits lands as rows and the subagent closes, killing its jobs. The
+    // person's toast tells (`tellJobEnd`).
     const to = this;
     const quiet = killedBy !== null && killedBy !== 'signal';
     to.deliver({
@@ -1019,6 +1019,21 @@ export class Conversation {
   }
   // The last twenty jobs that ended here, oldest first.
   get endedShellJobs(): readonly ShellJob[] { return this.endedJobs; }
+  // The shells that ended below this conversation (its own and its children's), the last
+  // twenty of each, whose rows are not in the tree (the unread ones are): what `/agents`
+  // lists as ended.
+  endedShellsListed(): ShellJob[] {
+    const out = this.endedJobs.filter((j) => !this.unreadJobs.has(j.id));
+    for (const child of this.children) out.push(...child.endedShellsListed());
+    return out;
+  }
+  // The ended shell with this id, here or below.
+  endedShellById(id: string): { job: ShellJob; owner: Conversation } | null {
+    const own = this.endedJobs.find((j) => j.id === id);
+    if (own) return { job: own, owner: this };
+    for (const child of this.children) { const f = child.endedShellById(id); if (f) return f; }
+    return null;
+  }
   // A job of this conversation, running or among the ended ones.
   jobById(id: string): ShellJob | undefined {
     return this.jobs.get(id) ?? this.endedJobs.find((j) => j.id === id);

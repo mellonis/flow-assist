@@ -125,11 +125,14 @@ export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'> & { kind?: 
   return `stop ${node.label}${node.below ? ` and ${node.below} below it` : ''}? y yes · n no`;
 }
 
+// An ended shell as `/agents` lists it: its words are the job's own (`exited 0`, `killed (person)`).
+export interface EndedShell { id: string; command: string; state: string; ms: number; lines: number }
+
 // `/agents`: the whole tree in the panel's rows. The live nodes first in tree order, indented,
 // each with its state and the time it has spent; then the ended ones as the listing words
 // them. A live row's id is its node key, an ended row's `ended:<n>`. `asking`: the key of a
 // node whose stop question is up, drawn in place of that row's text.
-export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null): PanelRow[] {
+export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null, endedShells: readonly EndedShell[] = []): PanelRow[] {
   const rows: PanelRow[] = nodes.map((n): PanelRow => {
     if (n.key === asking) return { id: n.key, text: stopQuestion(n), tone: 'warn' };
     if (n.shell) {
@@ -154,5 +157,10 @@ export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly Ende
     const tokens = e.tokens ? ` · ${e.tokens >= 1e6 ? `${(e.tokens / 1e6).toFixed(1)}M` : e.tokens >= 1000 ? `${Math.round(e.tokens / 1000)}k` : e.tokens} tokens` : '';
     rows.push({ id: `ended:${i}`, text: `${e.label}${e.kind === 'task' ? ' (task)' : ''}`, detail: `${verdict} · ${formatDuration(e.ms)}${tokens}` });
   });
+  // The shells that ended and are not rows above (opened, or ended by the person), as the
+  // ended children are: their output opens in the pager.
+  for (const e of endedShells) {
+    rows.push({ id: `endedjob:${e.id}`, text: `${SHELL_MARK} ${e.id} · ${oneLine(e.command)}`, detail: `${e.state.replace(/^killed \(.*\)$/, 'killed')} · ${formatDuration(e.ms)} · ${linesText(e.lines)}` });
+  }
   return rows;
 }

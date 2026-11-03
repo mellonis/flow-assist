@@ -1268,7 +1268,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   them — a pid may have been reused.
   **A job's end goes to its owner** (`deliverJobEnd`: `to = this`, no `resultRecipient`): an inbox
   item framed as data (`what: 'shell'`, the last `END_LINES` (20) lines, a nonce). Kills by the
-  person or the model are quiet (a row, no turn); kills by exit, clear and parent deliver
+  person or the model are quiet (a row, no turn); a kill by a signal nobody here sent is not
+  quiet, so a model job so ended may wake (pinned by a rig test); a job that ends on its own
+  with its group still alive (`leftover`) has the group sent SIGTERM, SIGKILL after the grace; kills by exit, clear and parent deliver
   nothing. A subagent that does not stay never reads an end that lands after its turn, so the
   person's toast covers it; one that stays reads it in its next turn. **The wake** is in
   `takeInbox` and only for a job with `by: 'model'` delivered to a session: `mayWake()` needs
@@ -1277,8 +1279,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   at all. A woken turn is the ordinary `send(…, {fromInbox: true})`, so it runs under the
   conversation's own auto mode and round cap; it counts `wakeRun++`, adds a `note` row and the
   event `shell-wake {job, command, woke}`, and a `send()` from the person resets the count. At
-  the cap the end lands as a row with a note and `shell-wake {woke: false}`. `plugins/assistant.ts`
-  toasts every kept job end through `deps.showMessage` (so a left session's shows too).
+  the cap the end lands as a row with a note and `shell-wake {woke: false}`. `Conversation.tellJobEnd`
+  toasts every kept job end through `deps.showMessage` (so a left session's shows too), except
+  the ends by exit, clear and parent and one the wake toast already said (`toldWake`/`toastedEnd`).
   **The person's side.** `!cmd &` (`background-bang.ts`, `backgroundCommand`) takes only a bare
   trailing `&` — not `&&`, `|&`, `>&`, `\&`, not inside quotes, not after a word-initial `#` —
   and starts a `by: 'person'` job with the whole environment in the conversation's directory,
@@ -1287,7 +1290,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   an ended unread one as `idle` + `answered` until opened (`readJob`); `x` then `y` is
   `killJob`. The pager of a job reads the WHOLE ring buffer at each draw (`jobConsoleData`,
   `whole`, `ViewRecord.rows` raising `frameView`'s 400-row cap), not the view caps.
-  `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells in a panel: `s` stops them
+  `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells (`shownJobs()`, subagents' too;
+  a probe still within its settle is none, and the session stays loaded for its running turn) in a
+  panel: `s` stops them
   and leaves, `k` leaves the session headless with its jobs, Esc stays, and a pending y/n or
   question blocks the leave; a refused switch from the picker brings the picker back with its
   notice. The footer's `N in background` adds `registry.shellCount()`.
