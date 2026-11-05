@@ -38,7 +38,9 @@ test('/subagent @ lists the agents with parameters and source, the shadowed ones
   write(path.join(root, '.flow-assist', 'agents', 'bad.md'), doc('Broken', 'tool: x\n'));
   write(path.join(hostStateDir(), 'agents', 'new-ticket.md'), doc('The person\'s ticket'));
   write(path.join(hostStateDir(), 'agents', 'notes.md'), doc('Take notes'));
-  await ask(ui, '/subagent @');
+  // Two agents open the completion list; Esc closes it so Enter runs the line.
+  await ui.type('/subagent @');
+  await ui.press('escape', 'return');
   await settleUntil(() => frameOf(ui).includes('@notes'));
   const frame = frameOf(ui);
   expect(frame).toContain('@new-ticket — Start a ticket · <ticket> [branch] · project');

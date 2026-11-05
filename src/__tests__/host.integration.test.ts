@@ -160,6 +160,9 @@ test('command line: ESC-only close, buffer clear, and up/down history', async ()
 
   // 3. Up recalls the executed command; Down returns to the empty buffer.
   backend.type('clear');
+  // `clear` is also the start of `clear-cache`, so a list is open: the first Enter
+  // keeps the word and closes it, the second runs the line.
+  backend.press({ name: 'return' });
   backend.press({ name: 'return' });
   await flush();
   backend.press({ name: ':' });

@@ -86,8 +86,8 @@ export const LIST_ROWS = 8;
 
 // A line's list in progress. `text` is the line the state was last read against: when
 // the line is anything else the selection and the Esc are void. `sel` indexes the
-// candidates (-1: the completer's best), `closed` is Esc, and `height` the rows the
-// list has needed since it opened, so it never shrinks while it is open.
+// candidates (-1: the word as typed when it is a candidate, else the completer's
+// best), `closed` is Esc, and `height` the rows the list has needed since it opened, so it never shrinks while it is open.
 export interface ListState { text: string; sel: number; closed: boolean; height: number }
 export const newListState = (): ListState => ({ text: '', sel: -1, closed: false, height: 0 });
 
@@ -124,7 +124,12 @@ export function openList(input: string, state: ListState, complete: Complete): C
   const comp = complete(input);
   const all = comp.candidates;
   if (all.length < 2 || !input.endsWith(comp.head)) return shut();
-  if (state.sel < 0 || state.sel >= all.length) state.sel = Math.max(0, all.indexOf(comp.best));
+  // The selection starts on the word as typed when it is itself a candidate (⏎ then
+  // keeps `clear` rather than turning it into `clear-cache`), else on the best match.
+  if (state.sel < 0 || state.sel >= all.length) {
+    const typed = all.findIndex((c) => c.toLowerCase() === comp.head.toLowerCase());
+    state.sel = Math.max(0, typed >= 0 ? typed : all.indexOf(comp.best));
+  }
   const start = Math.max(0, Math.min(all.length - LIST_ROWS, state.sel - Math.floor(LIST_ROWS / 2)));
   const shown = all.slice(start, start + LIST_ROWS);
   const selected = all[state.sel]!;

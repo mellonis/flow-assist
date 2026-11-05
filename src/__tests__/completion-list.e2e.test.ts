@@ -80,10 +80,9 @@ test('Enter on the candidate the field already holds closes the list, then runs 
   // `/sub` is a whole command and a prefix of `/subagent`: the list holds both.
   await ui.type('/sub');
   expect(ui.backend.lastFrame).toMatch(/subagent/);
-  await ui.press('up');
-  expect(fieldRow(ui)).toContain('› /sub');
+  // The selection starts on the word as typed, not on `/subagent`.
+  expect(fieldRow(ui)).not.toContain('subagent');
   await ui.press('return');
-  expect(fieldRow(ui)).toContain('› /sub');
   expect(ui.backend.lastFrame).not.toMatch(/subagent +start/);
   await ui.press('return');
   await settle(4);

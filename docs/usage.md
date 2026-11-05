@@ -167,8 +167,9 @@ width.
 The list never grows past eight rows; more are scrolled around the selection, with the
 selected candidate's place in the count (`3/41`). Its height stays the same while you
 type and it narrows, so the line does not move. It closes when one candidate or none
-is left. When the selected candidate is what the line already holds, ⏎ closes the list
-and the next ⏎ sends or runs the line. With the list closed, ↑ and ↓ do what they do
+is left. The selection starts on the word as typed when that is itself a candidate
+(`clear`, with `clear-cache` also matching), so ⏎ never turns it into the longer one:
+it closes the list, and the next ⏎ sends or runs the line. With the list closed, ↑ and ↓ do what they do
 otherwise: in the `:` line the history, in the field the earlier messages and the rows
 under it.
 

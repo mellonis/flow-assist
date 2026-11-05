@@ -134,7 +134,8 @@ test('Tab and Enter replace the word with the selected candidate', () => {
 test('taking the candidate the line already holds closes the list instead', () => {
   const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'ab', candidates: ['a', 'ab'] });
   const st = newListState();
-  listKey('a', st, { name: 'up' }, c); // the selection is `a`, which is the line
+  // The selection starts on `a`, the word as typed, though `ab` is the best match.
+  expect(openList('a', st, c)).toMatchObject({ selected: 'a', ghost: '' });
   expect(listKey('a', st, { name: 'return' }, c)).toEqual({ handled: true });
   // Closed: the next Enter is the line's own.
   expect(listKey('a', st, { name: 'return' }, c)).toEqual({ handled: false });

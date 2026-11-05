@@ -273,7 +273,8 @@ test('no letter acts on the start screen — q included; :q quits', async () => 
   }
   await ui.press(':');
   await ui.type('q');
-  await ui.press('return');
+  // `q` is also the start of `quit`: the first Enter closes the list, the second runs.
+  await ui.press('return', 'return');
   expect(ui.exits()).toBe(1);
   ui.app.unmount();
 });

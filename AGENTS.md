@@ -2876,7 +2876,9 @@ was read against, so a changed line forgets the selection and the Esc by itself.
 **Its height only grows while it is open** (max 8 rows plus a count line, padded with
 blank rows) so typing never moves the screen by a row at a time; a list that was never
 fixed-height would jump the whole screen on every keystroke. Enter taking a candidate
-the line already holds closes the list, so the next Enter is the line's own. Tab
+the line already holds closes the list, so the next Enter is the line's own; the
+selection starts on the word as typed when it is itself a candidate (`:clear` beside
+`clear-cache`), so Enter never rewrites it into the longer match. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
 `config get|set|unset` argument alike. A completer supplies `CompleteResult.details`
 (candidate → what it is) for its list rows; a row without one falls back to the
