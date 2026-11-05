@@ -4438,7 +4438,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   every `ChatRow` is one terminal line, and fifty tool names would take two.
 - **Two limits bound a turn; the one reached first ends it, says where, and one key
   carries it on** (`src/assistant/rounds.ts`; `services.chatLLM` applies both, and a
-  caller naming its own keeps it: a background task runs 12 rounds). `ai.maxRounds`
+  caller naming its own keeps it: a background task takes `ai.taskRounds` — `taskRoundsOf`, `TASK_ROUNDS_DEFAULT` = 12, 0 no cap — through the `taskCap` of its turn shape). `ai.maxRounds`
   (`maxRoundsOf`, `MAX_ROUNDS_DEFAULT` = 150) — requests per turn, a guard against a
   loop that never ends, high enough for long ordinary work; 0 is no round cap.
   `ai.maxTurnTokens` (`maxTurnTokensOf`, `MAX_TURN_TOKENS_DEFAULT` = 2000000) — tokens

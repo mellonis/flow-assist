@@ -182,8 +182,12 @@ was left, or `ai.backgroundFollowUp` is off — goes on with its best assumption
 its result. Where the job merely leaves something open it makes an assumption without asking. Whatever would wait for your y/n (a command, a file change, a fetch off the
 allowlist) is declined, unless the assistant started the task with `write: true`: then each
 write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
-that waits does not hold one of the running places. It gets twelve rounds; one that runs out of them
-says so at the end of its result (`stopped after 12 rounds — last: …`). A task may start
+that waits does not hold one of the running places. A task started without `write: true` is
+read-only: its writes and commands are declined, and the decline tells it so, so it reports
+what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
+`ai.maxTurnTokens` bounds it); one that runs out of them says so at the end of its result
+(`stopped after 12 rounds — last: …`). Long work with many commands, each waiting for your
+yes, is better done in the conversation itself, or by an agent file you start with `/subagent @name`. A task may start
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
 
@@ -208,7 +212,7 @@ stops for your y/n, and the y/n is asked where you started the subagent. It can 
 you a question when it cannot go on without one (`ask_parent`): it waits, and what you
 answer is what it reads. Where the job leaves only a small thing open it makes an
 assumption and names it in its answer. It gets the
-rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's twelve,
+rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's `ai.taskRounds`,
 and counts toward the three that run at once. The prompt is sent as you
 typed it, line breaks included (⇧⏎ makes one).
 
@@ -704,11 +708,11 @@ Two limits bound one turn, and whichever is reached first ends it: `ai.maxRounds
 the requests a turn may make (150 by default; 0 is no cap), and `ai.maxTurnTokens`,
 the tokens its requests spend together (2,000,000 by default — each prompt without the
 part read from the provider's cache, plus the answer; 0 is no budget). A background
-task runs 12 rounds. The chat then says where the turn stopped — `stopped after 150
+task has its own round cap, `ai.taskRounds` (12 by default; 0 is no cap). The chat then says where the turn stopped — `stopped after 150
 rounds (ai.maxRounds) — ⏎ continue · last: <the last call>`, or `stopped after 2.0M
 tokens (ai.maxTurnTokens) — …` — and Enter on the empty field, whose hint then reads
 `⏎ continue`, sends "continue", so the assistant carries on where it stopped. Both
-limits are yours to set; the assistant cannot change them.
+limits are yours to set, `ai.taskRounds` too; the assistant cannot change them.
 
 ## When a request to the model fails
 

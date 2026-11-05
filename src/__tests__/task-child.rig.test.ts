@@ -190,6 +190,61 @@ test('a child stopped at its twelve rounds returns `limit` with its last step', 
   expect(child.closed).toBe(true);
 });
 
+const loop = (rounds: number) => Array.from({ length: rounds }, () => [{ tool: 'datetime', args: {} }]);
+
+test('ai.taskRounds sets the round cap of a task', async () => {
+  const model = new ScriptedModel();
+  model.script(...loop(20));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false, taskRounds: 3 } });
+  const { run } = startFrom(rig, spec('L', 'loop'));
+  const result = await run();
+  expect(model.requests.length).toBe(3);
+  expect(result.limit?.rounds).toBe(3);
+});
+
+test('ai.taskRounds 0 is no round cap for a task: it does not fall back to ai.maxRounds', async () => {
+  const model = new ScriptedModel();
+  model.script(...loop(20), [{ text: 'done' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false, taskRounds: 0, maxRounds: 5 } });
+  const { run } = startFrom(rig, spec('L', 'loop'));
+  const result = await run();
+  expect(model.requests.length).toBe(21);
+  expect(result.outcome).not.toBe('limit');
+});
+
+test('a task whose ai.taskRounds is not a whole number runs the default twelve', async () => {
+  for (const bad of [-1, 2.5, '3']) {
+    const model = new ScriptedModel();
+    model.script(...loop(20));
+    const rig = conversationRig(model, { ai: { backgroundFollowUp: false, taskRounds: bad } });
+    const { run } = startFrom(rig, spec('L', 'loop'));
+    await run();
+    expect(model.requests.length).toBe(12);
+    closeRigs();
+  }
+});
+
+test('a subagent keeps ai.maxRounds and ignores ai.taskRounds', async () => {
+  const model = new ScriptedModel();
+  model.script(...loop(20));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false, taskRounds: 3, maxRounds: 5 } });
+  const { run } = startFrom(rig, { kind: 'subagent', label: 'S', prompt: 'loop', by: 'person' });
+  await run();
+  expect(model.requests.length).toBe(5);
+});
+
+test('a write declined in a task started read-only tells the model so', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const { run } = startFrom(rig, spec('w', 'make a file'));
+  await run();
+  const told = model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n');
+  expect(told).toContain('started read-only');
+  expect(told).toContain('write: true');
+  expect(told).not.toContain('must explicitly confirm');
+});
+
 test('`deliver` on a closed conversation lands nothing', async () => {
   const model = new ScriptedModel();
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });

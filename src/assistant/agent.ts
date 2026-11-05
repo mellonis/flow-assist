@@ -30,7 +30,7 @@ import { compactionInstruction, retryNote, summaryProblem } from './compaction.j
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
 import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from './rounds.js';
 
-export { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, maxRoundsOf, maxTurnTokensOf } from './rounds.js';
+export { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, TASK_ROUNDS_DEFAULT, maxRoundsOf, maxTurnTokensOf, taskRoundsOf } from './rounds.js';
 import { estimateTokens } from './context-meter.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
@@ -183,6 +183,9 @@ export interface AgentOpts {
   // call's own id, as `onToolStart` and `onToolRun` carry it. A caller that cannot ask
   // the person leaves it out, and then every write is declined unasked.
   confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => boolean | Promise<boolean>;
+  // What a write the caller declined tells the model, when it is not the person's own no: a
+  // run that never asks says so, and why (a background task started read-only).
+  declinedText?: string;
   // Fired as a call that will run (or wait on a y/n) begins — after its arguments are
   // checked, before the y/n: `confirm` says whether it waits on one. A call refused
   // before that (arguments that do not parse or do not fit, a write with no
@@ -1159,7 +1162,7 @@ export async function agentChat(
           const ok = await confirm(tc.name, tc.arguments, { ...(input ? { input: input.tool, inputId: input.id } : {}), ...(isHostShellTool(def) ? { hostShell: true } : {}), id: tc.id });
           if (!ok) {
             outcome = 'declined';
-            detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
+            detail = opts.declinedText ?? 'This write operation was declined — the user must explicitly confirm before it runs.';
             current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
             logRun({ name: tc.name, write, outcome, detail, args: parsed });
             const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write, outcome, detail };

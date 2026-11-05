@@ -2,10 +2,10 @@
 // the settings-file guard's own. Functions over a Conversation, which holds the state;
 // its methods call them, and the chat answers their events (AGENTS.md, "The chat").
 import path from 'node:path';
-import { transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
+import { taskRoundsOf, transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
 import type { AskQuestion } from './ask.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from './compaction.js';
-import { confirmFor, parkedAt } from './confirm-policy.js';
+import { READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from './confirm-policy.js';
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
@@ -59,20 +59,19 @@ export interface TurnShape {
   // Whether the turn may answer a question a child put to it (`answer_child`).
   answerChild: boolean;
   images: boolean;
-  // A cap on the rounds of a turn, over the config's `ai.maxRounds`.
-  maxRounds?: number;
+  // Whether the turn's round cap is the config's `ai.taskRounds` (a background task's) instead of `ai.maxRounds`.
+  taskCap?: boolean;
   withholdTools: readonly string[];
 }
 export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind', 'ask_parent', 'answer_child'];
 // A session has nobody above it to ask.
 export const SESSION_WITHHELD: readonly string[] = ['ask_parent'];
-export const TASK_ROUNDS = 12;
 // A child cannot put a question to anyone, so `ask_user` is not offered to it.
 export const TASK_WITHHELD: readonly string[] = ['ask_user', 'answer_child'];
 export const SUBAGENT_WITHHELD: readonly string[] = ['remind', 'ask_user'];
 const SHAPES: Record<ConversationKind, TurnShape> = {
   session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, answerChild: true, images: true, withholdTools: SESSION_WITHHELD },
-  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: TASK_WITHHELD },
+  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, taskCap: true, withholdTools: TASK_WITHHELD },
   subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, answerChild: true, images: false, withholdTools: SUBAGENT_WITHHELD },
   oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, answerChild: false, images: true, withholdTools: ONESHOT_WITHHELD },
 };
@@ -283,7 +282,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // the next round, and its line comes with it. An unchanged list is the same bytes,
       // so a round without a change keeps the cached prefix.
       systemPrompt: sysParts ? () => chatSystem(sysParts, true) : workerSystem,
-      ...(shape.maxRounds ? { maxRounds: shape.maxRounds } : {}),
+      // 0 reaches the loop as no cap, not as a fall back to `ai.maxRounds`.
+      ...(shape.taskCap ? { maxRounds: taskRoundsOf(cfg.ai) } : {}),
       // A line about the turn itself (a tool call the model wrote as text), a
       // note in the conversation where it happened.
       onNote: (text: string, detail?: { markup?: string }) => {
@@ -422,6 +422,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         agentStarter: agentStarterOf(c),
         skills: skillsFinderOf(c),
       },
+      ...(c.policy.kind === 'always-no' ? { declinedText: READ_ONLY_TASK_DECLINE } : {}),
       // A subagent with a file of its own writes its y/n lines there untagged, like its
       // calls; one without a home tags them for the journal above.
       confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : c.kind === 'subagent' && !c.subJournalId ? { subagent: c.label } : {}) }),

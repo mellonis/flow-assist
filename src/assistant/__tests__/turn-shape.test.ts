@@ -17,7 +17,7 @@ function answering(text: string) {
 
 test('the table: a row per kind', () => {
   expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, answerChild: true, images: true, withholdTools: SESSION_WITHHELD });
-  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
+  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, taskCap: true, withholdTools: TASK_WITHHELD });
   expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, answerChild: false, images: true, withholdTools: ONESHOT_WITHHELD });
 });
 

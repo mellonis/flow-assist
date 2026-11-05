@@ -18,6 +18,10 @@ export function parkedAt(): number {
   return lastAt;
 }
 
+// What a write declined by `always-no` tells the model: the task was started read-only, so
+// the decline is its kind, not the person's no.
+export const READ_ONLY_TASK_DECLINE = 'This write was declined: this task was started read-only, so it may not write or run commands, whatever you try. The conversation that started it can start it again with write: true (each write then waits for the person\'s yes), or start an agent file, if the job must change something. Report what you found and what you would have changed.';
+
 export type ConfirmWrite = NonNullable<AgentOpts['confirmWrite']>;
 
 export type ConfirmPolicy =

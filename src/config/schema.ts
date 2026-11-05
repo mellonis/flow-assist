@@ -111,6 +111,9 @@ export const hostConfigSchema = z.object({
     // ends the turn, and the chat offers ⏎ continue.
     maxRounds: z.number().int().min(0).optional(),
     maxTurnTokens: z.number().int().min(0).optional(),
+    // The round cap of a background task, in place of `maxRounds` (12; 0 — no cap, the
+    // token budget alone bounds it).
+    taskRounds: z.number().int().min(0).optional(),
     // Before a request that would pass `threshold` (0.8) of `contextWindow`, the chat
     // compacts the conversation into a handoff first — the /compact path, its row marked
     // `auto` — at a request boundary, never between a call and its result

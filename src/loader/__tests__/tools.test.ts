@@ -684,6 +684,26 @@ test('config_schema prints the marks beside a key, with the reason', async () =>
   expect(row('keys')).toMatch(/takes effect on restart/);
 });
 
+test('the subagent description names ai.taskRounds and says a read-only task cannot run commands', () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const fn = reg.tools.find((t) => t.function.name === 'subagent')!.function;
+  expect(fn.description).toContain('up to `ai.taskRounds` tool rounds, 12 by default');
+  expect(fn.description).toMatch(/cannot run commands/);
+  expect(fn.description).toContain('/subagent @name');
+  expect(fn.description).not.toContain('up to 12 tool rounds');
+});
+
+test('ai.taskRounds takes 0 for none and has a note naming its default', async () => {
+  expect(hostConfigSchema.safeParse({ ai: { taskRounds: 0 } }).success).toBe(true);
+  expect(hostConfigSchema.safeParse({ ai: { taskRounds: -1 } }).success).toBe(false);
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-task-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local }));
+  expect(out).toMatch(/- ai\.taskRounds: .*default: 12 — .*0 is no round cap for tasks/);
+});
+
 test('ai.maxRounds and ai.maxTurnTokens take 0 for none, and the notes say which limit ends a turn', async () => {
   expect(hostConfigSchema.safeParse({ ai: { maxRounds: 0, maxTurnTokens: 0 } }).success).toBe(true);
   expect(hostConfigSchema.safeParse({ ai: { maxRounds: -1 } }).success).toBe(false);

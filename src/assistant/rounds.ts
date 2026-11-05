@@ -9,11 +9,14 @@
 //   provider's cache (a long loop re-reads its prefix from the cache every round, which
 //   is not new work), plus its answer. 0 is no budget; a provider that reports no usage
 //   is bounded by the rounds alone.
-// Both are the person's own settings (under `ai`, which the model may not set). A caller
-// with its own reason (a background task) passes less. A module with no imports, so the
+// - `ai.taskRounds` — the round cap of a background task (12; 0 is no round cap, and then
+//   the token budget bounds it). Subagents and sessions keep `ai.maxRounds`.
+// All are the person's own settings (under `ai`, which the model may not set). A caller
+// with its own reason passes less. A module with no imports, so the
 // config's notes (src/loader/tools-core.ts) can name the defaults.
 export const MAX_ROUNDS_DEFAULT = 150;
 export const MAX_TURN_TOKENS_DEFAULT = 2_000_000;
+export const TASK_ROUNDS_DEFAULT = 12;
 
 // A whole number at or above `floor` (0 unless said), else the default: a hand-edited
 // value that is not one never becomes NaN or a negative bound.
@@ -21,6 +24,10 @@ export const wholeOrDefault = (n: unknown, dflt: number, floor = 0): number => (
 
 export function maxRoundsOf(ai: unknown): number {
   return wholeOrDefault((ai as { maxRounds?: unknown } | undefined)?.maxRounds, MAX_ROUNDS_DEFAULT);
+}
+
+export function taskRoundsOf(ai: unknown): number {
+  return wholeOrDefault((ai as { taskRounds?: unknown } | undefined)?.taskRounds, TASK_ROUNDS_DEFAULT);
 }
 
 export function maxTurnTokensOf(ai: unknown): number {

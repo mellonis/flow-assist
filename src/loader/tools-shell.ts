@@ -3,8 +3,9 @@
 // so `ai.disabledTools: ["shell"]` turns it off (core cannot be). The runner is the
 // one `!command` uses (assistant/shell.ts); what makes this safe to offer is not the
 // runner but the pause: the tool is a write, so EVERY
-// call waits for the person's y/n with the command on screen, and a background task —
-// nobody to ask — has it declined.
+// call waits for the person's y/n with the command on screen. A background task started
+// read-only has it declined; one started with `write: true` asks the person for each
+// command.
 //
 // The arguments are hostile input like any tool's (the model may have just read a
 // ticket or a web page that told it what to write), and the y/n is the guard. The
@@ -119,7 +120,7 @@ export function runCommandDescription(config: Record<string, unknown>, found: st
   const roots = shellRoots(config);
   const { timeoutMs } = shellLimits(config);
   return [
-    'Run a shell command in the person\'s clone, after the person confirms it (every call pauses for y/n; a background task cannot run it). Returns the exit code, duration and the end of the output; a non-zero exit is a result, not a failure of the tool.',
+    'Run a shell command in the person\'s clone, after the person confirms it (every call pauses for y/n; a background task started without write: true has it declined, and one started with write: true asks the person for each command). Returns the exit code, duration and the end of the output; a non-zero exit is a result, not a failure of the tool.',
     `Machine: ${platformLine()}; run through /bin/sh -c, no TTY; no stdin unless stdinFrom names an earlier tool call's id — then that call's result, exactly as the tool returned it (never cut), is the stdin: to count, search or save data you already have without re-typing it (\`wc -m\`, \`python3 -\`, \`cat > file\`). The directory is remembered between calls (and the person's own !commands) like a terminal's — a \`cd\` or the cwd argument moves it, within the roots; variables are not kept. It starts at ${start}${roots.length ? ` (shell.roots: ${roots.join(', ')})` : ''}.`,
     found.length ? `Installed: ${found.join(', ')}.` : '',
     'Before guessing a build/test command, read the project\'s package.json scripts / Makefile / README with read_file. Prefer the dedicated tools (git_*, read_file, search, list_dir) when they fit. Never for interactive programs (editors, pagers, prompts); a command still running at the time limit' + ` (${Math.round(timeoutMs / 1000)} s) is killed.`,

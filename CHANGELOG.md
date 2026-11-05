@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A background task's round cap is a setting, and a read-only task says why it cannot write.**
+  `ai.taskRounds` (12 by default; 0 is no round cap, and then `ai.maxTurnTokens` bounds the task) sets how
+  many rounds a task takes, an agent file the assistant started included; subagents and sessions keep
+  `ai.maxRounds`. A write declined in a task started without `write: true` tells the model the task
+  is read-only and can be started again with `write: true`, instead of the plain "must explicitly
+  confirm". The `subagent` tool, `run_command` and the `shell` note say that a read-only task cannot run
+  commands, that one with `write: true` asks you for each, and that long work with many commands belongs
+  in the conversation or in an agent file.
+
 - **Background shells: a command that runs on while the conversation goes on.** `!bun run dev &`
   (a trailing, unquoted `&`; `&&`, `\&`, quoted ones and `#` comments stay plain) starts one with your
   whole environment, and the assistant starts one with `run_command` and `background: true`, after the

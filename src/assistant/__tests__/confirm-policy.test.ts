@@ -72,6 +72,7 @@ test('ask: the person\'s no declines it, journaled by: person', async () => {
   expect(r.parked).toBe(1);
   expect(r.runs.map((x) => x.outcome)).toEqual(['declined']);
   expect(r.confirms).toMatchObject([{ answer: 'no', by: 'person' }]);
+  expect(String(r.runs[0]!.detail)).toContain('the user must explicitly confirm');
   expect(r.made).toBe(false);
 });
 
