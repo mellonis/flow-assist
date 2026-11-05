@@ -2,14 +2,18 @@
 // it wakes the model by itself and every guard on that, the y/n of run_command and
 // shell_kill, and the model's own tools end to end. Real processes, a scripted model.
 import { afterEach, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ShellJob } from '../assistant/shell-job.ts';
 import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
 const strays: ShellJob[] = [];
+// Process groups a test started a program in: ended after it, whatever its outcome.
+const groups: number[] = [];
 afterEach(() => {
+  for (const g of groups.splice(0)) { try { process.kill(-g, 'SIGKILL'); } catch { /* gone */ } }
   for (const j of strays.splice(0)) { try { j.killNow('exit'); } catch { /* ended */ } }
   closeRigs();
 });
@@ -589,16 +593,48 @@ test('leaving a session during the settle of the model\'s background command ask
   expect(rig.registry.statusOf(left.sessionId)).toBe('working');
 }, 20_000);
 
-test('a background run_command that ends within the settle while a program of its group runs on ends that group too', async () => {
+test('a background run_command that ends within the settle while a program of its group runs on ends that group too, and the result says so', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'run_command', args: { command: 'sleep 7311 >/dev/null 2>&1 & echo launched', background: true } }], [{ text: 'Done.' }]);
   const rig = conversationRig(model);
+  const pidFile = path.join(rig.root, 'pgid');
+  model.script([{ tool: 'run_command', args: { command: `echo $$ > ${pidFile}; sleep 7311 >/dev/null 2>&1 & echo launched`, background: true } }], [{ text: 'Done.' }]);
   const turn = rig.conv.send('launch it');
   await rig.until(() => rig.pending() !== null);
   rig.answerNext(true);
   await turn;
   expect(rig.conv.jobs.size).toBe(0);
-  const alive = () => execFileSync('ps', ['-axo', 'command']).toString().split('\n').some((l) => l.startsWith('sleep 7311'));
+  // The shell is its group's leader: its pid is the group. Only that group is looked at, and
+  // whatever the outcome it is ended after the test.
+  const pgid = Number(fs.readFileSync(pidFile, 'utf8').trim());
+  groups.push(pgid);
+  const alive = () => { try { process.kill(-pgid, 0); return true; } catch { return false; } };
   await rig.until(() => !alive(), 5000);
   expect(alive()).toBe(false);
+  const result = rig.sent(1).filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n');
+  expect(result).toContain('launched');
+  expect(result).toContain('(a program it left running in its group was stopped)');
 }, 20_000);
+
+test('the end of a kept job that left a program running in its group says it was stopped', async () => {
+  const model = new ScriptedModel();
+  model.script(START);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await anchor(rig);
+  const j = job(rig.conv, 'sleep 7312 >/dev/null 2>&1 & echo x');
+  groups.push(j.pid!);
+  await j.wait(5000);
+  await rig.until(() => bgApi(rig).length === 1);
+  expect(bgApi(rig)[0]).toContain('sh-1 · sleep 7312 >/dev/null 2>&1 & echo x — exited 0 after');
+  expect(bgApi(rig)[0]).toContain('(a program it left running in its group was stopped)');
+});
+
+test('a plain job end carries no such line', async () => {
+  const model = new ScriptedModel();
+  model.script(START);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await anchor(rig);
+  const j = job(rig.conv, 'echo plain');
+  await j.wait(5000);
+  await rig.until(() => bgApi(rig).length === 1);
+  expect(bgApi(rig)[0]).not.toContain('left running');
+});

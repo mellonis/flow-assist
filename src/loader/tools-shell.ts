@@ -28,7 +28,7 @@ import { activeSecrets, buildSecretSet, withheldEnv } from '../assistant/secrets
 import { MODEL_SHELL_ENV } from '../config/load.js';
 import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellPassEnv, shellRoots, tildePath, within, type ShellResult, type ShellState } from '../assistant/shell.js';
 import { BACKGROUND_SETTLE_MS, JOB_KILL_GRACE_MS, type ShellJob } from '../assistant/shell-job.js';
-import { dataBlock, jobHow, listLine } from '../assistant/job-text.js';
+import { LEFTOVER_NOTE, dataBlock, jobHow, listLine } from '../assistant/job-text.js';
 import { formatDuration } from '../assistant/duration.js';
 import type { JobPort } from '../assistant/conversation-types.js';
 import type { ToolGroup } from './tools.js';
@@ -302,7 +302,7 @@ async function runInBackground(cmd: string, cwd: string, env: Record<string, str
   const { timeoutMs, maxChars } = shellLimits(config);
   if (!port.keep(job)) {
     if (job.error) throw new Error(`run_command: could not start /bin/sh: ${job.error}`);
-    return formatShell(cmd, foregroundResult(job, maxChars), cwd, timeoutMs, { after: cwd }).forTool;
+    return formatShell(cmd, foregroundResult(job, maxChars), cwd, timeoutMs, { after: cwd }).forTool + (job.leftover ? `\n${LEFTOVER_NOTE.trim()}` : '');
   }
   const first = job.read(0, maxChars);
   job.told = first.next;

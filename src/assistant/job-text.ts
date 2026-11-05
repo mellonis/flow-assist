@@ -12,6 +12,10 @@ export const END_LINES = 20;
 
 const oneLine = (command: string, n = 80): string => command.replace(/\s+/g, ' ').slice(0, n);
 
+// Said after a job that ended on its own while a program of its group still ran: that program
+// was stopped, so it is not a server the model can count on.
+export const LEFTOVER_NOTE = ' (a program it left running in its group was stopped)';
+
 // A job's outcome in words: `exited 0`, `killed (person)`, `could not start: …`.
 export function jobHow(job: ShellJob): string {
   if (job.error) return `could not start: ${job.error}`;
@@ -31,7 +35,7 @@ export function dataBlock(job: ShellJob, text: string, nonce: string = crypto.ra
 export function jobEndText(job: ShellJob): string {
   const tail = job.tail(END_LINES).text.replace(/\n+$/, '');
   const f = fence(tail);
-  const head = `${job.id} · ${oneLine(job.command)} — ${jobHow(job)} after ${formatDuration(job.ms)}`;
+  const head = `${job.id} · ${oneLine(job.command)} — ${jobHow(job)} after ${formatDuration(job.ms)}${job.leftover ? LEFTOVER_NOTE : ''}`;
   if (!tail) return `${head}\n(no output)`;
   const shown = Math.min(END_LINES, job.lines);
   return `${head}\nlast ${shown === 1 ? 'line' : `${shown} lines`}:\n${f}console\n${tail}\n${f}`;

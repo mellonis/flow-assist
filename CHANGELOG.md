@@ -10,7 +10,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   whole environment, and the assistant starts one with `run_command` and `background: true`, after the
   same y/n and under the same `shell.autoRun` and `shell.roots` rules. The assistant's call waits
   2 seconds and answers with an id (`sh-1`) and the lines so far; a command that ends sooner is an
-  ordinary result. `shell_output` reads a shell (new lines, `since`, `tail`, or `grep` for a literal,
+  ordinary result (one that left a program running in its group has it stopped, and says so). `shell_output` reads a shell (new lines, `since`, `tail`, or `grep` for a literal,
   100 lines at most), `shell_kill` stops one of its conversation after a y/n (SIGTERM, SIGKILL after
   2 seconds; `shell.autoRun` frees it as it frees `run_command`) and `shell_list` lists them.
   `shell.maxBackground` (4) shells run at once and each keeps its last `shell.jobChars` (64000)
