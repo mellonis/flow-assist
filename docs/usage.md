@@ -839,10 +839,12 @@ so it reports without waiting for you. It does that only when
 are read with your next message.
 
 The toast says when the assistant was woken, and by which shell. A subagent's shell reports to
-that subagent: one that stays (one you started) is woken by it on the same terms as a session
-(a question drawn in the session above holds it too), and the answer of that turn stays with the
-subagent for you, its row reading `answered`, and never goes to the session's model; otherwise it reads it in its next turn; a task, and a subagent the assistant started, never read
-it and their shells end with their run (the toast tells you).
+that subagent. One that stays (one you started) is woken by it on the same terms as a session,
+and the answer of that turn stays with the subagent for you, its row reading `answered`, and
+never goes to the session's model. While a question is drawn in the session above, or a guard
+holds the wake, the end lands as a row and the subagent reads it with your next message to it.
+A task, and a subagent the assistant started, never read it, and their shells end with their run
+(the toast tells you).
 
 **The row.** Shells stand in the tree under the field beside subagents:
 `○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
