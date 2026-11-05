@@ -202,6 +202,14 @@ export function completeConfigArgs(text: string, config?: unknown, configSchema:
 
 // Subcommands of `config get|set|unset|help` — there is no bare `config <key>` form.
 const CONFIG_SUBS = ['get', 'set', 'unset', 'help'];
+const CONFIG_SUB_DETAILS: Record<string, string> = {
+  get: 'a key and where its value comes from',
+  set: 'a key, in config.local.json or with --session for this run',
+  unset: 'a key back to its default',
+  help: 'what the keys are',
+};
+const detailsOf = (names: string[], all: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(names.filter((n) => all[n]).map((n) => [n, all[n]!]));
 
 // Completion of arguments after `config ` accounting for subcommands. Empty
 // input hints the subcommands themselves; a subcommand prefix completes it;
@@ -214,7 +222,7 @@ export function completeConfigCommand(text: string, config?: unknown, configSche
   const hasSpace = m![2] !== undefined;
   const lower = first.toLowerCase();
 
-  if (!first) return { head: '', hasSpace: true, best: '', candidates: CONFIG_SUBS.slice() };
+  if (!first) return { head: '', hasSpace: true, best: '', candidates: CONFIG_SUBS.slice(), details: CONFIG_SUB_DETAILS };
   if (!hasSpace && CONFIG_SUBS.some(s => s.startsWith(lower))) {
     const matches = CONFIG_SUBS.filter(s => s.startsWith(lower)).sort();
     // Full match — the subcommand is typed entirely; next it needs an argument
@@ -223,7 +231,7 @@ export function completeConfigCommand(text: string, config?: unknown, configSche
       return { head: first, hasSpace: false, best: '', candidates: [] };
     }
     const best = matches.find(s => s !== lower) ?? matches[0] ?? '';
-    return { head: first, hasSpace: false, best, candidates: matches };
+    return { head: first, hasSpace: false, best, candidates: matches, details: detailsOf(matches, CONFIG_SUB_DETAILS) };
   }
   if (lower === 'set' || lower === 'unset') {
     // `--session` is a flag before the key: the key after it completes as it does
@@ -254,7 +262,30 @@ function completeConfigKey(head: string, nodes: { path: string; value?: unknown;
   }
   matches.sort((a, b) => a.localeCompare(b));
   const best = matches.find(p => p.toLowerCase() !== kl) ?? matches[0] ?? '';
-  return { head, hasSpace: false, best, candidates: matches };
+  const details: Record<string, string> = {};
+  for (const n of nodes) {
+    const d = keyDetail(n);
+    if (d && matches.includes(n.path)) details[n.path] = d;
+  }
+  return { head, hasSpace: false, best, candidates: matches, ...(Object.keys(details).length ? { details } : {}) };
+}
+
+// What a key is, for the completion list: its value when set, else its default when the
+// schema has one, then the schema's description when it carries one.
+function keyDetail(node: { value?: unknown; schema?: unknown }): string {
+  const parts: string[] = [];
+  const shown = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+  if (node.value !== undefined) parts.push(shown(node.value) ?? '');
+  else {
+    let cur = node.schema as any;
+    while (cur && (cur.type === 'optional' || cur.type === 'nullable')) cur = cur.unwrap?.() ?? undefined;
+    if (cur?.type === 'default') {
+      try { parts.push(`default ${shown(cur.def?.defaultValue ?? cur._zod?.def?.defaultValue)}`); } catch { /* no default to show */ }
+    }
+  }
+  const description = (node.schema as { description?: unknown } | undefined)?.description;
+  if (typeof description === 'string' && description) parts.push(description);
+  return parts.filter(Boolean).join(' · ');
 }
 
 function completeConfigValue(keyHead: string, valueHead: string, nodes: { path: string; value?: unknown; schema?: unknown }[]): CompleteResult {
@@ -332,6 +363,10 @@ export type CompleteResult = {
   // A word said beside a candidate (a session's title beside its number), by
   // candidate; absent when no candidate has one.
   labels?: Record<string, string>;
+  // What a candidate is, said beside it in the completion list (a command's
+  // description, a key's value and meaning), by candidate; absent when none has one.
+  // A candidate without a detail falls back to its label there.
+  details?: Record<string, string>;
 };
 
 // The values of a command's argument, resolved: a function is called (its throw is an
@@ -419,12 +454,18 @@ export function completeCommand(text: string, commands: Command[] = BASE_COMMAND
     c.name.includes(':') ? c.name.slice(c.name.lastIndexOf(':') + 1) : c.name,
     ...(c.aliases ?? []),
   ]);
+  const described: Record<string, string> = {};
+  for (const c of commands) {
+    for (const n of [c.name.includes(':') ? c.name.slice(c.name.lastIndexOf(':') + 1) : c.name, ...(c.aliases ?? [])]) {
+      if (c.description && !described[n]) described[n] = c.description;
+    }
+  }
   const matches = [...new Set(names)]
     .filter(Boolean)
     .filter(n => n.toLowerCase().startsWith(lower))
     .sort((a: string, b: string) => a.localeCompare(b));
   const best = matches.find(n => n.toLowerCase() !== lower) ?? matches[0] ?? '';
-  return { head, hasSpace, best, candidates: matches };
+  return { head, hasSpace, best, candidates: matches, details: detailsOf(matches, described) };
 }
 
 // A command reduced to its "help mode": sorted by name, showing usage +

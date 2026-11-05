@@ -150,3 +150,22 @@ test('a /command that declares complete(words) completes its later words in the 
   expect(completeSlash('/mcp tools w', defs)).toMatchObject({ head: 'w', best: 'webstorm', candidates: ['webstorm'] });
   expect(completeSlash('/mcp tools webstorm ', defs).candidates).toEqual([]);
 });
+
+test('a slash command is offered with its description; an argument value with its label', async () => {
+  const { openList, newListState } = await import('../commandline');
+  const described = [{ name: 'compact', description: 'fold it' }, { name: 'copy' }, ...defs.slice(3)];
+  const rowsOf = (text: string) => openList(text, newListState(), (t) => completeSlash(t, described))!.rows;
+  expect(rowsOf('/co')).toEqual([{ value: 'compact', detail: 'fold it' }, { value: 'copy', detail: '' }]);
+  // `/resume`'s sessions carry their titles; an agent its description and mark.
+  expect(rowsOf('/resume ')).toEqual([{ value: '1', detail: 'hello there' }, { value: '2', detail: 'fix the tests' }]);
+  const agents = [{ name: 'subagent', complete: () => [{ value: '@a', label: 'does a · recorded' }, { value: '@b', label: 'does b · changed since recorded' }] }];
+  expect(openList('/subagent @', newListState(), (t) => completeSlash(t, agents))!.rows).toEqual([
+    { value: '@a', detail: 'does a · recorded' }, { value: '@b', detail: 'does b · changed since recorded' },
+  ]);
+});
+
+test('a path is offered by name alone, a directory ending in a slash', async () => {
+  const { openList, newListState } = await import('../commandline');
+  const list = openList('ls s', newListState(), (t) => completePath(t, deps))!;
+  expect(list.rows).toEqual([{ value: 'sandbox/', detail: '' }, { value: 'snake-project/', detail: '' }]);
+});

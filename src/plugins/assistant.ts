@@ -14,7 +14,7 @@ import path from 'node:path';
 import { addTrigger } from '../loader/registry.js';
 import { autoBadge, autoCommand, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { NOTES_MODES, notesCommand, notesMode, notesSaid, type NotesMode } from '../assistant/step.js';
-import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
+import { lineTab, lineViewWithList, listKey, newListState, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
 import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
@@ -97,11 +97,30 @@ import { agentCompletions, agentListing, parseSubagentLine, stopTargetIndex, sub
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'agents' }, { name: 'skill' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
+  { name: 'compact', description: 'fold the conversation into a handoff summary' },
+  { name: 'context', description: 'what fills the model\'s context' },
+  { name: 'subagent', description: 'start a subagent from an agent file' },
+  { name: 'sub', description: 'start a subagent from an agent file' },
+  { name: 'agents', description: 'the live and ended subagents and tasks' },
+  { name: 'skill', description: 'list the skills, or send a turn with one' },
+  { name: 'copy', description: 'copy an answer to the clipboard' },
+  { name: 'image', description: 'attach an image' },
+  { name: 'resume', description: 'continue a saved session' },
+  { name: 'sessions', description: 'pick a saved session' },
+  { name: 'new', description: 'start a new session' },
+  { name: 'title', description: 'name this session' },
+  { name: 'export', description: 'save the conversation to a file' },
+  { name: 'clear', description: 'clear the conversation' },
+  { name: 'memory', description: 'what the assistant remembers', values: ['project', 'global', 'forget', 'accept'] },
+  { name: 'workspace', description: 'the project\'s workspace and its files' },
   // `cd`'s own argument is a path, not a fixed set of values — its completion is
   // special-cased in `chatComplete`, the way shell mode's own path completion is.
-  { name: 'cd' },
-  { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
+  { name: 'cd', description: 'change the shell\'s directory' },
+  { name: 'auto', description: 'what runs without asking', values: ['reads', 'all', 'off'] },
+  { name: 'notes', description: 'how the steps between tool calls are drawn', values: NOTES_MODES },
+  { name: 'mode', description: 'the chat\'s layout', values: CHAT_MODES },
+  { name: 'log', description: 'share the tail of the host log' },
+  { name: 'exit', description: 'close the chat' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
 
@@ -499,6 +518,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The Tab walk through the field's completion candidates — the `:` line's own
           // (src/config/commandline.ts); over as soon as the field is anything else.
           const tabRef = ui.useRef<TabWalk | null>(null);
+          // The completion list's selection, its Esc and its height (the same file).
+          const listRef = ui.useRef(newListState());
           const inputRef = ui.useRef(input); inputRef.current = input;
           // Input field caret — an index (codepoint) in `input`. Kept in a ref so the
           // handler reads a fresh value.
@@ -744,7 +765,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The first word: `trust` or a skill's name; after `trust`, a name.
                   ? { ...c, complete: (before: string[]) => (before.length > 1 || (before.length === 1 && before[0] !== 'trust') ? [] : [...(before.length ? [] : [{ value: 'trust', label: 'record a project skill without loading it' }]), ...skillsFound().skills.map((s) => ({ value: s.id, label: s.description }))]) }
                   : c)),
-            ...pluginChatCommands().map(({ name, cmd }) => ({ name, values: cmd.values, complete: cmd.complete })),
+            ...pluginChatCommands().map(({ name, cmd }) => ({ name, values: cmd.values, complete: cmd.complete, description: cmd.description })),
           ];
           // What the ↑/↓ history asks of a command: the chat's own, and a plugin's as it
           // declares (`history: false` for one whose argument may be a secret).
@@ -753,7 +774,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // typed as a path under the shell's directory (nothing outside the roots by
           // real path — `dirAllowed`'s own rule); `/cd`'s own argument the same way, but
           // directories only — a file is never where it goes; otherwise a `/command` and
-          // its argument. Drawn and walked through `lineView` / `lineTab`, exactly as the
+          // its argument. Drawn and taken through `lineView` / `openList`, exactly as the
           // `:` line is.
           const CD_ARG = /^\/cd(?:\s([\s\S]*))?$/i;
           const chatComplete = (text: string): CompleteResult => {
@@ -2601,6 +2622,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return true;
                 }
               }
+              // ── The completion list, while two or more candidates match: ↑/↓ and ⇧⇥ move
+              // its selection, ⇥ and ⏎ take it (⏎ never sends then), Esc closes it until
+              // the text changes. Only with the caret at the end of a one-line field,
+              // where the list is drawn; with no list open every one of these keys is
+              // the field's own, below.
+              if (!key.ctrl && !key.meta && !(key.name === 'return' && key.shift)
+                && (key.name === 'up' || key.name === 'down' || key.name === 'tab' || key.name === 'return' || key.name === 'escape')) {
+                const text = inputRef.current;
+                if (!text.includes('\n') && cursorRef.current >= text.length) {
+                  const step = listKey(text, listRef.current, key, chatComplete);
+                  if (step.handled) {
+                    disarmEsc();
+                    if (step.input !== undefined) {
+                      tabRef.current = null;
+                      setInput(step.input); inputRef.current = step.input;
+                      setCursor(step.input.length); cursorRef.current = step.input.length;
+                    }
+                    host.notify();
+                    return true;
+                  }
+                }
+              }
               // ── Esc: a turn (or a `!command`) running → stop it, on the FIRST press,
               // touching neither the field nor the queue — the queue comes back into the
               // field once the turn has ended (see `restoreQueue`). Clearing the
@@ -2647,7 +2690,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 conv.toggleHoldLast();
                 return true;
               }
-              // ── Tab: completion — a `/command`, its argument, a path in shell mode
+              // ── Tab with no list open (a single candidate, or the list closed by Esc):
+              // completion — a `/command`, its argument, a path in shell mode
               // (`chatComplete`). It takes the offer drawn after the caret and then walks
               // the other candidates, the `:` line's way; only with the caret at the end
               // of a one-line field, where the offer is drawn.
@@ -2816,14 +2860,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the screens show, asked once per draw: the title names it and the meter
           // counts it, as the next request will carry it.
           const screen = screenNow();
-          // The field's completion, shown INLINE: the part of the offer not typed yet
-          // right after the caret, its label, the other candidates beside it — a
-          // `/command`, its argument, or a path in shell mode (`chatComplete`), through
-          // the `:` line's own `lineView`. While Tab walks the candidates the field
-          // already holds a whole one, and the view takes the list from where the walk
-          // started (`tabRef`), not from the field. Only with the caret at the end of a
-          // one-line field, where the offer can be drawn.
-          const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
+          // The field's completion: the part of the offer not typed yet right after the
+          // caret and its label, and with two or more candidates the list over the field
+          // (`listRef`) — a `/command`, its argument, or a path in shell mode
+          // (`chatComplete`), through the `:` line's own `lineViewWithList`. With the list
+          // closed by Esc, Tab walks the candidates: the field then holds a whole one,
+          // and the view takes the others from where the walk started (`tabRef`). Only
+          // with the caret at the end of a one-line field, where the offer can be drawn.
+          const shown = !input.includes('\n') && cursor >= input.length ? lineViewWithList(input, tabRef.current, listRef.current, chatComplete) : null;
+          if (!shown) listRef.current.height = 0;
+          const completion = shown ? { ...shown.view, list: shown.list } : null;
           // The watched child as the chat draws it: its own rows and folds, never the session's.
           const watchedNode = watching ? convRef.current!.tree().find((n) => n.key === watching.node.key) : undefined;
           const watchAsk = watching ? watchAskNow() : null;

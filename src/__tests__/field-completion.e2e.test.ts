@@ -85,18 +85,21 @@ test('Tab completes a path in shell mode: a unique match whole, a directory with
   expect(field()).not.toContain('⇥');
   await leaveShell(ui);
 
-  // Several: the first is offered, the others named, Tab walks them and comes round.
+  // Several: a list opens with the first selected and offered inline; ↓ moves the
+  // selection, Tab takes it.
   await ui.type('!ls a');
   expect(field()).toContain('! ls a.txt');
-  expect(field()).toContain('⇥ alpha/ · apple/');
-  await ui.press('tab');
-  expect(field()).toContain('! ls a.txt');
-  await ui.press('tab');
+  expect(ui.backend.lastFrame).toContain('alpha/');
+  expect(ui.backend.lastFrame).toContain('apple/');
+  await ui.press('down');
   expect(field()).toContain('! ls alpha/');
-  await ui.press('tab');
+  await ui.press('down', 'down');
+  expect(field()).toContain('! ls a.txt');
+  await ui.press('up');
   expect(field()).toContain('! ls apple/');
   await ui.press('tab');
-  expect(field()).toContain('! ls a.txt');
+  expect(field()).toContain('! ls apple/');
+  expect(ui.backend.lastFrame).not.toContain('alpha/');
   await leaveShell(ui);
 
   // Hidden entries only when the word starts with a dot.
@@ -143,8 +146,8 @@ test('/cd completes to directories only, moves the shell like !cd, and /cd - goe
   // Only the two directories are offered — never the file of a similar name.
   await ui.type('/cd su');
   expect(field()).toContain('› /cd sub');
-  expect(field()).toContain('⇥ subdir2/');
-  expect(field()).not.toContain('sub.txt');
+  expect(ui.backend.lastFrame).toContain('subdir2/');
+  expect(ui.backend.lastFrame).not.toContain('sub.txt');
   await ui.press('tab');
   expect(field()).toContain('› /cd sub/');
   await ui.press('return');
@@ -201,9 +204,10 @@ test('/notes and /mode complete their argument: `/notes ` offers step, `/notes o
 
   await ui.type('/notes ');
   expect(field()).toContain('› /notes step');
-  expect(field()).toContain('⇥ open');
+  expect(ui.backend.lastFrame).toContain('open');
   await ui.press('tab');
   expect(field()).toContain('› /notes step');
+  // The list is gone with the unique candidate; ⏎ runs the line.
   await ui.press('return');
   // The command ran with the completed word: no error, the mode said.
   expect(ui.backend.lastFrame).not.toContain('⚠');
@@ -219,10 +223,10 @@ test('/notes and /mode complete their argument: `/notes ` offers step, `/notes o
   await ui.type('/mode ');
   expect(field()).toContain('› /mode panel');
   const seen: string[] = [];
-  for (let i = 0; i < 4; i++) { await ui.press('tab'); seen.push(field().match(/› \/mode (\S+)/)![1]!); }
+  for (let i = 0; i < 4; i++) { seen.push(field().match(/› \/mode (\S+)/)![1]!); await ui.press('down'); }
   expect(seen).toEqual(['panel', 'window', 'full', 'panel']);
-  // A typed prefix narrows the walk.
-  await ui.press('escape');
+  // A typed prefix narrows the list. The first Esc closes the list, the second clears.
+  await ui.press('escape', 'escape');
   await ui.type('/mode f');
   expect(field()).toContain('› /mode full');
   ui.app.unmount();
@@ -250,12 +254,13 @@ test('/resume completes to the saved sessions, their titles said beside the numb
   await ui.type('/resume ');
   // Newest first: the number is the word, the title is said beside it.
   expect(field()).toContain('› /resume 1 tell me more');
-  expect(field()).toContain('⇥ 2 hello there');
-  await ui.press('tab');
-  await ui.press('tab');
-  // Walking, the field holds the whole word and the caret sits after it; the title
-  // follows the caret cell.
+  expect(ui.backend.lastFrame).toMatch(/2 +hello there/);
+  await ui.press('down');
+  // The selected row is the one offered inline, its title following the caret cell.
   expect(field()).toMatch(/› \/resume 2 {1,2}hello there/);
+  await ui.press('tab');
+  // Taken: the field holds the whole word, and a single session left means no list.
+  expect(field()).toMatch(/› \/resume 2/);
   await ui.press('return');
   await settle(4);
   expect(ui.backend.lastFrame).toContain('hello there');
@@ -274,7 +279,7 @@ test('a plugin command declares the values of its argument and the `:` line comp
   await ui.press(':');
   await ui.type('open ');
   expect(line()).toContain(': open board');
-  expect(line()).toContain('⇥ card');
+  expect(rows(ui).some((r) => /^\s*card\b/.test(r.trim()) || r.includes(' card'))).toBe(true);
   await ui.type('c');
   expect(line()).toContain(': open card');
   await ui.press('tab');

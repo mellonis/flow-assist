@@ -153,3 +153,31 @@ test('a group of the host schema completes one segment deeper at its parent\'s d
   expect(c).toEqual(expect.arrayContaining(['ai.thinking', 'ai.autoCompact', 'ai.images', 'ai.recall', 'ai.taskRounds']));
   expect(c).not.toContain('ai.thinking.adaptive');
 });
+
+test('a command name is offered with its description, an alias with its command\'s', () => {
+  const c = completeCommand('c', BASE_COMMANDS, {});
+  expect(c.candidates).toEqual(expect.arrayContaining(['cache', 'clear', 'clear-cache', 'config']));
+  expect(c.details!.cache).toBe(findCommand('cache')!.description);
+  expect(c.details!['clear-cache']).toBe(findCommand('clear')!.description);
+  expect(completeCommand('config ', BASE_COMMANDS, {}).details).toMatchObject({ get: expect.any(String), set: expect.any(String), unset: expect.any(String), help: expect.any(String) });
+  expect(Object.keys(completeCommand('config s', BASE_COMMANDS, {}).details!)).toEqual(['set']);
+});
+
+test('a config key is offered with its value, or its default, and the schema\'s description', async () => {
+  const { z } = await import('zod');
+  const schema = z.object({
+    mode: z.enum(['a', 'b']).default('a').describe('which way'),
+    size: z.number().optional(),
+    flag: z.boolean().default(true),
+    plain: z.string().optional().describe('only a description'),
+  });
+  const set = completeCommand('config get ', BASE_COMMANDS, { mode: 'b', size: 3 }, schema).details!;
+  expect(set.mode).toBe('b · which way');
+  expect(set.size).toBe('3');
+  // Not set: the default the schema holds, and the description.
+  const unset = completeCommand('config get ', BASE_COMMANDS, {}, schema).details!;
+  expect(unset.mode).toBe('default a · which way');
+  expect(unset.flag).toBe('default true');
+  expect(unset.plain).toBe('only a description');
+  expect(unset.size).toBeUndefined();
+});

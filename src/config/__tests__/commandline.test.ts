@@ -84,3 +84,125 @@ test('a walk over a single candidate completes anew: Tab after a unique director
   expect(first.input).toBe('cd a/');
   expect(lineTab(first.input, first.walk, tree).input).toBe('cd a/b/');
 });
+
+// ─── The list ────────────────────────────────────────────────────────────────
+import { LIST_ROWS, lineViewWithList, listKey, newListState, openList } from '../commandline';
+import type { CompleteResult } from '../commands';
+
+const names = (n: number) => Array.from({ length: n }, (_, i) => `item${String(i).padStart(2, '0')}`);
+const many = (count: number) => (text: string): CompleteResult => {
+  const head = text.split(' ').at(-1)!;
+  const candidates = names(count).filter((c) => c.startsWith(head));
+  return { head, hasSpace: true, best: candidates.find((c) => c !== head) ?? candidates[0] ?? '', candidates, details: { item01: 'the second' } };
+};
+
+test('the list opens at two candidates and not at one or none', () => {
+  const c = many(12);
+  expect(openList('x item0', newListState(), c)?.total).toBe(10);
+  expect(openList('x item1', newListState(), c)?.total).toBe(2);
+  expect(openList('x item11', newListState(), c)).toBeNull();
+  expect(openList('x zzz', newListState(), c)).toBeNull();
+  // An empty line offers nothing.
+  expect(openList('', newListState(), c)).toBeNull();
+});
+
+test('up and down move the selection and wrap; the inline rest follows it', () => {
+  const c = many(3);
+  const st = newListState();
+  expect(openList('x item', st, c)).toMatchObject({ selected: 'item00', ghost: '00', number: 1 });
+  expect(listKey('x item', st, { name: 'down' }, c)).toEqual({ handled: true });
+  expect(openList('x item', st, c)).toMatchObject({ selected: 'item01', ghost: '01', at: 1 });
+  listKey('x item', st, { name: 'up' }, c);
+  listKey('x item', st, { name: 'up' }, c);
+  expect(openList('x item', st, c)?.selected).toBe('item02');
+  listKey('x item', st, { name: 'down' }, c);
+  expect(openList('x item', st, c)?.selected).toBe('item00');
+  // Shift+Tab moves up, like the up arrow.
+  listKey('x item', st, { name: 'tab', shift: true }, c);
+  expect(openList('x item', st, c)?.selected).toBe('item02');
+});
+
+test('Tab and Enter replace the word with the selected candidate', () => {
+  const c = many(3);
+  for (const name of ['tab', 'return']) {
+    const st = newListState();
+    listKey('x item', st, { name: 'down' }, c);
+    expect(listKey('x item', st, { name }, c)).toEqual({ handled: true, input: 'x item01' });
+  }
+});
+
+test('taking the candidate the line already holds closes the list instead', () => {
+  const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'ab', candidates: ['a', 'ab'] });
+  const st = newListState();
+  listKey('a', st, { name: 'up' }, c); // the selection is `a`, which is the line
+  expect(listKey('a', st, { name: 'return' }, c)).toEqual({ handled: true });
+  // Closed: the next Enter is the line's own.
+  expect(listKey('a', st, { name: 'return' }, c)).toEqual({ handled: false });
+});
+
+test('Esc closes the list until the text changes', () => {
+  const c = many(3);
+  const st = newListState();
+  expect(listKey('x item', st, { name: 'escape' }, c)).toEqual({ handled: true });
+  expect(openList('x item', st, c)).toBeNull();
+  expect(listKey('x item', st, { name: 'down' }, c)).toEqual({ handled: false });
+  expect(listKey('x item', st, { name: 'escape' }, c)).toEqual({ handled: false });
+  expect(openList('x item0', st, c)).not.toBeNull();
+});
+
+test('keys that are not the list\'s are not handled, with a list open', () => {
+  const st = newListState();
+  expect(listKey('x item', st, { name: 'left' }, many(3))).toEqual({ handled: false });
+});
+
+test('more candidates than rows scroll around the selection and say where it is', () => {
+  const c = many(41);
+  const st = newListState();
+  const first = openList('x item', st, c)!;
+  expect(first.rows).toHaveLength(LIST_ROWS);
+  expect(first.count).toBe('1/41');
+  expect(first.rows[0]!.value).toBe('item00');
+  for (let i = 0; i < 20; i++) listKey('x item', st, { name: 'down' }, c);
+  const mid = openList('x item', st, c)!;
+  expect(mid.count).toBe('21/41');
+  expect(mid.rows[mid.at]!.value).toBe('item20');
+  expect(mid.rows).toHaveLength(LIST_ROWS);
+  // Up from the first wraps to the last, which stays in view.
+  const wrap = newListState();
+  listKey('x item', wrap, { name: 'up' }, c);
+  const last = openList('x item', wrap, c)!;
+  expect(last.rows.at(-1)!.value).toBe('item40');
+  expect(last.count).toBe('41/41');
+  // No count with every candidate in view.
+  expect(openList('x item', newListState(), many(5))!.count).toBe('');
+});
+
+test('the list keeps its height while it is open and narrowing, and forgets it when it closes', () => {
+  const c = many(12);
+  const st = newListState();
+  expect(openList('x item', st, c)!.height).toBe(LIST_ROWS + 1);
+  // Two candidates left: the list still takes its nine lines.
+  expect(openList('x item1', st, c)!.height).toBe(LIST_ROWS + 1);
+  expect(openList('x item11', st, c)).toBeNull();
+  expect(st.height).toBe(0);
+  expect(openList('x item1', st, c)!.height).toBe(2);
+});
+
+test('a row carries its detail, or its label when it has no detail', () => {
+  const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'a', candidates: ['a', 'b', 'c'], details: { a: 'detail a' }, labels: { b: 'label b' } });
+  expect(openList('x', newListState(), c)!.rows).toEqual([
+    { value: 'a', detail: 'detail a' }, { value: 'b', detail: 'label b' }, { value: 'c', detail: '' },
+  ]);
+});
+
+test('with a list open the line is drawn with the selected rest and the label, no `others`', () => {
+  const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'ab', candidates: ['ab', 'ac'], labels: { ab: 'first', ac: 'second' } });
+  const st = newListState();
+  listKey('a', st, { name: 'down' }, c);
+  const { view, list } = lineViewWithList('a', null, st, c);
+  expect(view).toEqual({ ghost: 'c', label: 'second', others: [] });
+  expect(list?.selected).toBe('ac');
+  // With one candidate it is the inline view.
+  const one = lineViewWithList('help', null, newListState(), (t) => completeCommand(t, BASE_COMMANDS, {}));
+  expect(one.list).toBeNull();
+});

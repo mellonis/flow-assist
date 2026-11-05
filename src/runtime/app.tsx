@@ -35,7 +35,7 @@ import {
   runConsumers,
 } from '../loader/registry.js';
 import { BASE_COMMANDS, completeCommand, describeConfigValue, flattenConfigPaths, parseConfigArgs, unquoteValue } from '../config/commands.js';
-import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
+import { lineTab, lineViewWithList, listKey, newListState, type ListState, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
   applyConfigChange,
@@ -68,7 +68,7 @@ import { renderHome } from '../views/home.js';
 import { createLatePlugins, joinIndex, type LatePlugins } from '../loader/late.js';
 import { createPluginsPanel, type PluginSite } from './plugins-panel.js';
 import { panelKey as commandPanelKey, panelAnswer, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
-import { renderCommandPanel } from '../views/modals.js';
+import { renderCommandPanel, renderCompletionList } from '../views/modals.js';
 import { redactDeep } from '../assistant/secrets.js';
 import { isRemotePlugin, stopRemotePlugin } from '../remote/index.js';
 import { UntrustedPluginError } from '../loader/build.js';
@@ -205,6 +205,8 @@ interface CommandLineState {
   historyIdx: number;
   // A Tab walk through the completion candidates (see config/commandline.ts).
   walk: TabWalk | null;
+  // The completion list's selection, its Esc and its height.
+  list: ListState;
 }
 
 // The host's chrome around a plugin's surface (the title bar and the footer, three rows
@@ -541,7 +543,7 @@ export function renderApp(
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
   (services as unknown as HostServices).hostKeys = () => ({ panel: !!ui.hostPanel, line: !!ui.cmdOpen });
-  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
+  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null, list: newListState() } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
   const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pressed: () => undefined, pass: 1, heard: false };
 
@@ -919,6 +921,18 @@ export function renderApp(
       // only — with the box open they must type into `:back`/`:quit` instead of
       // firing quit/clearCache/openBrowser (a real runtime defect).
       if (cmdline.current.open) {
+        // The completion list, while two or more candidates match: ↑/↓ and ⇧⇥ move its
+        // selection, ⇥ and ⏎ take it (⏎ never runs the line then), Esc closes the list
+        // and keeps the text. Ahead of the keys below, whose Esc closes the line and
+        // whose ↑/↓ walk the history — with no list open they are all theirs.
+        if (!key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
+          const step = listKey(cmdline.current.input, cmdline.current.list, { name, shift: !!key.shift }, completeLine);
+          if (step.handled) {
+            if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.walk = null; }
+            notify();
+            return true;
+          }
+        }
         if (isKey(keys.back, name)) {
           cmdline.current.open = false;
           ui.cmdOpen = false;
@@ -1242,11 +1256,11 @@ export function renderApp(
     // says it on its own strip.
     const status = chat && !chat.open && (dock ? dock.side === 'right' : true) && !armed && !toast.message ? chat.statusRow : null;
     const bottom = armed || toast.message || hints;
-    // The command line completes INLINE, on its own one row: the untyped rest of the
-    // suggestion after the caret, the other candidates beside it. A second row of
-    // candidates appearing and vanishing under the line with every keystroke would
-    // jump the whole screen by a row each time.
-    const line = cmdline.current.open ? lineView(cmdline.current.input, cmdline.current.walk, completeLine) : null;
+    // The command line completes inline with one candidate: the untyped rest of the
+    // suggestion after the caret. With two or more, a list sits over the line; it keeps
+    // its height while it is open, so typing does not move the screen by a row at a time.
+    const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.walk, cmdline.current.list, completeLine) : null;
+    const line = shownLine?.view ?? null;
     // The runtime's panel as it is drawn: its rows as they are now, redacted — a
     // plugin's settings and its links' places may hold what should not be on screen.
     const hostView = hostPanel.current ? (() => {
@@ -1323,7 +1337,9 @@ export function renderApp(
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, so an `as any` would hide that the footer is never dimmed.
         line
-          ? h(Box, { flexDirection: 'row' },
+          ? h(Box, { flexDirection: 'column' },
+            shownLine?.list ? renderCompletionList(shownLine.list, region.width - 2) : null,
+            h(Box, { flexDirection: 'row' },
               // The prompt, the inline offer and the candidate list are the host
               // speaking, not text anyone asked for: a copy of the command line is
               // what was typed and nothing else.
@@ -1336,7 +1352,7 @@ export function renderApp(
               // What the offered candidate's label says (a value declared as
               // `{ value, label }`): said, dim, never part of the command.
               line.label ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${line.label}`) : null,
-              line.others.length ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null)
+              line.others.length ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null))
           : status
             ? h(Box, { flexDirection: 'row', selectable: false }, status as never, h(Text, { dim: true, wrap: 'truncate' }, ` · ${bottom}`))
             : h(Text, { dim: true, selectable: false }, bottom),

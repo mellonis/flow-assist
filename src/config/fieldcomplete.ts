@@ -1,9 +1,8 @@
 // The chat field's completion beyond a `/command`'s name: the command's argument from
 // the values it declares, and — in shell mode — the word being typed as a PATH, the
 // way a shell completes one. Both answer in `CompleteResult`, so the field draws and
-// walks them through the `:` line's own `lineView` / `lineTab` (./commandline.ts):
-// the untyped rest after the caret, the other candidates beside it, Tab taking the
-// offer and then walking the rest.
+// takes them through the `:` line's own functions (./commandline.ts): the untyped rest
+// after the caret, and with two or more candidates the list over the line.
 //
 // Pure: the directory listing and the real-path check are injected (`PathDeps`), so
 // the tests use a tree of their own and the chat hands in the filesystem.
@@ -16,7 +15,9 @@ import { completeValues, completeWords, type ArgComplete, type ArgValues, type C
 const NONE = (head = ''): CompleteResult => ({ head, hasSpace: true, best: '', candidates: [] });
 
 // ─── a `/command` and its argument ───────────────────────────────────────────
-export type ChatCommandDef = { name: string; values?: ArgValues; complete?: ArgComplete };
+// `description`: one line on what the command does, said beside its name in the
+// completion list.
+export type ChatCommandDef = { name: string; values?: ArgValues; complete?: ArgComplete; description?: string };
 
 // `/co` completes the command's name — in the declared order, since the chat's
 // commands are listed by what they are for, not alphabetically; a bare `/` lists them
@@ -33,7 +34,8 @@ export function completeSlash(text: string, commands: readonly ChatCommandDef[])
     const lower = head.toLowerCase();
     const matches = commands.map((c) => c.name).filter((n) => n.toLowerCase().startsWith(lower));
     const best = matches.find((n) => n.toLowerCase() !== lower) ?? matches[0] ?? '';
-    return { head, hasSpace: false, best, candidates: matches };
+    const details = Object.fromEntries(commands.filter((c) => c.description && matches.includes(c.name)).map((c) => [c.name, c.description!]));
+    return { head, hasSpace: false, best, candidates: matches, ...(Object.keys(details).length ? { details } : {}) };
   }
   const cmd = commands.find((c) => c.name.toLowerCase() === head.toLowerCase());
   if (cmd?.complete) return completeWords(m![2], cmd.complete);

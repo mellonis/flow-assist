@@ -160,15 +160,16 @@ test('a slash command completes inline: the rest of it is shown in the field, Ta
   expect(fieldRow()).toContain('› /compact');
   expect(styleAt(ui.backend, '› /compact', 6).dim).toBeFalsy();
 
-  // With several candidates the others are named beside it, and Tab walks them.
+  // With several candidates a list opens over the field; ↓ moves the selection, which
+  // is what the field offers, and Tab takes it.
   await ui.press('escape');
   await ui.type('/');
-  expect(fieldRow()).toMatch(/› \/context|› \/clear|› \/compact|› \/log|› \/exit/);
-  expect(fieldRow()).toMatch(/⇥/);
+  expect(fieldRow()).toContain('› /compact');
+  expect(ui.backend.lastFrame).not.toContain('⇥');
+  await ui.press('down');
+  expect(fieldRow()).toContain('› /context');
   await ui.press('tab');
-  const first = fieldRow();
-  await ui.press('tab');
-  expect(fieldRow()).not.toBe(first);
+  expect(fieldRow()).toContain('› /context');
   ui.app.unmount();
 });
 

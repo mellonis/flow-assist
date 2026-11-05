@@ -36,6 +36,7 @@ import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
+import type { CompletionList } from '../config/commandline.js';
 import {
   Box,
   ScrollBox,
@@ -215,6 +216,27 @@ interface Completion {
   ghost: string;
   label?: string;
   others: string[];
+  // The candidates as a list over the field, when two or more match.
+  list?: CompletionList | null;
+}
+
+// The completion list under or over a line (`openList` in src/config/commandline.ts):
+// one row per candidate in view, the selected one inverted, its detail dim after the
+// name; the count line when more exist than rows; blank rows up to the list's height
+// so it keeps its place while the candidates narrow. Chrome: never copied by a drag.
+export function renderCompletionList(list: CompletionList, width: number) {
+  const nameW = Math.min(Math.max(...list.rows.map((r) => cellWidth(r.value))), Math.max(8, Math.floor(width / 2)));
+  const rows = list.rows.map((r, i) => {
+    const name = cutStep(r.value, nameW);
+    const pad = ' '.repeat(Math.max(0, nameW - cellWidth(name)));
+    const text = r.detail ? `${name}${pad}  ${r.detail}` : name;
+    return h(Text, { key: `r${i}`, wrap: 'truncate', ...(i === list.at ? { inverse: true } : {}) }, ` ${text}`);
+  });
+  const blanks = Math.max(0, list.height - rows.length - (list.count ? 1 : 0));
+  return h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, selectable: false },
+    rows,
+    Array.from({ length: blanks }, (_, i) => h(Text, { key: `b${i}` }, '')),
+    list.count ? h(Text, { key: 'n', dim: true, wrap: 'truncate' }, ` ${list.count}`) : null);
 }
 
 // The theme config subtree (`host.config.theme`) — a free-form object. Only `modals`
@@ -1512,6 +1534,8 @@ export interface ChatRoomInput {
   watch?: WatchView | null;
   picker?: PickerState | null;
   panel?: CommandPanelView | null;
+  // Only the completion list's height is read: its rows sit in the field's place.
+  completion?: { list?: { height: number } | null } | null;
 }
 
 // The measures of the chat's column, in one place so what is drawn and what a key may
@@ -1521,7 +1545,7 @@ export interface ChatRoomInput {
 // the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, a watched
 // child, the picker or a command panel takes the column, and the tree is not drawn.
 export function chatRoom(p: ChatRoomInput) {
-  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null } = p;
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null } = p;
   const fullscreen = p.fullscreen ?? false;
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = chatBoxHeight(height, fullscreen);
@@ -1549,7 +1573,7 @@ export function chatRoom(p: ChatRoomInput) {
     ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
-    : visible.length + (askNotice ? 1 : 0);
+    : visible.length + (askNotice ? 1 : 0) + (completion?.list?.height ?? 0);
   const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
@@ -1793,7 +1817,7 @@ export function renderChatModal({
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
   if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
-  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel });
+  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion });
   const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
@@ -2011,6 +2035,7 @@ export function renderChatModal({
           // not text to copy, and a drag over it must not pick them up.
           : h(Box, { flexDirection: 'column', width: '100%' },
               askNotice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, askNotice) : null,
+              completion?.list ? renderCompletionList(completion.list, boxW - 4) : null,
               h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
