@@ -37,6 +37,7 @@ import { Fragment, createContext, createElement as h, memo, useCallback, useCont
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import type { CompletionList } from '../config/commandline.js';
+import { redactSecrets } from '../assistant/secrets.js';
 import {
   Box,
   ScrollBox,
@@ -229,7 +230,8 @@ export function renderCompletionList(list: CompletionList, width: number) {
   const rows = list.rows.map((r, i) => {
     const name = cutStep(r.value, nameW);
     const pad = ' '.repeat(Math.max(0, nameW - cellWidth(name)));
-    const text = r.detail ? `${name}${pad}  ${r.detail}` : name;
+    // A detail is text from config and agent files: redacted as everything drawn is.
+    const text = r.detail ? `${name}${pad}  ${redactSecrets(r.detail)}` : name;
     return h(Text, { key: `r${i}`, wrap: 'truncate', ...(i === list.at ? { inverse: true } : {}) }, ` ${text}`);
   });
   const blanks = Math.max(0, list.height - rows.length - (list.count ? 1 : 0));
@@ -2067,7 +2069,7 @@ export function renderChatModal({
                   ...offer,
                   // The offered candidate's label (a session's title beside its
                   // number): said, dim, never part of the text.
-                  label ? h(Text, { wrap: 'truncate', dim: true }, ` ${label}`) : null,
+                  label ? h(Text, { wrap: 'truncate', dim: true }, ` ${redactSecrets(label)}`) : null,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
                     ? h(Text, { wrap: 'truncate', dim: true }, bangLevel === 2

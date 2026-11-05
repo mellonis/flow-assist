@@ -2632,7 +2632,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const text = inputRef.current;
                 if (!text.includes('\n') && cursorRef.current >= text.length) {
                   const step = listKey(text, listRef.current, key, chatComplete);
-                  if (step.handled) {
+                  // Esc while something runs also stops it, on the first press: the list is
+                  // closed (above) and the key goes on to the stop below.
+                  if (step.handled && key.name === 'escape' && conv.canStop()) { host.notify(); }
+                  else if (step.handled) {
                     disarmEsc();
                     if (step.input !== undefined) {
                       tabRef.current = null;

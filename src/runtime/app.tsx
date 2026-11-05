@@ -1351,7 +1351,7 @@ export function renderApp(
                 : h(Text, { inverse: true, selectable: false }, ' '),
               // What the offered candidate's label says (a value declared as
               // `{ value, label }`): said, dim, never part of the command.
-              line.label ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${line.label}`) : null,
+              line.label ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${redactSecrets(line.label)}`) : null,
               line.others.length ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null))
           : status
             ? h(Box, { flexDirection: 'row', selectable: false }, status as never, h(Text, { dim: true, wrap: 'truncate' }, ` · ${bottom}`))

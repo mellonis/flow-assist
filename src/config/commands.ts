@@ -12,6 +12,7 @@
 
 import { hostConfigSchema } from './schema.js';
 import { cellWidth } from '../cells.js';
+import { shownValue } from './load.js';
 
 // One value a command's argument takes: the word itself, or the word with a label
 // shown beside it (`{ value: '3', label: 'fix the build' }` — the label is never
@@ -262,25 +263,26 @@ function completeConfigKey(head: string, nodes: { path: string; value?: unknown;
   }
   matches.sort((a, b) => a.localeCompare(b));
   const best = matches.find(p => p.toLowerCase() !== kl) ?? matches[0] ?? '';
+  const byPath = new Map(nodes.map((n) => [n.path, n]));
   const details: Record<string, string> = {};
-  for (const n of nodes) {
-    const d = keyDetail(n);
-    if (d && matches.includes(n.path)) details[n.path] = d;
+  for (const path of matches) {
+    const d = keyDetail(byPath.get(path)!);
+    if (d) details[path] = d;
   }
   return { head, hasSpace: false, best, candidates: matches, ...(Object.keys(details).length ? { details } : {}) };
 }
 
 // What a key is, for the completion list: its value when set, else its default when the
-// schema has one, then the schema's description when it carries one.
-function keyDetail(node: { value?: unknown; schema?: unknown }): string {
+// schema has one, then the schema's description when it carries one. A value is shown as
+// `config get` shows it: masked at a secret-looking key, a known secret redacted.
+function keyDetail(node: { path: string; value?: unknown; schema?: unknown }): string {
   const parts: string[] = [];
-  const shown = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
-  if (node.value !== undefined) parts.push(shown(node.value) ?? '');
+  if (node.value !== undefined) parts.push(shownValue(node.path, node.value));
   else {
     let cur = node.schema as any;
     while (cur && (cur.type === 'optional' || cur.type === 'nullable')) cur = cur.unwrap?.() ?? undefined;
     if (cur?.type === 'default') {
-      try { parts.push(`default ${shown(cur.def?.defaultValue ?? cur._zod?.def?.defaultValue)}`); } catch { /* no default to show */ }
+      try { parts.push(`default ${shownValue(node.path, cur.def?.defaultValue ?? cur._zod?.def?.defaultValue)}`); } catch { /* no default to show */ }
     }
   }
   const description = (node.schema as { description?: unknown } | undefined)?.description;

@@ -156,20 +156,22 @@ line by itself, one row per candidate: its name, and what it is when that is kno
 command's description, a config key's value (or its default) and meaning, an agent's
 description with `recorded`, `unrecorded` or `changed since recorded`, a skill's
 description, a session's title. A directory ends in `/`. A long detail is cut to the
-width.
+width, and a value at a secret-looking key (a token, a key, a header) is shown masked,
+as `config get` shows it.
 
 | Key | With the list open |
 | --- | --- |
-| ↑ / ↓ | Move the selection, wrapping; ⇧⇥ moves up. The dim rest after the caret is the selected candidate. |
-| ⇥ | Replace the word being completed with the selected candidate (the first one, until you move). The list then shows what matches the new text. |
+| ↑ / ↓ | Move the selection, wrapping; ⇧⇥ moves up (with the list closed, ⇧⇥ steps the auto mode as usual). The dim rest after the caret is the selected candidate. |
+| ⇥ | Replace the word being completed with the selected candidate (the offered one, until you move). The list then shows what matches the new text. |
 | ⏎ | Before you move the selection the list is only a hint: ⏎ sends or runs the line exactly as typed. After ↑/↓/⇧⇥ moved it, ⏎ takes the selected candidate like ⇥ and does not send; the next ⏎ sends. |
 | Esc | Close the list and keep the text; it stays closed until the text changes. |
 
 The list never grows past eight rows; more are scrolled around the selection, with the
 selected candidate's place in the count (`3/41`). Its height stays the same while you
 type and it narrows, so the line does not move. It closes when one candidate or none
-is left. When the selected candidate is what the line already holds, ⏎ closes the list and the
-next ⏎ sends or runs the line. With the list closed, ↑ and ↓ do what they do
+is left. When the selected candidate is what the line already holds, ⏎ closes the
+list and the next ⏎ sends or runs the line. While an answer or a `!command` runs, Esc
+stops it on the first press and closes the list too. With the list closed, ↑ and ↓ do what they do
 otherwise: in the `:` line the history, in the field the earlier messages and the rows
 under it.
 

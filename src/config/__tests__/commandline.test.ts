@@ -218,3 +218,16 @@ test('with a list open the line is drawn with the selected rest and the label, n
   const one = lineViewWithList('help', null, newListState(), (t) => completeCommand(t, BASE_COMMANDS, {}));
   expect(one.list).toBeNull();
 });
+
+test('a draw or a key runs the completer once for the line', () => {
+  let calls = 0;
+  const counted = (text: string): CompleteResult => { calls++; return many(1)(text); };
+  lineViewWithList('x item0', null, newListState(), counted);
+  expect(calls).toBe(1);
+  calls = 0;
+  const two = (text: string): CompleteResult => { calls++; return many(3)(text); };
+  const st = newListState();
+  listKey('x item', st, { name: 'down' }, two);
+  listKey('x item', st, { name: 'tab' }, two);
+  expect(calls).toBe(2);
+});

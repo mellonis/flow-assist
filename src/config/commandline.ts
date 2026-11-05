@@ -87,7 +87,8 @@ export const LIST_ROWS = 8;
 // A line's list in progress. `text` is the line the state was last read against: when
 // the line is anything else the selection and the Esc are void. `sel` indexes the
 // candidates (-1: the completer's best), `moved` whether an arrow moved it since the
-// list opened or the text changed, `closed` is Esc, and `height` the rows the list has needed since it opened, so it never shrinks while it is open.
+// list opened or the text changed, `closed` is Esc, and `height` the rows the list has
+// needed since it opened, so it never shrinks while it is open.
 export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number }
 export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0 });
 
@@ -144,6 +145,17 @@ export function openList(input: string, state: ListState, complete: Complete): C
   };
 }
 
+// A completer that answers the text it was last asked about from memory: one draw or
+// key reads the same line more than once, and a completer may list a directory.
+function lastOnly(complete: Complete): Complete {
+  let text: string | null = null;
+  let result: CompleteResult;
+  return (t) => {
+    if (t !== text) { result = complete(t); text = t; }
+    return result;
+  };
+}
+
 // What the list does with a key. `handled: false`: no list is open, the key is the
 // line's own. `input`: the line after the key, when it changed — Tab, and Enter once an
 // arrow has moved the selection, replace the word being completed with the selected
@@ -151,7 +163,8 @@ export function openList(input: string, state: ListState, complete: Complete): C
 // own: the list is only a hint then. Taking a candidate the line already holds closes
 // the list instead, so the next Enter is the line's own.
 export type ListKey = { handled: false } | { handled: true; input?: string };
-export function listKey(input: string, state: ListState, key: { name: string; shift?: boolean }, complete: Complete): ListKey {
+export function listKey(input: string, state: ListState, key: { name: string; shift?: boolean }, completer: Complete): ListKey {
+  const complete = lastOnly(completer);
   const list = openList(input, state, complete);
   if (!list) return { handled: false };
   const step = (by: number): ListKey => { state.sel = (state.sel + by + list.total) % list.total; state.moved = true; return { handled: true }; };
@@ -176,6 +189,7 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 // The line as drawn: the list's selection as the inline rest, or the inline view alone
 // while no list is open.
 export function lineViewWithList(input: string, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
-  const list = openList(input, state, complete);
-  return list ? { view: { ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, walk, complete), list: null };
+  const once = lastOnly(complete);
+  const list = openList(input, state, once);
+  return list ? { view: { ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, walk, once), list: null };
 }

@@ -271,3 +271,71 @@ test('a config key is listed with its value', async () => {
   expect(ui.backend.lastFrame).toMatch(/shell\.maxChars +5000/);
   ui.app.unmount();
 });
+
+const SECRETS = {
+  ai: { apiKey: 'sk-live-1234567890' },
+  plugins: { x: { token: 'tok_1234567890abcdef', name: 'visible-name' } },
+  mcp: { servers: { x: { headers: { Authorization: 'Bearer abcdef1234567890', 'X-Trace': 'trace-value-123' }, url: 'http://visible.example' } } },
+  ui: { verbs: ['^scripted-llm-token', 'plain'], scrollbar: 'visible-bar' },
+};
+const typeKeys = async (typed: string) => {
+  const ui = await bootApp(new ScriptedModel(), 120, 40, undefined, SECRETS);
+  await ui.press(':');
+  await ui.type(typed);
+  return ui;
+};
+
+test('a secret key\'s value never shows in the list, a plain key\'s does', async () => {
+  for (const [typed, hidden] of [['config get ai.', 'sk-live-1234567890'], ['config get plugins.x.', 'tok_1234567890abcdef'], ['config get mcp.servers.x.headers', 'abcdef1234567890'], ['config get mcp.servers.x.headers', 'trace-value-123']] as const) {
+    const ui = await typeKeys(typed);
+    // Two or more keys match, so the list is open and shows the key's detail.
+    expect(rows(ui).filter((r) => /^\s*(ai|plugins|mcp)\./.test(r)).length).toBeGreaterThan(1);
+    expect(ui.backend.lastFrame).not.toContain(hidden);
+    ui.app.unmount();
+  }
+  const ui = await typeKeys('config get plugins.x.');
+  expect(ui.backend.lastFrame).toMatch(/plugins\.x\.name +"visible-name"/);
+  expect(ui.backend.lastFrame).toMatch(/plugins\.x\.token +‹masked›/);
+  ui.app.unmount();
+});
+
+test('the draw redacts a value only the secret set knows, at a key that does not look secret', async () => {
+  const ui = await typeKeys('config get ui.');
+  expect(ui.backend.lastFrame).toMatch(/ui\.verbs +/);
+  expect(ui.backend.lastFrame).not.toContain('^scripted-llm-token');
+  expect(ui.backend.lastFrame).toContain('‹secret');
+  ui.app.unmount();
+});
+
+test('Esc while an answer is coming stops it on the first press and closes the list', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'late' }]);
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('F');
+  await ui.type('hello');
+  await ui.press('return');
+  await settle(10);
+  await ui.type('/c');
+  expect(ui.backend.lastFrame).toContain('fold the conversation');
+  expect(ui.backend.lastFrame).toContain('Esc stops');
+  await ui.press('escape');
+  await settle(10);
+  expect(ui.backend.lastFrame).not.toContain('fold the conversation');
+  expect(ui.backend.lastFrame).not.toContain('Esc stops');
+  expect(fieldRow(ui)).toContain('› /c');
+  ui.app.unmount();
+});
+
+test('a label that holds a known secret is redacted in the list and beside the offered word', async () => {
+  const guests = (make: any) => [make('boards', {
+    name: 'boards',
+    commands: [{ name: 'open', run: () => {}, usage: 'open <key>', minArgs: 1, maxArgs: -1, description: 'Open', values: [{ value: 'one', label: 'has ^scripted-llm-token inside' }, { value: 'two', label: 'plain' }] }],
+  })];
+  const ui = await bootApp(new ScriptedModel(), 120, 24, guests);
+  await ui.press(':');
+  await ui.type('open ');
+  expect(ui.backend.lastFrame).toMatch(/two +plain/);
+  expect(ui.backend.lastFrame).not.toContain('^scripted-llm-token');
+  expect(ui.backend.lastFrame).toContain('‹secret');
+  ui.app.unmount();
+});

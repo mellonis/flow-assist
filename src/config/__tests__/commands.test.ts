@@ -172,12 +172,19 @@ test('a config key is offered with its value, or its default, and the schema\'s 
     plain: z.string().optional().describe('only a description'),
   });
   const set = completeCommand('config get ', BASE_COMMANDS, { mode: 'b', size: 3 }, schema).details!;
-  expect(set.mode).toBe('b · which way');
+  expect(set.mode).toBe('"b" · which way');
   expect(set.size).toBe('3');
   // Not set: the default the schema holds, and the description.
   const unset = completeCommand('config get ', BASE_COMMANDS, {}, schema).details!;
-  expect(unset.mode).toBe('default a · which way');
+  expect(unset.mode).toBe('default "a" · which way');
   expect(unset.flag).toBe('default true');
   expect(unset.plain).toBe('only a description');
   expect(unset.size).toBeUndefined();
+});
+
+test('a secret-looking key\'s detail is masked, whatever its value', () => {
+  const d = completeCommand('config get ', BASE_COMMANDS, { ai: { apiKey: 'sk-live-1' }, plugins: { x: { token: 'tok_1', name: 'n' } } }).details!;
+  expect(d['ai.apiKey']).toBe('‹masked›');
+  expect(d['plugins.x.token']).toBe('‹masked›');
+  expect(d['plugins.x.name']).toBe('"n"');
 });
