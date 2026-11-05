@@ -86,10 +86,10 @@ export const LIST_ROWS = 8;
 
 // A line's list in progress. `text` is the line the state was last read against: when
 // the line is anything else the selection and the Esc are void. `sel` indexes the
-// candidates (-1: the word as typed when it is a candidate, else the completer's
-// best), `closed` is Esc, and `height` the rows the list has needed since it opened, so it never shrinks while it is open.
-export interface ListState { text: string; sel: number; closed: boolean; height: number }
-export const newListState = (): ListState => ({ text: '', sel: -1, closed: false, height: 0 });
+// candidates (-1: the completer's best), `moved` whether an arrow moved it since the
+// list opened or the text changed, `closed` is Esc, and `height` the rows the list has needed since it opened, so it never shrinks while it is open.
+export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number }
+export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0 });
 
 export interface ListRow { value: string; detail: string }
 export interface CompletionList {
@@ -118,18 +118,13 @@ export interface CompletionList {
 // line — a changed line forgets the selection and the Esc — and keeps `height`, so it
 // is safe to call from both the drawing and the keys.
 export function openList(input: string, state: ListState, complete: Complete): CompletionList | null {
-  if (state.text !== input) { state.text = input; state.sel = -1; state.closed = false; }
-  const shut = () => { state.height = 0; return null; };
+  if (state.text !== input) { state.text = input; state.sel = -1; state.moved = false; state.closed = false; }
+  const shut = () => { state.height = 0; state.moved = false; return null; };
   if (state.closed || !input.trim()) return shut();
   const comp = complete(input);
   const all = comp.candidates;
   if (all.length < 2 || !input.endsWith(comp.head)) return shut();
-  // The selection starts on the word as typed when it is itself a candidate (⏎ then
-  // keeps `clear` rather than turning it into `clear-cache`), else on the best match.
-  if (state.sel < 0 || state.sel >= all.length) {
-    const typed = all.findIndex((c) => c.toLowerCase() === comp.head.toLowerCase());
-    state.sel = Math.max(0, typed >= 0 ? typed : all.indexOf(comp.best));
-  }
+  if (state.sel < 0 || state.sel >= all.length) state.sel = Math.max(0, all.indexOf(comp.best));
   const start = Math.max(0, Math.min(all.length - LIST_ROWS, state.sel - Math.floor(LIST_ROWS / 2)));
   const shown = all.slice(start, start + LIST_ROWS);
   const selected = all[state.sel]!;
@@ -150,20 +145,22 @@ export function openList(input: string, state: ListState, complete: Complete): C
 }
 
 // What the list does with a key. `handled: false`: no list is open, the key is the
-// line's own. `input`: the line after the key, when it changed — Tab and Enter replace
-// the word being completed with the selected candidate, as the inline Tab does. Taking
-// a candidate the line already holds closes the list instead, so the next Enter is the
-// line's own.
+// line's own. `input`: the line after the key, when it changed — Tab, and Enter once an
+// arrow has moved the selection, replace the word being completed with the selected
+// candidate, as the inline Tab does. Enter with the selection untouched is the line's
+// own: the list is only a hint then. Taking a candidate the line already holds closes
+// the list instead, so the next Enter is the line's own.
 export type ListKey = { handled: false } | { handled: true; input?: string };
 export function listKey(input: string, state: ListState, key: { name: string; shift?: boolean }, complete: Complete): ListKey {
   const list = openList(input, state, complete);
   if (!list) return { handled: false };
-  const step = (by: number): ListKey => { state.sel = (state.sel + by + list.total) % list.total; return { handled: true }; };
+  const step = (by: number): ListKey => { state.sel = (state.sel + by + list.total) % list.total; state.moved = true; return { handled: true }; };
   switch (key.name) {
     case 'down': return step(1);
     case 'up': return step(-1);
     case 'tab': return key.shift ? step(-1) : take(input, state, list, complete);
-    case 'return': return take(input, state, list, complete);
+    // While the selection is untouched the list is only a hint: ⏎ is the line's own.
+    case 'return': return state.moved ? take(input, state, list, complete) : { handled: false };
     case 'escape': state.closed = true; return { handled: true };
     default: return { handled: false };
   }

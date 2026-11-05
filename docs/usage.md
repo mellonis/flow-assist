@@ -161,15 +161,15 @@ width.
 | Key | With the list open |
 | --- | --- |
 | ↑ / ↓ | Move the selection, wrapping; ⇧⇥ moves up. The dim rest after the caret is the selected candidate. |
-| ⇥ or ⏎ | Replace the word being completed with the selected candidate. The list then shows what matches the new text. ⏎ does not send or run the line while the list is open. |
+| ⇥ | Replace the word being completed with the selected candidate (the first one, until you move). The list then shows what matches the new text. |
+| ⏎ | Before you move the selection the list is only a hint: ⏎ sends or runs the line exactly as typed. After ↑/↓/⇧⇥ moved it, ⏎ takes the selected candidate like ⇥ and does not send; the next ⏎ sends. |
 | Esc | Close the list and keep the text; it stays closed until the text changes. |
 
 The list never grows past eight rows; more are scrolled around the selection, with the
 selected candidate's place in the count (`3/41`). Its height stays the same while you
 type and it narrows, so the line does not move. It closes when one candidate or none
-is left. The selection starts on the word as typed when that is itself a candidate
-(`clear`, with `clear-cache` also matching), so ⏎ never turns it into the longer one:
-it closes the list, and the next ⏎ sends or runs the line. With the list closed, ↑ and ↓ do what they do
+is left. When the selected candidate is what the line already holds, ⏎ closes the list and the
+next ⏎ sends or runs the line. With the list closed, ↑ and ↓ do what they do
 otherwise: in the `:` line the history, in the field the earlier messages and the rows
 under it.
 

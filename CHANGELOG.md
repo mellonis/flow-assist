@@ -9,7 +9,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   open a list over the line by themselves: each row is the name and what it is (a command's
   description, a config key's value and meaning, an agent's description and its `recorded` /
   `unrecorded` / `changed since recorded` mark, a skill's description, a session's title). ↑/↓
-  move the selection, ⇥ and ⏎ take it (⏎ does not send or run the line while the list is open),
+  move the selection and ⇥ takes it; ⏎ takes it only after an arrow moved the selection (and then
+  does not send), otherwise ⏎ sends or runs the line as typed,
   Esc closes the list and keeps the text until it changes. At most eight rows show, scrolled
   around the selection with a count (`3/41`), and the list keeps its height while you type.
   One candidate still completes inline with ⇥; with the list closed, ↑/↓ keep their jobs

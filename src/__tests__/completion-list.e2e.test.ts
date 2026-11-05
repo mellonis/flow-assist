@@ -3,6 +3,9 @@
 // it is open), Esc closes it until the text changes. The pure parts are in
 // src/config/__tests__/commandline.test.ts.
 import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -54,7 +57,26 @@ test('↑/↓ move the selection and wrap; the field offers the selected one; Ta
   ui.app.unmount();
 });
 
-test('Enter takes the selection and does not run the line while the list is open; with it closed Enter runs', async () => {
+test('Enter with the selection untouched runs the line as typed; the list is only a hint', async () => {
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('F');
+  // `/sub` is a whole command and a prefix of `/subagent`: the list holds both.
+  await ui.type('/sub');
+  expect(ui.backend.lastFrame).toMatch(/subagent/);
+  await ui.press('return');
+  await settle(4);
+  // Run as typed (not turned into `/subagent`), and the field is empty.
+  expect(fieldRow(ui)).not.toContain('› /sub');
+  expect(ui.backend.lastFrame).not.toContain('Unknown');
+  // Tab, untouched, takes the first candidate.
+  await ui.type('/m');
+  await ui.press('tab');
+  expect(fieldRow(ui)).toContain('› /memory');
+  ui.app.unmount();
+});
+
+test('after an arrow moved the selection Enter takes it and does not run; the next Enter runs', async () => {
   const model = new ScriptedModel();
   const ui = await bootApp(model, 100, 28);
   await ui.press('F');
@@ -74,19 +96,33 @@ test('Enter takes the selection and does not run the line while the list is open
   ui.app.unmount();
 });
 
-test('Enter on the candidate the field already holds closes the list, then runs the line', async () => {
+test('moving the selection to the word already typed: Enter closes the list, the next Enter runs', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 28);
   await ui.press('F');
-  // `/sub` is a whole command and a prefix of `/subagent`: the list holds both.
   await ui.type('/sub');
-  expect(ui.backend.lastFrame).toMatch(/subagent/);
-  // The selection starts on the word as typed, not on `/subagent`.
-  expect(fieldRow(ui)).not.toContain('subagent');
+  // `/subagent` is selected first; ↓ wraps to `/sub`, the line itself.
+  await ui.press('down');
   await ui.press('return');
   expect(ui.backend.lastFrame).not.toMatch(/subagent +start/);
   await ui.press('return');
   await settle(4);
   expect(fieldRow(ui)).not.toContain('› /sub');
+  ui.app.unmount();
+});
+
+test('in shell mode `!echo a` with several matches runs on Enter', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-list-')));
+  for (const d of ['alpha', 'apple']) fs.mkdirSync(path.join(root, d));
+  const ui = await bootApp(new ScriptedModel(), root.length + 80, 32, undefined, { shell: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('!echo a');
+  expect(ui.backend.lastFrame).toContain('apple/');
+  await ui.press('return');
+  const end = Date.now() + 3000;
+  while (Date.now() < end && ui.backend.lastFrame.includes('Esc stops')) { await settle(2); await new Promise((r) => setTimeout(r, 20)); }
+  // The command ran as typed: the list is gone and the field holds neither `alpha/` nor the line.
+  expect(ui.backend.lastFrame).not.toContain('apple/');
+  expect(ui.backend.lastFrame).not.toContain('echo alpha');
   ui.app.unmount();
 });
 

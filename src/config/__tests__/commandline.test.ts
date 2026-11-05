@@ -122,19 +122,30 @@ test('up and down move the selection and wrap; the inline rest follows it', () =
   expect(openList('x item', st, c)?.selected).toBe('item02');
 });
 
-test('Tab and Enter replace the word with the selected candidate', () => {
+test('Tab takes the selected candidate; Enter does only once an arrow moved the selection', () => {
   const c = many(3);
+  // Untouched, Tab takes the best match and Enter is the line's own.
+  expect(listKey('x item', newListState(), { name: 'tab' }, c)).toEqual({ handled: true, input: 'x item00' });
+  expect(listKey('x item', newListState(), { name: 'return' }, c)).toEqual({ handled: false });
+  // Moved, both take it.
   for (const name of ['tab', 'return']) {
     const st = newListState();
     listKey('x item', st, { name: 'down' }, c);
     expect(listKey('x item', st, { name }, c)).toEqual({ handled: true, input: 'x item01' });
   }
+  // A changed line forgets the move.
+  const st = newListState();
+  listKey('x item', st, { name: 'down' }, c);
+  openList('x item0', st, c);
+  expect(listKey('x item0', st, { name: 'return' }, c)).toEqual({ handled: false });
 });
 
 test('taking the candidate the line already holds closes the list instead', () => {
   const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'ab', candidates: ['a', 'ab'] });
   const st = newListState();
-  // The selection starts on `a`, the word as typed, though `ab` is the best match.
+  // `ab` is the best match; ↓ wraps to `a`, the line itself.
+  expect(openList('a', st, c)).toMatchObject({ selected: 'ab' });
+  listKey('a', st, { name: 'down' }, c);
   expect(openList('a', st, c)).toMatchObject({ selected: 'a', ghost: '' });
   expect(listKey('a', st, { name: 'return' }, c)).toEqual({ handled: true });
   // Closed: the next Enter is the line's own.

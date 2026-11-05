@@ -42,8 +42,7 @@ test(':clear works from anywhere — the command is not contextual', async () =>
   const ui = await bootApp(new ScriptedModel(), 100, 24);
   await ui.press(':');
   await ui.type('clear');
-  // `clear` also starts `clear-cache`: the first Enter closes the list, the second runs.
-  await ui.press('return', 'return');
+  await ui.press('return');
   expect(ui.backend.lastFrame).toMatch(/Cache cleared/);
   ui.app.unmount();
 });

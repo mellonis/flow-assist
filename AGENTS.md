@@ -2867,8 +2867,10 @@ that every later message fails too. A background task never gets images.
 rest of the suggestion after the caret, and Tab takes it. With two or more a **list**
 opens over the line (`openList` in `src/config/commandline.ts`, drawn by
 `renderCompletionList` in `src/views/modals.ts`), and the chat's field has the same
-list through the same functions. ↑/↓/⇧⇥ move, Tab and Enter take, Esc closes it until the
-text changes (`listKey`); with it closed, ↑/↓ are the history and Esc closes the line.
+list through the same functions. ↑/↓/⇧⇥ move, Tab takes, Enter takes only once an arrow moved the selection
+(`ListState.moved`, reset when the text changes or the list closes), Esc closes it until
+the text changes (`listKey`); while the selection is untouched the list is a hint and
+Enter is the line's own, so `:clear` runs beside `clear-cache`; with it closed, ↑/↓ are the history and Esc closes the line.
 The logic is pure — `lineView` / `lineTab` / `openList` / `listKey` — and the drawing
 and the keys both go through the one `completeLine`. The list's state (`ListState`:
 selection, Esc, height) sits beside `walk` in the line's state, keyed on the text it
@@ -2876,9 +2878,7 @@ was read against, so a changed line forgets the selection and the Esc by itself.
 **Its height only grows while it is open** (max 8 rows plus a count line, padded with
 blank rows) so typing never moves the screen by a row at a time; a list that was never
 fixed-height would jump the whole screen on every keystroke. Enter taking a candidate
-the line already holds closes the list, so the next Enter is the line's own; the
-selection starts on the word as typed when it is itself a candidate (`:clear` beside
-`clear-cache`), so Enter never rewrites it into the longer match. Tab
+the line already holds closes the list, so the next Enter is the line's own. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
 `config get|set|unset` argument alike. A completer supplies `CompleteResult.details`
 (candidate → what it is) for its list rows; a row without one falls back to the
