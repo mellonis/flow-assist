@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Completion opens a list.** In the chat's field and in the `:` line, two or more candidates
+  open a list over the line by themselves: each row is the name and what it is (a command's
+  description, a config key's value and meaning, an agent's description and its `recorded` /
+  `unrecorded` / `changed since recorded` mark, a skill's description, a session's title). ↑/↓
+  move the selection, ⇥ and ⏎ take it (⏎ does not send or run the line while the list is open),
+  Esc closes the list and keeps the text until it changes. At most eight rows show, scrolled
+  around the selection with a count (`3/41`), and the list keeps its height while you type.
+  One candidate still completes inline with ⇥; with the list closed, ↑/↓ keep their jobs
+  (history, earlier messages, the rows under the field). The `⇥ a · b` row of other candidates
+  is gone.
+
 - **Agents the assistant cannot start are visible, and `:config set` completes keys that are not set yet.**
   The assistant's list of agents ends with one line naming, by `@name` only, the agents found that you have
   not started (or changed since you did), so it can ask you to start one once. `/subagent @` and its

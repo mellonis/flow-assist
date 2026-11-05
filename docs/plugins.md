@@ -428,12 +428,13 @@ entry: ['notes'],                     // the key that leads in, on the start scr
 
 - A command is its first word; the rest of the line is its argument (`run(ctx, arg)`).
 - A command whose argument is one of a few words says which, and the `:` line
-  completes it — Tab after `:open ` offers them inline, a typed prefix narrows them:
+  completes it — after `:open ` they are listed over the line, a typed prefix narrows them:
   `{ name: 'open', usage: 'open <what>', values: ['board', 'card'], run: … }`. For a
   list that changes, `values` is a function read when the line is drawn:
   `values: () => boards().map((b, i) => ({ value: String(i + 1), label: b.name }))` —
   a value is a word, or `{ value, label }` when a word alone says too little (a
-  number): the label is shown beside it, dim, and never inserted. The values are the
+  number): the label is shown beside it, in the list and after the caret, dim, and never
+  inserted. The values are the
   first argument's. A command whose later words take values too says `complete(words)`
   instead — given the words before the one being typed, the values it may be:
   `complete: (w) => w.length === 0 ? ['restart', 'tools'] : w.length === 1 ? servers() : []`

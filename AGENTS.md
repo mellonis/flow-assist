@@ -2863,14 +2863,25 @@ that every later message fails too. A background task never gets images.
 
 ## The command line
 
-`:` opens it. It completes **inline, on its one row**, as the chat's field does: the
-untyped rest of the suggestion after the caret, the other candidates beside it as
-`⇥ a · b`; Tab takes the offer and then walks the rest. The logic is pure —
-`lineView` / `lineTab` in `src/config/commandline.ts` — and both the drawing and Tab go
-through the one `completeLine`. Never add a row that appears while typing: a second
-row of candidates would make the whole screen jump with every keystroke. Tab
+`:` opens it. With one candidate it completes **inline, on its one row**: the untyped
+rest of the suggestion after the caret, and Tab takes it. With two or more a **list**
+opens over the line (`openList` in `src/config/commandline.ts`, drawn by
+`renderCompletionList` in `src/views/modals.ts`), and the chat's field has the same
+list through the same functions. ↑/↓/⇧⇥ move, Tab and Enter take, Esc closes it until the
+text changes (`listKey`); with it closed, ↑/↓ are the history and Esc closes the line.
+The logic is pure — `lineView` / `lineTab` / `openList` / `listKey` — and the drawing
+and the keys both go through the one `completeLine`. The list's state (`ListState`:
+selection, Esc, height) sits beside `walk` in the line's state, keyed on the text it
+was read against, so a changed line forgets the selection and the Esc by itself.
+**Its height only grows while it is open** (max 8 rows plus a count line, padded with
+blank rows) so typing never moves the screen by a row at a time; a list that was never
+fixed-height would jump the whole screen on every keystroke. Enter taking a candidate
+the line already holds closes the list, so the next Enter is the line's own. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
-`config get|set|unset` argument alike.
+`config get|set|unset` argument alike. A completer supplies `CompleteResult.details`
+(candidate → what it is) for its list rows; a row without one falls back to the
+candidate's `labels` entry. The list is not built on flowtty's `selectReducer`: that
+reducer filters as you type and submits on Enter, and here the line is the filter.
 
 - **`:` opens the line; once it is open, `:` is a character** (`hostFallback` in
   `src/runtime/app.tsx`) — a URL, a time, `host:port`, `repo:git_status` keep their
