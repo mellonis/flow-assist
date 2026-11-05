@@ -13,6 +13,9 @@ assistant may set or save".
   nothing is written, and the next start has the saved value again. Either way a
   running app uses it at once where it can; a key read only at start (`ui.mouse`, `ui.hover`, the
   model's endpoint, `ai.disabledTools`) waits for the next one and says so.
+  Tab completes a key from the whole schema, set or not (`agents.maxAuto`, `ai.taskRounds`), and
+  the values of an enum or a boolean key. A key that holds a map (`keys`, `theme`) completes as
+  itself, not by the names inside it.
   `config unset <key>` removes a saved value (`:config unset --session <key>` only the
   one for this run). `config get <key>` says where the value comes from: `session`,
   `local` (`config.local.json`), `config` (`config.json`) or `default`.

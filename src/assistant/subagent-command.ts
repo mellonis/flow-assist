@@ -5,6 +5,7 @@ import { formatDuration } from './duration.js';
 import type { EndedChild, RunningChild } from './conversation-types.js';
 import { paramsText, type AgentSource } from './agent-file.js';
 import type { FoundAgents } from './agent-find.js';
+import { standingNow, type AgentStanding } from './agent-trust.js';
 
 export type SubagentLine =
   | { kind: 'list' }
@@ -142,15 +143,25 @@ export function subagentListing(running: readonly RunningChild[], ended: readonl
 
 const sourceText = (s: AgentSource): string => (s.kind === 'plugin' ? `plugin ${s.plugin}` : s.kind);
 
+// The mark of a file the model cannot start, and what the listing adds to it.
+export const standingTag = (s: AgentStanding): string => s === 'unrecorded' ? 'unrecorded' : s === 'changed' ? 'changed since recorded' : '';
+export const standingNote = (s: AgentStanding): string => s === 'recorded' ? ' · recorded' : ` · ${standingTag(s)} — the model cannot start it until you start it once`;
+
+// What `/subagent @` offers: each agent with its description, and the mark of one the
+// model cannot start.
+export function agentCompletions(found: Pick<FoundAgents, 'agents'>, standing: (a: FoundAgents['agents'][number]) => AgentStanding = standingNow()): { value: string; label: string }[] {
+  return found.agents.map((a) => ({ value: `@${a.id}`, label: [a.description, standingTag(standing(a))].filter(Boolean).join(' · ') }));
+}
+
 // The agent files found, as a note. A note is drawn as markdown, where single line
 // breaks join, so each agent and each error is a list item: the agent with its
 // description, its parameters and where it comes from, a person's agent hidden by the
 // project's marked; every file with errors as `path:line: message`. With `shell.roots`
 // unset it says the project's agents are not read.
-export function agentListing(found: FoundAgents): string {
+export function agentListing(found: FoundAgents, standing: (a: FoundAgents['agents'][number]) => AgentStanding = standingNow()): string {
   const item = (a: FoundAgents['agents'][number], extra = ''): string => `- @${a.id} — ${a.description} · ${a.params.length ? `${paramsText(a.params)} · ` : ''}${sourceText(a.source)}${extra}`;
   const blocks: string[] = [];
-  const agents = [...found.agents.map((a) => item(a)), ...found.shadowed.map((a) => item(a, ' (shadowed by the project\'s agent of this name)'))];
+  const agents = [...found.agents.map((a) => item(a, standingNote(standing(a)))), ...found.shadowed.map((a) => item(a, ' (shadowed by the project\'s agent of this name)'))];
   blocks.push(agents.length ? agents.join('\n') : 'no agents found');
   if (found.errors.length) blocks.push(found.errors.map((e) => `- ${e.path}:${e.line}: ${e.message}`).join('\n'));
   if (!found.projectRead) blocks.push('the project\'s agents are not read — shell.roots is not set');

@@ -219,7 +219,9 @@ typed it, line breaks included (⇧⏎ makes one).
 
 **`/subagent @<name> <arguments>`** starts a subagent that an agent file describes, in place
 of a prompt (see Agent files, below); `/subagent @` alone lists the agent files found, with
-the errors of those that cannot be read. `--with-context` goes right after the name; `--auto`
+the errors of those that cannot be read. Each file is marked `recorded`, `unrecorded` or `changed
+since recorded`; the assistant cannot start the last two until you start the file once yourself,
+and the completion after `@` marks them too. `--with-context` goes right after the name; `--auto`
 is refused there, since the file says what the agent may do.
 
 A question from a subagent you started is drawn in the place of the field, a free-text block
@@ -475,7 +477,9 @@ only extra instructions, added after the prompt. The agent runs as a background 
 that may write, each write asking you unless its auto mode answers, and its result comes back to the assistant as
 any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
-start it once yourself with `/subagent @<name>`.
+start it once yourself with `/subagent @<name>`. A file it cannot start yet (never started by you,
+or changed since) is named in one more line of the list, by `@name` and its mark only, so it can ask
+you to start that one once.
 
 An agent never starts itself: the conversation running an agent file, and every conversation
 it started, leaves that file out of its list and has the `subagent` call for it refused, with

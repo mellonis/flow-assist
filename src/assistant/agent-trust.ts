@@ -55,6 +55,19 @@ export function trustedNow(): (agent: Recorded) => boolean {
   return (agent) => agent.source.kind === 'plugin' || (!unreadable && rec.files[agentKey(agent)] === agent.hash);
 }
 
+// Where a file stands against the record: started by the person with this content
+// (`recorded`, a plugin's always), never started (`unrecorded`), or started with other
+// content (`changed`). One read of the record for a caller that asks about many agents.
+export type AgentStanding = 'recorded' | 'unrecorded' | 'changed';
+export function standingNow(): (agent: Recorded) => AgentStanding {
+  const { unreadable, rec } = readRecord();
+  return (agent) => {
+    if (agent.source.kind === 'plugin') return 'recorded';
+    const was = unreadable ? undefined : rec.files[agentKey(agent)];
+    return was === agent.hash ? 'recorded' : was === undefined ? 'unrecorded' : 'changed';
+  };
+}
+
 // A record exists for the file under another hash.
 export function agentChanged(agent: Recorded): boolean {
   if (agent.source.kind === 'plugin') return false;

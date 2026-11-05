@@ -161,6 +161,7 @@ export function configValueOptions(node: unknown): string[] {
     else if ('schema' in node) {
       const t = schemaType((node as { schema: unknown }).schema);
       if (t === 'boolean') return ['true', 'false'];
+      if (t === 'enum') return [...(unwrapSchema((node as { schema: unknown }).schema).options ?? [])].map(String);
       return [];
     }
   }
@@ -170,12 +171,15 @@ export function configValueOptions(node: unknown): string[] {
 
 // The zod node type with wrappers (optional/nullable/default) unwrapped — in v4
 // the inner schema is only reachable after `.unwrap()`.
-function schemaType(schema: unknown): string {
+function unwrapSchema(schema: unknown): any {
   let cur = schema as any;
   while (cur && (cur.type === 'optional' || cur.type === 'nullable' || cur.type === 'default')) {
     cur = cur.unwrap?.() ?? cur;
   }
-  return cur?.type ?? '';
+  return cur;
+}
+function schemaType(schema: unknown): string {
+  return unwrapSchema(schema)?.type ?? '';
 }
 
 // Completion of arguments after the `config get|set|unset <key> [value]`
@@ -272,11 +276,29 @@ function completeConfigValue(keyHead: string, valueHead: string, nodes: { path: 
 // the node type.
 function configPaths(config?: unknown, configSchema: any = hostConfigSchema): { path: string; value?: unknown; schema?: unknown }[] {
   const nodes = new Map<string, { path: string; value?: unknown; schema?: unknown }>();
+  for (const n of hostSchemaPaths(configSchema)) nodes.set(n.path, n);
   for (const n of pluginSchemaPaths(configSchema)) nodes.set(n.path, n);
   for (const { path, value } of flattenConfigPaths(config ?? {})) {
     nodes.set(path, { path, value });
   }
   return [...nodes.values()];
+}
+
+// Every leaf of the host schema, so a key completes before it is set: the object
+// nodes are walked through their optional, default, nullable and partial wrappers; a
+// record, a passthrough or any other node ends the walk at its own path, offering the
+// keys the schema names and no more.
+function hostSchemaPaths(configSchema: any, prefix = ''): { path: string; schema: unknown }[] {
+  const shape = configSchema?.shape;
+  if (!shape) return [];
+  const out: { path: string; schema: unknown }[] = [];
+  for (const [key, node] of Object.entries(shape) as [string, any][]) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const inner = unwrapSchema(node);
+    if (inner?.type === 'object' && inner.shape) out.push(...hostSchemaPaths(inner, path));
+    else out.push({ path, schema: node });
+  }
+  return out;
 }
 
 // Plugin-namespace paths from the schema: the root (plugins), the namespaces

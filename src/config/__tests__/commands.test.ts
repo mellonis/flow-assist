@@ -128,3 +128,17 @@ test('complete(words) completes every word of a command\'s argument, each from t
   // A throwing `complete` is no values.
   expect(completeCommand('mcp ', [{ ...cmd, complete: () => { throw new Error('x'); } }] as never).candidates).toEqual([]);
 });
+
+test('config set completes every key of the host schema on an empty config, nested optional objects included', () => {
+  expect(completeCommand('config set agents.', BASE_COMMANDS, {}).candidates).toEqual(['agents.maxAuto']);
+  expect(completeCommand('config set ai.task', BASE_COMMANDS, {}).candidates).toEqual(['ai.taskRounds']);
+  expect(completeCommand('config get ai.thinking.', BASE_COMMANDS, {}).candidates).toEqual(['ai.thinking.adaptive', 'ai.thinking.budgetTokens']);
+  expect(completeCommand('config unset shell.max', BASE_COMMANDS, {}).candidates).toEqual(['shell.maxBackground', 'shell.maxChars']);
+  expect(completeCommand('config set ke', BASE_COMMANDS, {}).candidates).toEqual(['keys']);
+});
+
+test('config set completes an enum value from the schema, and a boolean one', () => {
+  expect(completeCommand('config set agents.maxAuto ', BASE_COMMANDS, {}).candidates).toEqual(['all', 'ask', 'reads']);
+  expect(completeCommand('config set ai.toolLoading o', BASE_COMMANDS, {})).toMatchObject({ best: 'onDemand' });
+  expect(completeCommand('config set ai.stream ', BASE_COMMANDS, {}).candidates).toEqual(['true', 'false']);
+});

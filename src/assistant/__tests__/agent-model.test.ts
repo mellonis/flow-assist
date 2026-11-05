@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { agentsBlock, AGENT_DESCRIPTION_MAX } from '../agent-model.ts';
-import { agentTrustPath } from '../agent-trust.ts';
+import { agentKey, agentTrustPath } from '../agent-trust.ts';
 import type { FoundAgent } from '../agent-find.ts';
 
 afterEach(() => { fs.rmSync(agentTrustPath(), { force: true }); });
@@ -32,4 +32,19 @@ test('the trust record is read once for the whole block, not once per agent', ()
     agentsBlock({ agents: [agent('a', 'd', 'project'), agent('b', 'd', 'project'), agent('c', 'd', 'project')] });
   } finally { spy.mockRestore(); }
   expect(reads).toBe(1);
+});
+
+test('agents that are not recorded are named in one line, by name only, capped at twenty; a running one is left out', () => {
+  const many = Array.from({ length: 25 }, (_, i) => agent(`p${String(i).padStart(2, '0')}`, 'SECRET description', 'project'));
+  const block = agentsBlock({ agents: [agent('ok', 'fine'), ...many] }, (a) => (a.id === 'ok' ? 'recorded' : a.id === 'p01' ? 'changed' : 'unrecorded'));
+  const [listed, held] = block.split('\n').slice(-2) as [string, string];
+  expect(block).toContain('@ok — fine');
+  expect(listed).toBe('@ok — fine');
+  expect(held.startsWith('Agents found that you cannot start yet: @p00 (unrecorded), @p01 (changed since recorded), @p02 (unrecorded)')).toBe(true);
+  expect(held).toContain('@p19 (unrecorded). If you need one, ask the person to start it once with /subagent @name.');
+  expect(held).not.toContain('@p20');
+  expect(block).not.toContain('SECRET');
+  const running = new Set([agentKey(many[0]!)]);
+  expect(agentsBlock({ agents: [many[0]!] }, () => 'unrecorded', running)).toBe('');
+  expect(agentsBlock({ agents: [many[0]!] }, () => 'unrecorded')).toContain('@p00 (unrecorded)');
 });

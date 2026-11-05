@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Agents the assistant cannot start are visible, and `:config set` completes keys that are not set yet.**
+  The assistant's list of agents ends with one line naming, by `@name` only, the agents found that you have
+  not started (or changed since you did), so it can ask you to start one once. `/subagent @` and its
+  completion mark each agent `recorded`, `unrecorded` or `changed since recorded`. `:config set agents.`
+  offers `agents.maxAuto` and `ai.` offers `ai.taskRounds` on a config that sets neither: key completion
+  walks the whole schema, and enum values complete too.
+
 - **A subagent you started is woken by the end of its own background shell.** Like a session, it
   starts a turn when a shell its model started ends, while it is idle with no question drawn, under the
   session on screen, in its own auto mode and round cap, at most three times in a row without a

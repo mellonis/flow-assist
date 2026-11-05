@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../subagent-command.ts';
+import { agentCompletions, agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../subagent-command.ts';
 
 test('a bare line lists; stop as the first word is the stop command', () => {
   expect(parseSubagentLine('  ')).toEqual({ kind: 'list' });
@@ -144,4 +144,19 @@ test('the agent listing: each agent with parameters and source, shadowed marked,
   expect(text).toContain('- /a/bad.md:4: unknown key "tool"');
   expect(text).toContain('the project\'s agents are not read — shell.roots is not set');
   expect(agentListing({ agents: [], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/p' })).toBe('no agents found');
+});
+
+test('the listing and the completion mark each agent: recorded, unrecorded or changed since recorded', () => {
+  const agent = (id: string) => ({ id, name: id, description: `does ${id}`, params: [], tools: null, auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h' });
+  const found = { agents: [agent('ok'), agent('new'), agent('edited')], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/p' };
+  const standing = (a: { id: string }) => (a.id === 'ok' ? 'recorded' : a.id === 'new' ? 'unrecorded' : 'changed') as 'recorded' | 'unrecorded' | 'changed';
+  const text = agentListing(found, standing);
+  expect(text).toContain('- @ok — does ok · person · recorded');
+  expect(text).toContain('- @new — does new · person · unrecorded — the model cannot start it until you start it once');
+  expect(text).toContain('- @edited — does edited · person · changed since recorded — the model cannot start it until you start it once');
+  expect(agentCompletions(found, standing)).toEqual([
+    { value: '@ok', label: 'does ok' },
+    { value: '@new', label: 'does new · unrecorded' },
+    { value: '@edited', label: 'does edited · changed since recorded' },
+  ]);
 });

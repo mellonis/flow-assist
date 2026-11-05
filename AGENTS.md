@@ -1045,7 +1045,13 @@ the agents the model may start (`agentsBlock`: `@id — description (params)`, o
 itself: `runningAgentKeys` (`conversation-turn.ts`) collects the `agentKey` (source and real
 path) of the `agent` of the conversation and of every `parent` above it; `agentsBlock` leaves
 those out and `planAgentStart` refuses them (`AgentStarter.running`) with a reply worded for
-the model: it already is that agent, so it does the work itself.
+the model: it already is that agent, so it does the work itself. `agentsBlock` takes a `standing`
+(`standingNow`, one read of the record: `recorded`, `unrecorded`, `changed`) and ends with one line
+naming the agents not recorded by `@name (mark)` only, at most twenty; `agentListing` and
+`agentCompletions` (`subagent-command.ts`) mark each agent the same way for `/subagent @`.
+`configPaths` (`src/config/commands.ts`) adds every leaf of the host schema (`hostSchemaPaths`,
+through optional, default, nullable and partial wrappers; a record ends the walk at its own
+path), and `configValueOptions` completes an enum node's options.
 **`skill(name, file?)` loads a skill** (`skillToolResult`, `src/assistant/skill-model.ts`;
 `ctx.skills`, which `conversation-turn.ts` builds per call as `skillsFinderOf`). It reads the
 skill's directory afresh (`loadSkillFresh`: one walk, every file read once, the body and the hash

@@ -256,8 +256,9 @@ test('the session\'s and a task\'s system prompt list the trusted agents, one li
   await childDone(rig);
   const sys = systemOf(model.requests[0]!);
   expect(sys).toContain(`${BLOCK}\n@job — Does the job (<ticket> [branch])\n@plain — No parameters`);
-  expect(sys).not.toContain('@loose');
+  expect(sys).not.toContain('@loose —');
   expect(sys).not.toContain('Never started');
+  expect(sys).toContain('Agents found that you cannot start yet: @loose (unrecorded). If you need one, ask the person to start it once with /subagent @name.');
   expect(systemOf(child.requests[0]!)).toContain(`${BLOCK}\n@job — Does the job`);
 });
 

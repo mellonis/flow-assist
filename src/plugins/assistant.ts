@@ -84,7 +84,7 @@ import { parseSkillLine, SKILL_DEFAULT_TEXT, skillListing, skillTrustRequest, sk
 import { chatToolGroupOf } from '../loader/tools.js';
 import type { ChildSpec } from '../assistant/conversation-types.js';
 import type { HostServices } from '../runtime/services.js';
-import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex, uniqueLabel } from '../assistant/subagent-command.js';
+import { agentCompletions, agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex, uniqueLabel } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -739,7 +739,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
               : c.name === 'subagent' || c.name === 'sub'
                 // Only the first word completes, and only an agent: `@` and its names.
-                ? { ...c, complete: (before: string[]) => (before.length ? [] : agentsFound().agents.map((a) => ({ value: `@${a.id}`, label: a.description }))) }
+                ? { ...c, complete: (before: string[]) => (before.length ? [] : agentCompletions(agentsFound())) }
                 : c.name === 'skill'
                   // The first word: `trust` or a skill's name; after `trust`, a name.
                   ? { ...c, complete: (before: string[]) => (before.length > 1 || (before.length === 1 && before[0] !== 'trust') ? [] : [...(before.length ? [] : [{ value: 'trust', label: 'record a project skill without loading it' }]), ...skillsFound().skills.map((s) => ({ value: s.id, label: s.description }))]) }

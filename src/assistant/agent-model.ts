@@ -2,7 +2,7 @@
 // gave are checked against the file's parameters and every refusal is worded for the
 // model to read (never a question to the person). Also the block of the system prompt
 // that lists the agents it may start. Pure but for the trust record the check reads.
-import { agentKey, agentTrusted, trustedNow } from './agent-trust.js';
+import { agentKey, agentTrusted, standingNow, type AgentStanding } from './agent-trust.js';
 import { fillPrompt, paramsText } from './agent-file.js';
 import { resolveAgent, type FoundAgent, type FoundAgents } from './agent-find.js';
 import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
@@ -88,10 +88,17 @@ const lineOf = (a: FoundAgent): string => {
   return `@${a.id} — ${clip(a.description)}${params}`;
 };
 
-// The system prompt's list of the agents the model may start: the trusted ones only, minus
-// the ones its own chain runs (`running`, agent identities), at most twenty. '' when there
-// is none.
-export function agentsBlock(found: Pick<FoundAgents, 'agents'>, trusted: (a: FoundAgent) => boolean = trustedNow(), running: ReadonlySet<string> = new Set()): string {
-  const lines = found.agents.filter((a) => trusted(a) && !running.has(agentKey(a))).slice(0, AGENTS_LISTED_MAX).map(lineOf);
-  return lines.length ? ['Agents you can start by name with the subagent tool (agent, args):', ...lines].join('\n') : '';
+// The system prompt's list of the agents the model may start: the recorded ones only, minus
+// the ones its own chain runs (`running`, agent identities), at most twenty. Under it one
+// line names, with no description, the agents found that are not recorded (never started by
+// the person, or changed since), at most twenty too, and says to ask the person to start
+// one once. '' when there is nothing to say.
+export function agentsBlock(found: Pick<FoundAgents, 'agents'>, standing: (a: FoundAgent) => AgentStanding = standingNow(), running: ReadonlySet<string> = new Set()): string {
+  const here = found.agents.filter((a) => !running.has(agentKey(a)));
+  const lines = here.filter((a) => standing(a) === 'recorded').slice(0, AGENTS_LISTED_MAX).map(lineOf);
+  const held = here.filter((a) => standing(a) !== 'recorded').slice(0, AGENTS_LISTED_MAX).map((a) => `@${a.id} (${standing(a) === 'changed' ? 'changed since recorded' : 'unrecorded'})`);
+  const out: string[] = [];
+  if (lines.length) out.push(['Agents you can start by name with the subagent tool (agent, args):', ...lines].join('\n'));
+  if (held.length) out.push(`Agents found that you cannot start yet: ${held.join(', ')}. If you need one, ask the person to start it once with /subagent @name.`);
+  return out.join('\n');
 }
