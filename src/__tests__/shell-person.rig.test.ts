@@ -80,6 +80,54 @@ test('a job that ends unread keeps its row, answered, until the person opens it;
   expect(rig.conv.jobById('sh-1')).toBe(a);
 });
 
+test('the row of a job the model started leaves once a request to the model carries its end', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'Seen.' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const a = job(rig.conv, 'echo built; sleep 0.2');
+  await rig.until(() => model.requests.length === 2);
+  expect(String(rig.sent(1).at(-1)!.content)).toContain('<shell-end n=');
+  await rig.idle();
+  expect(shells(rig.conv)).toEqual([]);
+  // The job stays among the ended ones, with its output, in /agents.
+  expect(rig.conv.jobById('sh-1')).toBe(a);
+  expect(rig.conv.endedShellsListed()).toEqual([a]);
+});
+
+test('the row of a model job stays while its end has landed and no request has carried it, and leaves with the next message', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'Seen.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await anchor(rig);
+  const a = job(rig.conv, 'echo built');
+  await a.wait(3000);
+  await rig.until(() => rig.conv.api.some((m) => m.role === 'bg'));
+  await settleTick();
+  expect(model.requests).toHaveLength(1);
+  expect(shells(rig.conv)).toHaveLength(1);
+  await rig.conv.send('and now?');
+  await rig.idle();
+  expect(rig.sent(1).map((m) => String(m.content)).join('\n')).toContain('sh-1 · echo built');
+  expect(shells(rig.conv)).toEqual([]);
+});
+
+test('the row of the person\'s own job stays after later requests, until the person opens it', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'Seen.' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const a = job(rig.conv, 'echo mine', 'person');
+  await a.wait(3000);
+  await rig.until(() => rig.conv.api.some((m) => m.role === 'bg'));
+  await rig.conv.send('next');
+  await rig.idle();
+  expect(rig.sent(1).map((m) => String(m.content)).join('\n')).toContain('sh-1 · echo mine');
+  expect(shells(rig.conv)).toHaveLength(1);
+  rig.conv.readJob(a);
+  expect(shells(rig.conv)).toEqual([]);
+});
+
 test('a job killed by the model or by a signal keeps its unread row; /clear takes the rows with the record', async () => {
   const model = new ScriptedModel();
   model.script(START);

@@ -2510,8 +2510,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 else if (key.name === 'up') setTreeSel(i <= 0 ? NO_TREE_SEL : { at: stops[i - 1]!.key, ask: false });
                 else if (key.name === 'down') setTreeSel({ at: stops[Math.min(stops.length - 1, i + 1)]!.key, ask: false });
                 else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) {
-                  // An ended shell has nothing to kill; opening it reads it and its row goes.
-                  if (!conv.jobByKey(sel.at!) || conv.jobByKey(sel.at!)!.job.running) setTreeSel({ at: sel.at, ask: true });
+                  // An ended shell has nothing to kill: `x` reads it, as opening it does, and its row
+                  // goes with no question; the job stays in /agents.
+                  const shell = conv.jobByKey(sel.at!);
+                  if (!shell || shell.job.running) setTreeSel({ at: sel.at, ask: true });
+                  else { shell.owner.readJob(shell.job); host.notify(); }
                 }
                 else if (key.name === 'return' && !key.ctrl && !key.meta && i >= 0) {
                   const node = conv.nodeByKey(sel.at!);

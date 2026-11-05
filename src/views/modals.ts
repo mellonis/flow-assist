@@ -1925,7 +1925,7 @@ export function renderChatModal({
           : escArmed
           ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
           : treeKeys
-          ? `${CAP.upDown} move · x stop · ${CAP.esc} back`
+          ? `${CAP.upDown} move · x ${treeShown.find((r) => r.key === tree!.cursor)?.ended ? 'dismiss' : 'stop'} · ${CAP.esc} back`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
               // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,

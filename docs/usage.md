@@ -837,9 +837,12 @@ that subagent: one that stays reads it in its next turn, one that does not stay 
 counts as working. ↓ on an empty line steps into the rows; ⏎ opens the output in the pager,
 the whole kept buffer (a first line says how many characters were dropped), growing while
 you look; `x` asks `kill sh-3? y yes · n no` and `y` stops it: SIGTERM to the whole process
-group, SIGKILL after 2 seconds. `x` does nothing on an ended shell. The last 20 ended shells
-stay in `/agents` with their status, and ⏎ opens their output in the pager; an ended shell you
-have not opened reads as `answered` until you do. The footer's background count includes running shells.
+group, SIGKILL after 2 seconds. On an ended shell `x` dismisses the row, with no question; the
+job stays in `/agents`. The last 20 ended shells stay in `/agents` with their status, and ⏎ opens
+their output in the pager. The row of a shell the assistant started leaves by itself once a request
+to the assistant has carried its end (a held-back wake keeps it until your next message does); the
+row of one you started with `!cmd &` reads as `answered` until you open or dismiss it, and one you
+killed leaves at once. The footer's background count includes running shells.
 
 **Leaving.** `/new`, a switch from the picker and `/resume` with shells running in the
 session ask first: `s` stops them, `k` keeps them running in the session you leave (it stays

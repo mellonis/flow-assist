@@ -174,6 +174,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // recall.ts); what this turn adds — the question's images, a `!command` run
   // since the last turn — is not in the set yet and goes in full.
   const apiMsgs: ChatMessage[] = c.sentHistory();
+  c.endsSent();
   c.recall.recalled = new Set(); // what `recall` brings back is this turn's
   // What this message ADDS to the screen list; laid onto the list as it is when
   // React applies it (below), never onto what was last drawn.

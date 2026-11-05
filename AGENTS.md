@@ -1291,8 +1291,12 @@ A saved history that holds calls under the name `background` is sent as it is. T
   and starts a `by: 'person'` job with the whole environment in the conversation's directory,
   without holding the field. `Conversation.tree()` makes kept jobs `TreeNode`s of
   `kind: 'shell'` (`key job:sh-N`) after the children of their level: running ranks as `working`,
-  an ended unread one as `idle` + `answered` until opened (`readJob`); `x` then `y` is
-  `killJob`. The pager of a job reads the WHOLE ring buffer at each draw (`jobConsoleData`,
+  an ended unread one as `idle` + `answered` until read (`readJob`); `x` then `y` on a running row is
+  `killJob`, `x` on an ended row is `readJob` with no question (the `TreeRow.ended` flag turns the hint
+  to `x dismiss`). The ended row of a job the model started (`by: 'model'`) is read when a request to
+  the model carries its end: `landInbox` notes the id in `landedEnds`, `runTurn` calls `endsSent()` once
+  it has built the history. A wake held back by a guard, or `ai.backgroundFollowUp: false`, lands the
+  end with no request, so the row stays until the next message; a person's job never leaves this way. The pager of a job reads the WHOLE ring buffer at each draw (`jobConsoleData`,
   `whole`, `ViewRecord.rows` raising `frameView`'s 400-row cap), not the view caps.
   `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells (`shownJobs()`, subagents' too;
   a probe still within its settle is none, and the session stays loaded for its running turn) in a

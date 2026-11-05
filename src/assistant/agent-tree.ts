@@ -8,7 +8,8 @@ import { formatDuration } from './duration.js';
 
 // One drawn row. `key` is the node's conversation key ('' for the `+K more` row, which is
 // not a stop of the cursor); `tone` is how the chat colours it.
-export interface TreeRow { key: string; text: string; tone: 'warn' | 'work' | 'dim' }
+// `ended`: a shell row whose job has ended, where `x` dismisses instead of killing.
+export interface TreeRow { key: string; text: string; tone: 'warn' | 'work' | 'dim'; ended?: true }
 
 export const AGENT_ROWS_DEFAULT = 4;
 export const AGENT_ROWS_MAX = 8;
@@ -98,7 +99,7 @@ export function treeRows(nodes: readonly TreeNode[], max: number, width: number,
     kept = kept.sort((a, b) => attentionOf(a.n) - attentionOf(b.n) || a.i - b.i).slice(0, max - 1).sort((a, b) => a.i - b.i);
   }
   const rows = kept.map(({ n }): TreeRow => {
-    if (n.shell) return { key: n.key, text: shellRowText(n, width), tone: toneOf(n) };
+    if (n.shell) return { key: n.key, text: shellRowText(n, width), tone: toneOf(n), ...(n.shell.running ? {} : { ended: true as const }) };
     const task = n.kind === 'task' ? ' (task)' : '';
     const text = `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task} · ${stateOf(n, now)}`;
     return { key: n.key, text: cutStep(text, width), tone: toneOf(n) };

@@ -102,10 +102,14 @@ export class Conversation {
   // buffer kept; emptied by /clear.
   readonly jobs = new Map<string, ShellJob>();
   private endedJobs: ShellJob[] = [];
-  // The jobs that have shown in the tree (kept ones; a probe has not), and the ended ones the
-  // person has not opened yet, by id: their rows stay until the person looks.
+  // The jobs that have shown in the tree (kept ones; a probe has not), and the ended ones
+  // nobody has read yet, by id: their rows stay until someone looks. The person's opening
+  // reads one; so does the model's request that carries the end of a job it started.
   private readonly shownJobSet = new WeakSet<ShellJob>();
   private readonly unreadJobs = new Set<string>();
+  // The ends of the model's jobs that have landed in the history and no request has carried
+  // yet, by job id (`endsSent`).
+  private readonly landedEnds = new Set<string>();
   // The last twenty children whose result came in here, as plain data; emptied by /clear.
   private ended: EndedChild[] = [];
   // A child's place in the host's schedule, set by `scheduleChild`: when its delay ends,
@@ -599,7 +603,7 @@ export class Conversation {
     // The questions asked of it get no answer; a clear or a stop of its parent stops the
     // children that asked, which says so itself, and an exit leaves them as a pending y/n is left.
     if (reason !== 'clear' && reason !== 'parent' && reason !== 'exit') this.settleAsksTo(this);
-    if (reason === 'clear') { this.ended = []; this.endedJobs = []; this.unreadJobs.clear(); }
+    if (reason === 'clear') { this.ended = []; this.endedJobs = []; this.unreadJobs.clear(); this.landedEnds.clear(); }
     // The children it started are stopped and a pending y/n declined first, so their
     // closing lines precede this conversation's own closing `end`.
     if (reason === 'clear' || reason === 'parent') this.stopChildren(by);
@@ -726,6 +730,16 @@ export class Conversation {
   // The person opened an ended job's output: its row leaves the tree.
   readJob(job: ShellJob): void {
     if (this.unreadJobs.delete(job.id)) this.treeChanged(this);
+  }
+  // A request to the model goes out with the history as it stands: the ends of the model's
+  // own jobs that landed in it are read, and their rows leave the tree. An end that has not
+  // landed, or landed after the last request, keeps its row.
+  endsSent(): void {
+    if (!this.landedEnds.size) return;
+    let changed = false;
+    for (const id of this.landedEnds) if (this.unreadJobs.delete(id)) changed = true;
+    this.landedEnds.clear();
+    if (changed) this.treeChanged(this);
   }
   // The person ends a job of this conversation (the tree's `y`, the leave question).
   killJob(job: ShellJob, by: JobKilledBy = 'person'): boolean {
@@ -969,7 +983,9 @@ export class Conversation {
     const by = job.status.state === 'killed' ? job.status.by : null;
     if (!this.isClosed) {
       this.endedJobs = [...this.endedJobs, job].slice(-MAX_ENDED_JOBS);
-      // Its row stays until the person opens it — unless the person ended it themselves.
+      // Its row stays until it is read — unless the person ended it themselves. The person
+      // reads it by opening it; the model, for a job it started, with the request that
+      // carries its end (`endsSent`).
       if (by !== 'person') this.unreadJobs.add(job.id);
       for (const id of [...this.unreadJobs]) if (!this.endedJobs.some((j) => j.id === id)) this.unreadJobs.delete(id);
     }
@@ -1577,6 +1593,10 @@ export class Conversation {
     const items = taken.map((i) => i.text);
     if (!items.length) return [];
     for (const i of this.inbox) if (i.kind === 'question' && i.askId && openAsks.has(i.askId)) this.readAsks.push(i.askId);
+    for (const i of this.inbox) {
+      const id = i.from.what === 'shell' ? i.job?.id : undefined;
+      if (id && this.jobById(id)?.by === 'model') this.landedEnds.add(id);
+    }
     this.inbox = [];
     this.clearInbox();
     const rows = keepLast ? taken.slice(0, -1) : taken;

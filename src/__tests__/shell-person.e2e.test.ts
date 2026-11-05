@@ -102,6 +102,7 @@ test('x on the row asks, y kills it (the end is a toast), n and Esc keep it', as
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
   await ui.press('down');
+  expect(frameOf(ui)).toContain('x stop');
   await ui.press('x');
   expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
   await ui.press('n');
@@ -136,6 +137,25 @@ test('a job that ends on its own tells the person and keeps an answered row; ope
   await ui.press('escape');
   await settleUntil(() => !rowWith(ui, '○ sh-1 ·').includes('exited 5'));
   expect(rowWith(ui, '○ sh-1 ·')).toBe('');
+  ui.app.unmount();
+});
+
+test('x on an ended row dismisses it with no question; the job stays in /agents', async () => {
+  const { ui } = await boot();
+  await ui.type('!');
+  await ui.type('echo bye; sleep 0.3; exit 5 &');
+  await ui.press('return');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 5'));
+  await ui.press('down');
+  await settleUntil(() => frameOf(ui).includes('x dismiss'));
+  expect(frameOf(ui)).toContain('x dismiss');
+  await ui.press('x');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
+  expect(frameOf(ui)).not.toContain('kill sh-1?');
+  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Agents'));
+  expect(frameOf(ui)).toContain('exited 5');
   ui.app.unmount();
 });
 

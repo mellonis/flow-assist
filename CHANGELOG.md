@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Background shells: the row of a shell the assistant started leaves once it has the end, and `x` dismisses an ended row.**
+  When a request to the assistant carries the end of a shell it started, its row leaves the tree; the
+  job stays in `/agents` with its output. A wake held back (the cap, another session on screen,
+  `ai.backgroundFollowUp: false`) keeps the row until your next message carries the end. The row of a
+  shell you started with `!cmd &` stays until you open or dismiss it. `x` on an ended row dismisses it
+  with no question, and the hint under the field says `x dismiss`; on a running row it still asks to
+  kill. The `run_command` and `shell_output` descriptions tell the assistant not to call `shell_output`
+  in a loop to wait for the end, which comes to it by itself and usually starts its next turn.
+
 - **Fix: commands started from the assistant see `NODE_ENV` as your shell has it.** The assistant sets
   `NODE_ENV=production` only while it loads its own modules (so React runs its faster build) and then
   puts your value back, an unset variable included. `!command`, `run_command`, background shells and
