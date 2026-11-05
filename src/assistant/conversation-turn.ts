@@ -20,6 +20,7 @@ import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
 import { findAgents, type PluginAgentSource } from './agent-find.js';
+import { agentKey } from './agent-trust.js';
 import { preloadSkills } from './agent-skills.js';
 import { findSkills, type FoundSkills } from './skill-find.js';
 import { skillsBlock, withLoadedSkills } from './skill-model.js';
@@ -88,8 +89,16 @@ export function agentStarterOf(c: Conversation): AgentStarter {
     cap: () => maxAutoOf(c.deps.config()),
     loaded: () => new Set(chatToolGroupOf().values()),
     labels: () => c.runningChildren().map((r) => r.label),
+    running: () => runningAgentKeys(c),
     preload: (names, agentId) => preloadSkills(names, agentId, skillsFinderOf(c)),
   };
+}
+
+// The identities of the agent files this conversation and every one above it run.
+export function runningAgentKeys(c: Conversation): Set<string> {
+  const keys = new Set<string>();
+  for (let a: Conversation | null = c; a; a = a.parent) if (a.agent) keys.add(agentKey({ path: a.agent.path, source: { kind: a.agent.source } }));
+  return keys;
 }
 
 // The skills as they are now: read at each call, nothing kept. One entry per conversation
@@ -106,7 +115,7 @@ export function skillsFinderOf(c: Conversation): () => FoundSkills {
 // `subagent` tool; read at each build of the prompt. '' with none.
 export function agentsNowOf(c: Conversation): string {
   if (turnShape(c.kind).withholdTools.includes('subagent')) return '';
-  try { return agentsBlock(agentStarterOf(c).found()); } catch { return ''; }
+  try { return agentsBlock(agentStarterOf(c).found(), undefined, runningAgentKeys(c)); } catch { return ''; }
 }
 
 // The skills the model may load, listed for every kind that has the core tools; read at

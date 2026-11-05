@@ -477,6 +477,11 @@ any task's does. A call that names an agent you have not started, an unknown par
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
 start it once yourself with `/subagent @<name>`.
 
+An agent never starts itself: the conversation running an agent file, and every conversation
+it started, leaves that file out of its list and has the `subagent` call for it refused, with
+a reply that says it already is that agent and should do the work itself. A child of one
+agent that runs another may start neither. The file is the same file whatever its name.
+
 ## Skills
 
 A skill is a directory of instructions the model loads into the current conversation when a

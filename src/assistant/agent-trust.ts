@@ -25,7 +25,8 @@ type Recorded = Pick<Agent, 'path' | 'source' | 'hash'>;
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const realOr = (p: string): string => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-const keyOf = (a: Recorded): string => `${a.source.kind}:${realOr(a.path)}`;
+// The identity of an agent file: its source and real path, whatever it is called.
+export const agentKey = (a: { path: string; source: { kind: string } }): string => `${a.source.kind}:${realOr(a.path)}`;
 
 function readRecord(): { unreadable: boolean; rec: AgentRecord } {
   let raw: string;
@@ -44,21 +45,21 @@ function readRecord(): { unreadable: boolean; rec: AgentRecord } {
 export function agentTrusted(agent: Recorded): boolean {
   if (agent.source.kind === 'plugin') return true;
   const { unreadable, rec } = readRecord();
-  return !unreadable && rec.files[keyOf(agent)] === agent.hash;
+  return !unreadable && rec.files[agentKey(agent)] === agent.hash;
 }
 
 // The same check as `agentTrusted` against one read of the record, for a caller that
 // asks about many agents at once.
 export function trustedNow(): (agent: Recorded) => boolean {
   const { unreadable, rec } = readRecord();
-  return (agent) => agent.source.kind === 'plugin' || (!unreadable && rec.files[keyOf(agent)] === agent.hash);
+  return (agent) => agent.source.kind === 'plugin' || (!unreadable && rec.files[agentKey(agent)] === agent.hash);
 }
 
 // A record exists for the file under another hash.
 export function agentChanged(agent: Recorded): boolean {
   if (agent.source.kind === 'plugin') return false;
   const { unreadable, rec } = readRecord();
-  const was = rec.files[keyOf(agent)];
+  const was = rec.files[agentKey(agent)];
   return !unreadable && was !== undefined && was !== agent.hash;
 }
 
@@ -85,7 +86,7 @@ function writeRecord(key: string, hash: string): boolean {
 // a plugin's file (no record), a process the model's command started, a failed write.
 export function recordAgentStart(agent: Recorded): boolean {
   if (agent.source.kind === 'plugin') return false;
-  return writeRecord(keyOf(agent), agent.hash);
+  return writeRecord(agentKey(agent), agent.hash);
 }
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;

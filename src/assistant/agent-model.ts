@@ -2,7 +2,7 @@
 // gave are checked against the file's parameters and every refusal is worded for the
 // model to read (never a question to the person). Also the block of the system prompt
 // that lists the agents it may start. Pure but for the trust record the check reads.
-import { agentTrusted, trustedNow } from './agent-trust.js';
+import { agentKey, agentTrusted, trustedNow } from './agent-trust.js';
 import { fillPrompt, paramsText } from './agent-file.js';
 import { resolveAgent, type FoundAgent, type FoundAgents } from './agent-find.js';
 import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
@@ -18,6 +18,9 @@ export interface AgentStarter {
   cap: () => AutoMode;
   loaded: () => ReadonlySet<string>;
   labels: () => string[];
+  // The identities (`agentKey`) of the agent files the asking conversation and every
+  // conversation above it run: none of them can be started again below. Absent: none.
+  running?: () => ReadonlySet<string>;
   // The agent's `skills:` resolved now (agent-skills.ts); absent: no skill can be preloaded.
   preload?: (names: readonly string[], agentId: string) => Preload;
 }
@@ -36,6 +39,9 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
   if (!hit.ok) return { ok: false, message: `subagent: ${hit.message}` };
   const agent = hit.agent;
   const id = agent.id;
+  if (starter.running?.().has(agentKey(agent))) {
+    return { ok: false, message: `subagent: you are already running @${id} (or you were started below it) — do this work yourself instead of starting it again` };
+  }
   if (!agentTrusted(agent)) return { ok: false, message: `subagent: @${id} is not trusted here — ask the person to start @${id} once` };
   if (call.args !== undefined && !isMap(call.args)) return { ok: false, message: `subagent: args must be an object of parameter values for @${id}` };
   const given = (call.args ?? {}) as Record<string, unknown>;
@@ -82,9 +88,10 @@ const lineOf = (a: FoundAgent): string => {
   return `@${a.id} — ${clip(a.description)}${params}`;
 };
 
-// The system prompt's list of the agents the model may start: the trusted ones only, at
-// most twenty. '' when there is none.
-export function agentsBlock(found: Pick<FoundAgents, 'agents'>, trusted: (a: FoundAgent) => boolean = trustedNow()): string {
-  const lines = found.agents.filter(trusted).slice(0, AGENTS_LISTED_MAX).map(lineOf);
+// The system prompt's list of the agents the model may start: the trusted ones only, minus
+// the ones its own chain runs (`running`, agent identities), at most twenty. '' when there
+// is none.
+export function agentsBlock(found: Pick<FoundAgents, 'agents'>, trusted: (a: FoundAgent) => boolean = trustedNow(), running: ReadonlySet<string> = new Set()): string {
+  const lines = found.agents.filter((a) => trusted(a) && !running.has(agentKey(a))).slice(0, AGENTS_LISTED_MAX).map(lineOf);
   return lines.length ? ['Agents you can start by name with the subagent tool (agent, args):', ...lines].join('\n') : '';
 }

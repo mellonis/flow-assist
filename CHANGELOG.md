@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **An agent never starts itself.** The conversation running an agent file, and every conversation
+  below it, leaves that file out of the agents the assistant may start, and the `subagent` call for it
+  is refused with a reply that says it already is that agent and should do the work itself. The
+  check is by the file (its source and real path), so a child of one agent that runs another may start
+  neither.
+
 - **Background shells: the row of a shell the assistant started leaves once it has the end, and `x` dismisses an ended row.**
   When a request to the assistant carries the end of a shell it started, its row leaves the tree; the
   job stays in `/agents` with its output. A wake held back (the cap, another session on screen,

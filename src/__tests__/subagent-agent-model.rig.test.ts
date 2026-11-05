@@ -288,3 +288,47 @@ test('a kind that is not offered the subagent tool gets no block', async () => {
   expect(systemOf(model.requests[0]!)).not.toContain(BLOCK);
   expect(toolNames(model.requests[0]!)).not.toContain('subagent');
 });
+
+// ── an agent never starts itself
+const toolAnswer = (req: { messages: { role: string; content?: unknown }[] }): string => String(req.messages.filter((m) => m.role === 'tool').at(-1)?.content ?? '');
+
+test('a conversation running an agent does not list it, and its subagent call for it is refused for the model', async () => {
+  const { model, child, rig } = rigFor('GO-X');
+  project(rig, 'x', doc('', 'GO-X go', 'The X agent'));
+  project(rig, 'other', doc('', 'GO-O go', 'The other agent'));
+  child.script([{ tool: 'subagent', args: { agent: '@x' } }], [{ text: 'ok' }]);
+  await call(rig, model, { agent: '@x' });
+  await rig.until(() => child.requests.length === 2);
+  await childDone(rig);
+  expect(systemOf(child.requests[0]!)).not.toContain('@x — ');
+  expect(systemOf(child.requests[0]!)).toContain('@other — The other agent');
+  expect(toolAnswer(child.requests[1]!)).toContain('you are already running @x');
+  expect(rig.journal().filter((e) => e.t === 'task-start').map((e) => e.label)).toEqual(['x']);
+  // The session still lists and starts it.
+  expect(systemOf(model.requests[0]!)).toContain('@x — The X agent');
+});
+
+test('a child of X running Y may start neither X nor Y', async () => {
+  const model = new ScriptedModel();
+  const x = model.when((req) => firstUser(req).includes('GO-X'));
+  const y = model.when((req) => firstUser(req).includes('GO-Y'));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false, subagentDepth: 3 } });
+  project(rig, 'x', doc('', 'GO-X go', 'The X agent'));
+  project(rig, 'y', doc('', 'GO-Y go', 'The Y agent'));
+  project(rig, 'z', doc('', 'GO-Z go', 'The Z agent'));
+  x.script([{ tool: 'subagent', args: { agent: '@y' } }], [{ hold: true }, { text: 'x done' }]);
+  y.script([{ tool: 'subagent', args: { agent: '@x' } }, { tool: 'subagent', args: { agent: '@y' } }], [{ text: 'y done' }]);
+  model.script([{ tool: 'subagent', args: { agent: '@x' } }], [{ text: 'Noted.' }]);
+  await rig.conv.send('go');
+  await rig.idle();
+  await rig.until(() => y.requests.length === 2);
+  const sys = systemOf(y.requests[0]!);
+  expect(sys).not.toContain('@x — ');
+  expect(sys).not.toContain('@y — ');
+  expect(sys).toContain('@z — The Z agent');
+  const answers = y.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => String(m.content));
+  expect(answers[0]).toContain('you are already running @x');
+  expect(answers[1]).toContain('you are already running @y');
+  x.release();
+  await childDone(rig);
+});

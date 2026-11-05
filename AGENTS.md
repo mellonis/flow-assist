@@ -1041,7 +1041,11 @@ the resolve message, `@id is not trusted here — ask the person to start @id on
 `write: true` (each write asks the person), the file's tool groups and the capped auto
 mode. The system prompt of every kind that is offered `subagent` ends with a list of
 the agents the model may start (`agentsBlock`: `@id — description (params)`, only those
-`agentTrusted`, at most twenty, read at each build of the prompt).
+`agentTrusted`, at most twenty, read at each build of the prompt). An agent never starts
+itself: `runningAgentKeys` (`conversation-turn.ts`) collects the `agentKey` (source and real
+path) of the `agent` of the conversation and of every `parent` above it; `agentsBlock` leaves
+those out and `planAgentStart` refuses them (`AgentStarter.running`) with a reply worded for
+the model: it already is that agent, so it does the work itself.
 **`skill(name, file?)` loads a skill** (`skillToolResult`, `src/assistant/skill-model.ts`;
 `ctx.skills`, which `conversation-turn.ts` builds per call as `skillsFinderOf`). It reads the
 skill's directory afresh (`loadSkillFresh`: one walk, every file read once, the body and the hash
