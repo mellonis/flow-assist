@@ -142,3 +142,14 @@ test('config set completes an enum value from the schema, and a boolean one', ()
   expect(completeCommand('config set ai.toolLoading o', BASE_COMMANDS, {})).toMatchObject({ best: 'onDemand' });
   expect(completeCommand('config set ai.stream ', BASE_COMMANDS, {}).candidates).toEqual(['true', 'false']);
 });
+
+test('an enum key that is set still completes its values from the schema', () => {
+  expect(completeCommand('config set agents.maxAuto ', BASE_COMMANDS, { agents: { maxAuto: 'ask' } }).candidates).toEqual(['all', 'ask', 'reads']);
+  expect(completeCommand('config set ai.toolLoading ', BASE_COMMANDS, { ai: { toolLoading: 'all' } }).candidates).toEqual(['all', 'onDemand']);
+});
+
+test('a group of the host schema completes one segment deeper at its parent\'s dot', () => {
+  const c = completeCommand('config set ai.', BASE_COMMANDS, {}).candidates;
+  expect(c).toEqual(expect.arrayContaining(['ai.thinking', 'ai.autoCompact', 'ai.images', 'ai.recall', 'ai.taskRounds']));
+  expect(c).not.toContain('ai.thinking.adaptive');
+});

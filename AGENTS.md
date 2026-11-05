@@ -1290,7 +1290,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   `takeInbox` and only for a job with `by: 'model'` delivered to a session or to a subagent that
   stays: `mayWake()` needs `wakeRun < MAX_WAKES` (3), the session above (`homeSession()`, the
   conversation itself for a session) not headless, and the host's shown conversation to be that
-  session, so a left session's subagent sleeps with it; the inbox holds
+  session, so a left session's subagent sleeps with it, as it does while the session has a question or
+  y/n drawn. A shell end is a `result` item with `from.what: 'shell'`; `readsChildResult` leaves it out, so
+  the answer of the turn it woke stays in the subagent (`markAnswered`) instead of going up; the inbox holds
   (`inboxHeld`: busy, y/n, question, queue) and a headless conversation starts no inbox turn
   at all. A woken turn is the ordinary `send(…, {fromInbox: true})`, so it runs under the
   conversation's own auto mode and round cap; it counts `wakeRun++`, adds a `note` row and the

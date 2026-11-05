@@ -55,7 +55,7 @@ async function resting(ai: Record<string, unknown> = {}, scripts: { text: string
   const child = scheduled(rig, spec('stayer', 'stay'));
   await answered(rig, child);
   await rig.idle();
-  return { model: sub, rig, child };
+  return { model: sub, all: model, rig, child };
 }
 const requestsOf = (sub: { requests: unknown[] }) => sub.requests.length;
 
@@ -93,7 +93,7 @@ test('ai.backgroundFollowUp: false keeps it asleep with the end in its rows', as
   expect(requestsOf(model)).toBe(before);
 });
 
-test('a drawn question keeps it asleep; the end is read when the question is answered', async () => {
+test('a question drawn in the subagent keeps it asleep, the end waiting in its inbox', async () => {
   const { model, rig, child } = await resting();
   const before = requestsOf(model);
   void child.askUser([{ question: 'which?', header: 'h', options: [] }]);
@@ -122,7 +122,7 @@ test(`after ${MAX_WAKES} woken turns in a row the next end only lands`, async ()
   await settle();
   expect(requestsOf(model)).toBe(before);
   expect(seen.map((s) => s.woke)).toEqual([true, true, true, false]);
-  expect(child.inbox.some((i) => i.from.what === 'shell') || bgRows(child).some((r) => r.includes('echo over'))).toBe(true);
+  expect(bgRows(child).some((r) => r.includes('echo over'))).toBe(true);
 });
 
 test('a subagent under a session the chat has left sleeps with it', async () => {
@@ -133,6 +133,10 @@ test('a subagent under a session the chat has left sleeps with it', async () => 
   await j.wait(5000);
   await settle();
   expect(requestsOf(model)).toBe(before);
+  // The end is read with the subagent's next turn.
+  child.resume?.('go on');
+  await rig.until(() => requestsOf(model) === before + 1, 5_000);
+  expect(JSON.stringify(model.requests.at(-1)!.messages)).toContain('<shell-end');
 });
 
 test('a subagent under a session that is not the one on screen sleeps, though the chat has not left it', async () => {
@@ -147,7 +151,7 @@ test('a subagent under a session that is not the one on screen sleeps, though th
   other.close('exit');
 });
 
-test('the end of a job of a subagent the model started is not a wake item, and a task\'s neither', async () => {
+test('the end of a job of a subagent the model started is not a wake item', async () => {
   const model = new ScriptedModel();
   const hold = subScript(model, 'by model');
   hold.script([{ hold: true }, { text: 'done' }]);
@@ -160,4 +164,29 @@ test('the end of a job of a subagent the model started is not a wake item, and a
   expect(sub.staying).toBe(false);
   expect(sub.inbox.filter((i) => i.from.what === 'shell').map((i) => i.wake === true)).toEqual([false]);
   hold.release();
+});
+
+test('the answer of a turn the subagent\'s own shell woke stays with the subagent: the session takes no turn, the row reads answered', async () => {
+  const { model, all, rig, child } = await resting({}, [[{ text: 'Seen.' }]]);
+  const before = requestsOf(model);
+  const sessionTurns = () => all.requests.length - model.requests.length;
+  const sessionBefore = sessionTurns();
+  job(child, 'echo built');
+  await rig.until(() => requestsOf(model) === before + 1, 5_000);
+  await answered(rig, child);
+  await settle();
+  expect(sessionTurns()).toBe(sessionBefore);
+  expect(rig.conv.runningChildren()).toMatchObject([{ label: 'stayer', status: 'idle', answered: true }]);
+  expect(bgRows(rig.conv)).toEqual(['stayer finished:\nfirst']);
+});
+
+test('a question drawn in the session above keeps a subagent asleep', async () => {
+  const { model, rig, child } = await resting();
+  const before = requestsOf(model);
+  void rig.conv.askUser([{ question: 'which?', header: 'h', options: [] }]);
+  expect(rig.conv.question).not.toBeNull();
+  const j = job(child, 'echo meanwhile');
+  await j.wait(3000);
+  await settle();
+  expect(requestsOf(model)).toBe(before);
 });

@@ -1642,6 +1642,8 @@ export class Conversation {
     if ((this.kind !== 'session' && !this.staying) || this.wakeRun >= MAX_WAKES) return false;
     const home = this.homeSession();
     if (home.headless) return false;
+    // A question or y/n drawn in the session above holds a subagent's wake too.
+    if (this !== home && (home.question || home.confirm)) return false;
     const shown = home.deps.current?.();
     return !shown || shown === home;
   }
@@ -1684,7 +1686,7 @@ export class Conversation {
     // until the person writes, and the person is told. At the cap the end only lands, and
     // the person is told that instead.
     const woken = turn && this.inbox.filter(starts).every((i) => i.from.what === 'shell');
-    const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.headless && this.wakeCapped();
+    const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.homeSession().headless && this.wakeCapped();
     if (woken || capped) {
       const names = shellEnds.map((i) => i.from.label).join(', ');
       for (const i of shellEnds) {
@@ -1708,7 +1710,7 @@ export class Conversation {
     }
     if (woken) this.wakeRun++;
     if (!turn) { this.landInbox(); this.settleReadAsks(); return false; }
-    const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
+    const readResult = this.inbox.some(readsChildResult);
     const last = this.landInbox(true).at(-1)!;
     const options: SendOptions = { fromInbox: true, framed: last.framed };
     if (this.staying && this.resume) {
@@ -1721,7 +1723,7 @@ export class Conversation {
   // The person's message starts a turn of a subagent: what waits in the inbox lands as
   // rows just ahead of it, and the turn reads them with it. true when a result landed.
   landInboxAhead(): boolean {
-    const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
+    const readResult = this.inbox.some(readsChildResult);
     this.landInbox();
     return readResult;
   }
@@ -1986,6 +1988,11 @@ export class Conversation {
 // Who takes the result of a child that `from` started: the first conversation from `from`
 // upward that is open and either a session or a subagent that stays. A task is passed
 // over: it ends after its answer, and its inbox goes with it. null when none is left.
+// An inbox item that makes the turn reading it answer up: a child's result. The end of
+// the conversation's own shell is not one; the answer to a turn it woke stays here, for
+// the person.
+const readsChildResult = (i: InboxItem): boolean => i.kind === 'result' && !i.quiet && i.from.what !== 'shell';
+
 export function resultRecipient<T extends { parent: T | null | undefined; closed: boolean; staying: boolean }>(from: T | null | undefined): T | null {
   for (let c = from; c; c = c.parent) if (!c.closed && (!c.parent || c.staying)) return c;
   return null;

@@ -157,13 +157,14 @@ export function flattenConfigPaths(obj: unknown, prefix = ''): { path: string; v
 // on/off separately, so for config we keep true/false).
 export function configValueOptions(node: unknown): string[] {
   if (node && typeof node === 'object') {
-    if ('value' in node) node = (node as { value: unknown }).value;
-    else if ('schema' in node) {
+    // A key in the config keeps its schema node beside the value: the schema decides first.
+    if ('schema' in node && (node as { schema: unknown }).schema) {
       const t = schemaType((node as { schema: unknown }).schema);
       if (t === 'boolean') return ['true', 'false'];
       if (t === 'enum') return [...(unwrapSchema((node as { schema: unknown }).schema).options ?? [])].map(String);
-      return [];
     }
+    if ('value' in node) node = (node as { value: unknown }).value;
+    else return [];
   }
   if (typeof node === 'boolean') return ['true', 'false'];
   return [];
@@ -279,15 +280,16 @@ function configPaths(config?: unknown, configSchema: any = hostConfigSchema): { 
   for (const n of hostSchemaPaths(configSchema)) nodes.set(n.path, n);
   for (const n of pluginSchemaPaths(configSchema)) nodes.set(n.path, n);
   for (const { path, value } of flattenConfigPaths(config ?? {})) {
-    nodes.set(path, { path, value });
+    nodes.set(path, { path, value, schema: nodes.get(path)?.schema });
   }
   return [...nodes.values()];
 }
 
-// Every leaf of the host schema, so a key completes before it is set: the object
-// nodes are walked through their optional, default, nullable and partial wrappers; a
-// record, a passthrough or any other node ends the walk at its own path, offering the
-// keys the schema names and no more.
+// Every node of the host schema, groups and leaves, so a key completes before it is set
+// and a group shows one segment deeper at its parent's dot: the object nodes are walked
+// through their optional, default, nullable and partial wrappers; a record, a
+// passthrough or any other node ends the walk at its own path, offering the keys the
+// schema names and no more.
 function hostSchemaPaths(configSchema: any, prefix = ''): { path: string; schema: unknown }[] {
   const shape = configSchema?.shape;
   if (!shape) return [];
@@ -295,8 +297,8 @@ function hostSchemaPaths(configSchema: any, prefix = ''): { path: string; schema
   for (const [key, node] of Object.entries(shape) as [string, any][]) {
     const path = prefix ? `${prefix}.${key}` : key;
     const inner = unwrapSchema(node);
+    out.push({ path, schema: node });
     if (inner?.type === 'object' && inner.shape) out.push(...hostSchemaPaths(inner, path));
-    else out.push({ path, schema: node });
   }
   return out;
 }
