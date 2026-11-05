@@ -319,19 +319,19 @@ test('the description says when to use background and when not', () => {
   expect(d).toContain('shell_output');
   expect(d).toContain('shell_kill');
   expect(d).toContain('usually starts your next turn when you are idle (unless the person turned that off with ai.backgroundFollowUp)');
-  expect(d).toContain('In the main chat the end comes to you by itself');
+  expect(d).toContain('In the main chat, and in a subagent the person started, the end comes to you by itself');
   expect(d).toContain('do not call shell_output in a loop to wait for it');
-  expect(d).toContain('Running as a subagent or a task, nothing wakes you and your shells end with your run: run a command whose result you need in the foreground');
+  expect(d).toContain('Running as a task, or as a subagent the model started, nothing wakes you and your shells end with your run: run a command whose result you need in the foreground');
 });
 
 test('the background parameter and shell_output say not to poll for the end', () => {
   const byName = Object.fromEntries(shellTools({}).tools.map((t) => [t.function.name, t.function]));
   const param = (byName.run_command!.parameters as { properties: { background: { description: string } } }).properties.background.description;
-  expect(param).toContain('In the main chat its end comes to you by itself');
-  expect(param).toContain('as a subagent or a task nothing wakes you and it ends with your run');
+  expect(param).toContain('In the main chat, and in a subagent the person started, its end comes to you by itself');
+  expect(param).toContain('as a task or a subagent the model started nothing wakes you and it ends with your run');
   const out = byName.shell_output!.description;
-  expect(out).toContain('In the main chat the end comes to you by itself');
-  expect(out).toContain('as a subagent or a task nothing wakes you');
+  expect(out).toContain('In the main chat, and in a subagent the person started, the end comes to you by itself');
+  expect(out).toContain('as a task or a subagent the model started nothing wakes you');
   expect(byName.shell_output!.description).toContain('once, with grep or tail');
 });
 

@@ -1030,7 +1030,7 @@ export class Conversation {
     const quiet = killedBy !== null && killedBy !== 'signal';
     to.deliver({
       kind: 'result', from: { key: job.id, label: job.id, what: 'shell' }, text: jobEndText(job), quiet,
-      wake: job.by === 'model' && to.kind === 'session', job: { id: job.id, command: job.command },
+      wake: job.by === 'model' && (to.kind === 'session' || to.staying), job: { id: job.id, command: job.command },
     });
   }
   // The last twenty jobs that ended here, oldest first.
@@ -1626,15 +1626,29 @@ export class Conversation {
   // The woken turns since the person last wrote: a background shell the model started
   // ended while it was idle, and the end started a turn by itself.
   private wakeRun = 0;
+  // The session a conversation belongs to: itself, or the one above a subagent.
+  private homeSession(): Conversation {
+    let c: Conversation = this;
+    while (c.parent) c = c.parent;
+    return c;
+  }
   // May the end of a shell the model started start a turn of the model by itself? Only a
   // session the chat shows (the host's one on screen; a left, headless one waits for the
-  // person — `takeInbox` starts no turn for it at all), idle and with no question drawn
+  // person — `takeInbox` starts no turn for it at all), or a subagent that stays under
+  // one, which sleeps with its session when that is left; idle and with no question drawn
   // (`inboxHeld`, checked by the caller), and no more than MAX_WAKES times in a row without
   // a message from the person.
   private mayWake(): boolean {
-    if (this.kind !== 'session' || this.wakeRun >= MAX_WAKES) return false;
-    const shown = this.deps.current?.();
-    return !shown || shown === this;
+    if ((this.kind !== 'session' && !this.staying) || this.wakeRun >= MAX_WAKES) return false;
+    const home = this.homeSession();
+    if (home.headless) return false;
+    const shown = home.deps.current?.();
+    return !shown || shown === home;
+  }
+  // Whether the cap of woken turns, not a left session, is what keeps this conversation's
+  // model from being woken by the end of its shell.
+  private wakeCapped(): boolean {
+    return (this.kind === 'session' || this.staying) && this.wakeRun >= MAX_WAKES;
   }
   // A line in the list and the journal that is neither the person's nor the model's.
   private noteRow(text: string): void {
@@ -1670,7 +1684,7 @@ export class Conversation {
     // until the person writes, and the person is told. At the cap the end only lands, and
     // the person is told that instead.
     const woken = turn && this.inbox.filter(starts).every((i) => i.from.what === 'shell');
-    const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.headless && this.kind === 'session' && this.wakeRun >= MAX_WAKES;
+    const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.headless && this.wakeCapped();
     if (woken || capped) {
       const names = shellEnds.map((i) => i.from.label).join(', ');
       for (const i of shellEnds) {
@@ -1686,8 +1700,8 @@ export class Conversation {
           if (!endTold) this.toldWake.add(id);
         } catch { /* a toast is never fatal */ }
       }
-      const away = this.deps.current?.();
-      const why = away && away !== this ? ` and this is not the session on screen` : '';
+      const away = this.homeSession().deps.current?.();
+      const why = away && away !== this.homeSession() ? ` and this is not the session on screen` : '';
       this.noteRow(woken
         ? `${names} ended — waking the model`
         : `${names} ended — the model has been woken ${MAX_WAKES} times in a row without a message from you${why}, so it reads this with your next message`);

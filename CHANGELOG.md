@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A subagent you started is woken by the end of its own background shell.** Like a session, it
+  starts a turn when a shell its model started ends, while it is idle with no question drawn, under the
+  session on screen, in its own auto mode and round cap, at most three times in a row without a
+  message from you, and unless `ai.backgroundFollowUp` is false. A task, and a subagent the
+  assistant started, are not woken: their shells end with their run. The `run_command` and
+  `shell_output` descriptions say so.
+
 - **An agent never starts itself.** The conversation running an agent file, and every conversation
   below it, leaves that file out of the agents the assistant may start, and the `subagent` call for it
   is refused with a reply that says it already is that agent and should do the work itself. The

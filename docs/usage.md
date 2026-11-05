@@ -823,7 +823,8 @@ stopped, ends quiet. The end of a shell the assistant started can also start a t
 so it reports without waiting for you. It does that only when
 
 - the conversation is idle, no question or y/n is drawn, no message of yours is queued, and it is
-  the session on screen (a session you left keeps the end for its next turn);
+  the session on screen, or a subagent you started under it (a session you left, and the subagents
+  under it, keep the end for the next turn);
 - the end is of a shell the assistant started, that ended on its own or by a signal nobody here
   sent (one you started with `&` never wakes it);
 - the turn runs under the conversation's own auto mode and round cap, so its writes still ask;
@@ -834,8 +835,9 @@ so it reports without waiting for you. It does that only when
 are read with your next message.
 
 The toast says when the assistant was woken, and by which shell. A subagent's shell reports to
-that subagent: one that stays reads it in its next turn, one that does not stay never reads it
-(the toast tells you).
+that subagent: one that stays (one you started) is woken by it on the same terms as a session,
+and otherwise reads it in its next turn; a task, and a subagent the assistant started, never read
+it and their shells end with their run (the toast tells you).
 
 **The row.** Shells stand in the tree under the field beside subagents:
 `○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
