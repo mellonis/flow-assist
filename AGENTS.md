@@ -2874,7 +2874,7 @@ untouched the list is a hint and Enter is the line's own, so `:clear` runs besid
 `clear-cache`; with it closed, ↑/↓ are the history and Esc closes the line. While a
 turn or a `!command` runs, the chat's Esc closes the list and also stops the run, on
 the first press. A detail is drawn through `redactSecrets`, and a config key's value
-goes through `shownValue` (masked at a secret-looking key), as `config get` shows it.
+goes through `shownValue` (masked at a secret-looking key), as the config-change lines show it.
 The logic is pure — `lineView` / `lineTab` / `openList` / `listKey` — and the drawing
 and the keys both go through the one `completeLine`. The list's state (`ListState`:
 selection, Esc, height) sits beside `walk` in the line's state, keyed on the text it

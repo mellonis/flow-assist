@@ -157,7 +157,7 @@ command's description, a config key's value (or its default) and meaning, an age
 description with `recorded`, `unrecorded` or `changed since recorded`, a skill's
 description, a session's title. A directory ends in `/`. A long detail is cut to the
 width, and a value at a secret-looking key (a token, a key, a header) is shown masked,
-as `config get` shows it.
+as the config-change lines show it.
 
 | Key | With the list open |
 | --- | --- |
