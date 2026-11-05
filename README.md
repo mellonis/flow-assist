@@ -73,7 +73,9 @@ inside a compiled binary a plugin cannot import a package from disk, so a plugin
 with dependencies bundles them into its `main` (docs/plugins.md, "Shipping it").
 `bun src/cli.ts` — or the `flow-assist` command, whose shebang runs it under Bun —
 works as well. Both run React's production build, unless `NODE_ENV` is set to
-something else; the binary is built with it and always does.
+something else; the binary is built with it and always does. The variable is set only
+while the program loads: commands started from the assistant see your own `NODE_ENV`,
+or none.
 
 ## Repository
 

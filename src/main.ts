@@ -4,7 +4,7 @@
 // the plugin repo, any other argv → a one-shot `<prompt>`: one headless conversation
 // (src/assistant/oneshot.ts), and `--help`/`--version`.
 //
-// The program's entry point is `cli.ts`, which sets NODE_ENV before importing this
+// The program's entry point is `cli.ts`, which sets NODE_ENV only while it imports this
 // module (see there); this one is never run directly, so a test imports its pure
 // helpers without starting anything. The heavy lifting (config, plugins, registry,
 // TUI, agent) lives in the modules below; here they are only wired together.

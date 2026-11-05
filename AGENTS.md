@@ -55,13 +55,17 @@ past incident may motivate a rule; keep the rule, drop the incident.
 - **The entry is `src/cli.ts`, the CLI is `src/main.ts`, and React runs its
   PRODUCTION build.** React and the reconciler inside `@flowtty/react` pick their
   build by `NODE_ENV` when first loaded, and Bun leaves it unset — so the app ran the
-  development build, about twice as slow per scroll step. `cli.ts` sets
-  `NODE_ENV ??= 'production'` (`defaultToProduction`, `src/node-env.ts`: a value
-  already set wins — `test` under `bun test`, a person's `development`) and only THEN
-  imports `main.ts` dynamically; a static import would be evaluated before the
-  assignment. So nothing imports `cli.ts` (it runs the program) and `main.ts` is never
+  development build, about twice as slow per scroll step. `cli.ts` imports `main.ts`
+  dynamically through `withProductionDefault` (`src/node-env.ts`): `NODE_ENV` is
+  `production` only while the modules load, when the person had none (a value already
+  set wins — `test` under `bun test`, a person's `development`), and is then put back
+  as the person had it, an unset variable unset again, so every command the program
+  starts inherits the person's own value (`npm install` keeps devDependencies); a
+  static import would be evaluated before the assignment. So nothing imports `cli.ts` (it runs the program) and `main.ts` is never
   run directly; tests import `main.ts`. The compiled binary is settled at build time:
-  `build:binary` passes `--define process.env.NODE_ENV="production"`, and the bundle
+  `build:binary` passes `--define process.env.NODE_ENV="production"` (it rewrites the
+  literal text only; the environment passed to `withProductionDefault` is an object, so
+  the binary sets and restores the variable at run time too), and the bundle
   holds no development React at all (`bun run test:binary` builds it and checks —
   skipped by the regular `bun test`, as it compiles a ~60 MB binary; run it before
   building a release) — a

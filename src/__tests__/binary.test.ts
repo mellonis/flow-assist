@@ -13,6 +13,12 @@ describe('distribution', () => {
     expect(src.startsWith('#!/usr/bin/env bun')).toBe(true);
   });
 
+  it('src/cli.ts loads main.js through withProductionDefault and never assigns NODE_ENV itself', () => {
+    const src = readFileSync('src/cli.ts', 'utf8');
+    expect(src).toMatch(/await withProductionDefault\(process\.env, \(\) => import\('\.\/main\.js'\)\)/);
+    expect(src).not.toMatch(/NODE_ENV\s*(\?\?)?=[^=]/);
+  });
+
   it('bun src/cli.ts --version prints the host version and exits 0', () => {
     expect(execSync('bun src/cli.ts --version', { encoding: 'utf8' }).trim()).toBe(JSON.parse(readFileSync('package.json', 'utf8')).version);
   });
