@@ -3156,7 +3156,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`src/assistant/host-deps.ts`), which reads the host's services when a member is
   called; `canAsk` is always said. What a turn is handed that differs by kind is
   `turnShape` (`conversation-turn.ts`), a table with a row per kind; the `task` row hands the
-  worker prompt (plus the project block) as the system prompt, twelve rounds, no screen tail,
+  worker prompt (plus the project block) as the system prompt, `ai.taskRounds` rounds (12 by default), no screen tail,
   round boundary, recall, `ask_user` or images, and withholds `ask_user` and `answer_child` from its tool list. The `subagent` row
   hands the same worker prompt with the person's prompt framed as `The person's task:`,
   then the memory block and the language directive (read once for the message) and,
@@ -3313,7 +3313,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `N in background` is `backgroundCount()`, over every conversation of the registry, so
   it counts the tasks of a session left by `/new` too (`/clear` stops the cleared
   session's own). A task's result says `stopped after N rounds — last: …` when its
-  twelve rounds ran out, and a `failed` end is reported as a failure (`⚠ <label> failed:
+  the `ai.taskRounds` rounds ran out, and a `failed` end is reported as a failure (`⚠ <label> failed:
   …`). A child the person stopped (`stopSubtree`, below) says so in one line, `■ <label>
   stopped`, and never also a `done` or `failed` toast; one stopped with its conversation
   or at exit (`stoppedWithParent`) is named only by the log, `[bg] <label> stopped with
@@ -3328,7 +3328,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
   `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy `always-no` — or `ask`
   for a subagent the person starts and for any spec with `write: true` (the `subagent` tool's
-  `write` argument starts a `task` with it: twelve rounds, the worker prompt, its y/n
+  `write` argument starts a `task` with it: `ai.taskRounds` rounds, the worker prompt, its y/n
   offered to the session like a subagent's — `write` absent or false is `always-no`), where the host's
   root can ask at all (`canAsk`; with nobody to ask such a child declines) and the starter
   can: a session, or a child that asks itself. A child that cannot ask cannot start one

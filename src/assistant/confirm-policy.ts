@@ -18,15 +18,18 @@ export function parkedAt(): number {
   return lastAt;
 }
 
-// What a write declined by `always-no` tells the model: the task was started read-only, so
-// the decline is its kind, not the person's no.
+// What a write declined by `always-no` tells the model, by the reason the policy carries:
+// the task was started read-only (the decline is its kind, not the person's no), or it may
+// write but nobody here can confirm a write.
 export const READ_ONLY_TASK_DECLINE = 'This write was declined: this task was started read-only, so it may not write or run commands, whatever you try. The conversation that started it can start it again with write: true (each write then waits for the person\'s yes), or start an agent file, if the job must change something. Report what you found and what you would have changed.';
+
+export const CANNOT_ASK_DECLINE = 'This write was declined: nobody can confirm a write here, so it did not run and nothing was changed. Report what you found and what you would have changed.';
 
 export type ConfirmWrite = NonNullable<AgentOpts['confirmWrite']>;
 
 export type ConfirmPolicy =
   | { kind: 'ask' }                                            // the auto mode first, then a y/n the person answers in the chat
-  | { kind: 'always-no' }                                      // every write declined, journaled `by: 'background'`: the policy of a background task's conversation
+  | { kind: 'always-no'; reason?: 'read-only' | 'cannot-ask' }                                      // every write declined, journaled `by: 'background'`: the policy of a background task's conversation
   | { kind: 'none' }                                           // nobody to ask: no confirmWrite at all, so agentChat declines before the call starts
   | { kind: 'allow-writes'; say: (line: string) => void }      // `--allow-writes`: what the auto mode may answer with `shell.autoRun` on, each write said
   | { kind: 'caller'; confirm: ConfirmWrite };                 // a plugin tool's own confirmation, journaled `by: 'plugin'`

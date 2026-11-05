@@ -245,6 +245,35 @@ test('a write declined in a task started read-only tells the model so', async ()
   expect(told).not.toContain('must explicitly confirm');
 });
 
+const toolTexts = (model: ScriptedModel) => model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n');
+
+test('the person\'s own no in a task started with write: true keeps the plain decline, not the read-only text', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'declined' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const { run } = startFrom(rig, { ...spec('w', 'make a file'), write: true });
+  const done = run();
+  await rig.until(() => rig.conv.offered() !== null);
+  rig.conv.offered()!.owner.answerConfirm(false);
+  await done;
+  const told = toolTexts(model);
+  expect(told).toContain('the user must explicitly confirm');
+  expect(told).not.toContain('read-only');
+  expect(told).not.toContain('nobody can confirm');
+});
+
+test('a write: true task in a host that cannot ask says nobody can confirm, not that it was started read-only', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, canAsk: false, policy: { kind: 'none' } });
+  const { run } = startFrom(rig, { ...spec('w', 'make a file'), write: true });
+  await run();
+  const told = toolTexts(model);
+  expect(told).toContain('nobody can confirm a write here');
+  expect(told).not.toContain('started read-only');
+  expect(told).not.toContain('write: true');
+});
+
 test('`deliver` on a closed conversation lands nothing', async () => {
   const model = new ScriptedModel();
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });

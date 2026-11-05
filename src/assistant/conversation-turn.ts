@@ -5,7 +5,7 @@ import path from 'node:path';
 import { taskRoundsOf, transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
 import type { AskQuestion } from './ask.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from './compaction.js';
-import { READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from './confirm-policy.js';
+import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from './confirm-policy.js';
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
@@ -422,7 +422,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         agentStarter: agentStarterOf(c),
         skills: skillsFinderOf(c),
       },
-      ...(c.policy.kind === 'always-no' ? { declinedText: READ_ONLY_TASK_DECLINE } : {}),
+      ...(c.policy.kind === 'always-no' && c.policy.reason ? { declinedText: c.policy.reason === 'read-only' ? READ_ONLY_TASK_DECLINE : CANNOT_ASK_DECLINE } : {}),
       // A subagent with a file of its own writes its y/n lines there untagged, like its
       // calls; one without a home tags them for the journal above.
       confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : c.kind === 'subagent' && !c.subJournalId ? { subagent: c.label } : {}) }),

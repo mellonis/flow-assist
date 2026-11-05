@@ -786,8 +786,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       case 'subagent': {
         // Offload a self-contained task to a CHILD conversation of the one whose turn
         // called this (AGENTS.md, "A conversation starts a child of its own"): its own
-        // plan, shell, tool set and abort, no recall, twelve rounds. Every write is declined
-        // unless `write: true`: then each one asks the person, in the chat that started it. The tool answers at once; when the task ends its result
+        // plan, shell, tool set and abort, no recall, `ai.taskRounds` rounds. Every write is declined
+        // unless `write: true`: then each one asks the person, in the chat that started it.
+        // The tool answers at once; when the task ends its result
         // goes into the inbox of the nearest session or subagent above it (`run()` delivers it),
         // and the tool says so in the toast and the log line.
         const agentName = String(args.agent ?? '').trim();

@@ -41,7 +41,8 @@
 // `web_fetch` and `config_set` are never automatic, whatever is set.
 // A background task is not covered here at all: one started read-only declines writes by
 // construction — it is given a confirmation that always answers no — and one started with
-// `write: true` asks the person for each write; the chat's mode never reaches either. Nor is the person's own `!command`: they typed it.
+// `write: true` asks the person for each write; the chat's mode never reaches either. Nor is the
+// person's own `!command`: they typed it.
 
 export type AutoMode = 'ask' | 'reads' | 'all';
 

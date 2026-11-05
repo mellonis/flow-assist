@@ -187,7 +187,8 @@ read-only: its writes and commands are declined, and the decline tells it so, so
 what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
 `ai.maxTurnTokens` bounds it); one that runs out of them says so at the end of its result
 (`stopped after 12 rounds — last: …`). Long work with many commands, each waiting for your
-yes, is better done in the conversation itself, or by an agent file you start with `/subagent @name`. A task may start
+yes, is better done in the conversation itself, or by an agent file you start with
+`/subagent @name`. A task may start
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
 
@@ -807,7 +808,8 @@ for its end and is killed at its timeout. The assistant then has three more tool
 **Limits.** `shell.maxBackground` (4) shells run at once in the whole process; a fifth is
 refused, with the list of the running ones. Each keeps its last `shell.jobChars` (64000)
 characters of output, as a ring: the oldest text goes first. A subagent you started can start
-shells too; a task cannot, since it cannot run commands.
+shells too; a task can only when it was started with `write: true`, and then each
+command waits for your yes.
 
 **When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
 data, to the conversation that started it, in its next turn. You see a toast

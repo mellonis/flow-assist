@@ -1173,7 +1173,8 @@ export class Conversation {
     let host: Conversation = this;
     while (host.parent) host = host.parent;
     const starterAsks = !this.parent || this.policy.kind === 'ask';
-    const asks = starterAsks && host.deps.canAsk !== false && (spec.write === true || (spec.kind === 'subagent' && spec.by === 'person'));
+    const wantsWrites = spec.write === true || (spec.kind === 'subagent' && spec.by === 'person');
+    const asks = starterAsks && host.deps.canAsk !== false && wantsWrites;
     const deps: ConversationDeps = {
       ...this.deps,
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: asks,
@@ -1183,7 +1184,7 @@ export class Conversation {
       // The tool groups a child may use bind its own turns and the runs its tools start.
       chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: o?.allowGroups ? o.allowGroups.filter((g) => child.toolGroups!.includes(g)) : child.toolGroups } : {}) }),
     };
-    const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no' } });
+    const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no', reason: wantsWrites ? 'cannot-ask' : 'read-only' } });
     child.parent = this;
     child.depth = this.depth + 1;
     child.label = spec.label;

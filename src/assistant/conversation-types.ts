@@ -65,7 +65,7 @@ export function lastAnswerOf(list: readonly { role?: string; content?: unknown }
 export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
 
 // 'session': a chat's — saved, journaled, locked, continued. 'task': a background task's
-// child conversation — no screen, no journal or file of its own, twelve rounds. 'subagent':
+// child conversation — no screen, no journal or file of its own, `ai.taskRounds` rounds. 'subagent':
 // a child conversation the person's work runs in — read-only, no journal or file of its own,
 // the config's round and token limits, its own summary kept through a compaction. 'oneshot':
 // `flow-assist "<prompt>"` — nobody to ask, no screen, no journal, no session file.
