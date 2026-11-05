@@ -318,15 +318,20 @@ test('the description says when to use background and when not', () => {
   expect(d).toContain('returns after 2 s with an id (sh-N)');
   expect(d).toContain('shell_output');
   expect(d).toContain('shell_kill');
-  expect(d).toContain('an end while the person is idle usually starts a turn of yours (unless they turned that off with ai.backgroundFollowUp)');
+  expect(d).toContain('usually starts your next turn when you are idle (unless the person turned that off with ai.backgroundFollowUp)');
+  expect(d).toContain('In the main chat the end comes to you by itself');
   expect(d).toContain('do not call shell_output in a loop to wait for it');
+  expect(d).toContain('Running as a subagent or a task, nothing wakes you and your shells end with your run: run a command whose result you need in the foreground');
 });
 
 test('the background parameter and shell_output say not to poll for the end', () => {
   const byName = Object.fromEntries(shellTools({}).tools.map((t) => [t.function.name, t.function]));
   const param = (byName.run_command!.parameters as { properties: { background: { description: string } } }).properties.background.description;
-  expect(param).toContain('do not poll shell_output to wait for it');
-  expect(byName.shell_output!.description).toContain('Do not poll it to wait for the end');
+  expect(param).toContain('In the main chat its end comes to you by itself');
+  expect(param).toContain('as a subagent or a task nothing wakes you and it ends with your run');
+  const out = byName.shell_output!.description;
+  expect(out).toContain('In the main chat the end comes to you by itself');
+  expect(out).toContain('as a subagent or a task nothing wakes you');
   expect(byName.shell_output!.description).toContain('once, with grep or tail');
 });
 

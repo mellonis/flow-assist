@@ -159,6 +159,21 @@ test('x on an ended row dismisses it with no question; the job stays in /agents'
   ui.app.unmount();
 });
 
+test('x on a running row asks to kill and leaves the row; it does not dismiss', async () => {
+  const { ui } = await boot();
+  await ui.type('!');
+  await ui.type('sleep 60 &');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await ui.press('down');
+  await ui.press('x');
+  await settleUntil(() => frameOf(ui).includes('kill sh-1? y yes · n no'));
+  expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
+  await ui.press('n');
+  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  ui.app.unmount();
+});
+
 test('/agents lists the shell and kills it with x then y', async () => {
   const { ui } = await boot();
   await ui.type('!');
