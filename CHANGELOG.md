@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Fix: commands started from the assistant see `NODE_ENV` as your shell has it.** The assistant sets
+  `NODE_ENV=production` only while it loads its own modules (so React runs its faster build) and then
+  puts your value back, an unset variable included. `!command`, `run_command`, background shells and
+  plugin processes do not inherit `production`, so `npm install` run from the assistant installs
+  devDependencies.
+
 - **A background task's round cap is a setting, and a read-only task says why it cannot write.**
   `ai.taskRounds` (12 by default; 0 is no round cap, and then `ai.maxTurnTokens` bounds the task) sets how
   many rounds a task takes, an agent file the assistant started included; subagents and sessions keep

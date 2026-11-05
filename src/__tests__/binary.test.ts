@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultToProduction } from '../node-env';
+import { withProductionDefault } from '../node-env';
 
 // Distribution smoke test: the entry is runnable with bun and reports the host
 // version. (The host also ships as a compiled binary — AGENTS.md, Stack.)
@@ -19,18 +19,54 @@ describe('distribution', () => {
 });
 
 // React picks its build by NODE_ENV when it is first loaded, and Bun leaves the
-// variable unset: the entry defaults it to production before main.ts (and React) is
-// imported, and leaves any value already there alone.
+// variable unset: the entry sets it to production while main.ts (and React) loads, and
+// puts the person's own state back afterwards, so commands the program starts inherit it.
 describe('which React build runs', () => {
-  it('an unset NODE_ENV becomes production; a set one is kept', () => {
-    const unset: Record<string, string | undefined> = {};
-    defaultToProduction(unset);
-    expect(unset.NODE_ENV).toBe('production');
+  it('the loader sees production when NODE_ENV was unset, and it is unset again afterwards', async () => {
+    const env: Record<string, string | undefined> = {};
+    let seen: string | undefined;
+    await withProductionDefault(env, async () => {
+      seen = env.NODE_ENV;
+    });
+    expect(seen).toBe('production');
+    expect('NODE_ENV' in env).toBe(false);
+  });
+
+  it('a value the person set is kept during and after the load', async () => {
     for (const value of ['test', 'development', '']) {
       const env: Record<string, string | undefined> = { NODE_ENV: value };
-      defaultToProduction(env);
+      let seen: string | undefined;
+      await withProductionDefault(env, async () => {
+        seen = env.NODE_ENV;
+      });
+      expect(seen).toBe(value);
       expect(env.NODE_ENV).toBe(value);
     }
+  });
+
+  it('a loader that throws still puts the environment back, and the error propagates', async () => {
+    const env: Record<string, string | undefined> = {};
+    await expect(
+      withProductionDefault(env, async () => {
+        throw new Error('load failed');
+      }),
+    ).rejects.toThrow('load failed');
+    expect('NODE_ENV' in env).toBe(false);
+  });
+
+  it('a process started after the entry loaded sees no NODE_ENV when the person had none', () => {
+    // The entry's own shape, as a process: the load window, then a child that prints its NODE_ENV.
+    const script = `
+      import { withProductionDefault } from ${JSON.stringify(join(process.cwd(), 'src/node-env.ts'))};
+      import { execSync } from 'node:child_process';
+      let during = '';
+      await withProductionDefault(process.env, async () => { during = String(process.env.NODE_ENV); });
+      const child = execSync('printf "%s" "\${NODE_ENV-unset}"', { encoding: 'utf8' });
+      console.log(during + '|' + child);
+    `;
+    const env = { ...process.env };
+    delete env.NODE_ENV;
+    expect(execSync(`bun -e '${script.replace(/'/g, `'\\''`)}'`, { env, encoding: 'utf8' }).trim()).toBe('production|unset');
   });
 
   // The binary's React is chosen by the bundler, not at run time: build:binary
