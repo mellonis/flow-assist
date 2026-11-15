@@ -47,8 +47,19 @@ test('a table passes columns and rows through, capped by the tree caps', () => {
 });
 
 test('wide characters are measured with the injected stringWidth', () => {
-  const el = toElement(['Text', { wrap: 'truncate' }, '日本語テキスト'], ctx({ width: 6, stringWidth: () => 20 })) as T;
+  const el = toElement(['Text', { truncate: true }, '日本語テキスト'], ctx({ width: 6, stringWidth: () => 20 })) as T;
   expect(JSON.stringify(el)).toContain('…');
+});
+
+test('truncation is opt-in: a text that does not ask for it keeps its string', () => {
+  const text = 'a long line that would be cut';
+  const plain = toElement(['Text', {}, text], ctx({ width: 6 })) as T;
+  expect(plain.children).toEqual([text]);
+  const off = toElement(['Text', { truncate: false, wrap: false }, text], ctx({ width: 6 })) as T;
+  expect(off.children).toEqual([text]);
+  const wrapped = toElement(['Text', { wrap: true }, text], ctx()) as T;
+  expect(wrapped.props).toEqual({ wrap: 'wrap' });
+  expect(wrapped.children).toEqual([text]);
 });
 
 test('a badge is one pill: its glyph, its text and its tone', () => {

@@ -63,9 +63,8 @@ const readNode = (node: Node): { type: string; props: TProps; children: Array<No
 const itemsOf = (props: TProps): TProps[] => (Array.isArray(props.items) ? props.items : []).filter(isPlainObject);
 
 // The Text props, sanitised: a colour is a palette token, the flags are booleans, and
-// the vocabulary's `wrap: true` is flowtty's word wrap. `wrap: 'truncate'` and
-// `truncate: true` are cut here with `fit` — only the renderer measures with the
-// pane's `stringWidth` — so they contribute no wrap mode of their own.
+// `wrap` is flowtty's word wrap. `truncate` is cut here with `fit` — only the renderer
+// measures with the pane's `stringWidth` — so it contributes no wrap mode of its own.
 const textProps = (props: TProps): TProps => {
   const out: TProps = {};
   if (props.color !== undefined) out.color = toneToken(props.color);
@@ -102,7 +101,7 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
       case 'ScrollBox':
         return ui.h(ui.ScrollBox, only(props, SCROLL_PROPS), ...children.map(draw));
       case 'Text': {
-        const truncate = props.truncate === true || props.wrap === 'truncate';
+        const truncate = props.truncate === true;
         const strings = children
           .filter((c): c is string => typeof c === 'string')
           .map((s) => (truncate ? fit(s, ctx.width, ctx.stringWidth) : s));
