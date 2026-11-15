@@ -2,11 +2,18 @@
 import { expect, test } from 'bun:test';
 import { TestBackend } from '@flowtty/core/testing';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import buildCanvasPlugin from '../../plugins-available/canvas/src/index.ts';
+import buildCanvasPlugin, { type TMake } from '../../plugins-available/canvas/src/index.ts';
+import type { Make, Plugin } from '../loader/plugin.ts';
+
+// The plugin restates the host's `make` (its own sources typecheck under their own root,
+// without the loader), so the bridge is asserted once, here: the host's `make` is the one the
+// builder was written for, and what it makes is a plugin the host can boot.
+const canvasPlugin = (make: Make): Plugin =>
+  buildCanvasPlugin({ make: make as unknown as TMake, config: {} }) as unknown as Plugin;
 
 // The chat docked as a panel, not a window over the screen: these tests assert on what
 // the plugin's side of the screen draws, and a window covers it.
-const boot = (model: ScriptedModel) => bootApp(model, 110, 32, (make) => [buildCanvasPlugin({ make, config: {} })], {}, { chatMode: 'panel' });
+const boot = (model: ScriptedModel) => bootApp(model, 110, 32, (make) => [canvasPlugin(make)], {}, { chatMode: 'panel' });
 
 test('the model draws a canvas with a read tool; the answer names it and the context carries it', async () => {
   const model = new ScriptedModel();
@@ -51,7 +58,7 @@ class ResizableBackend extends TestBackend {
   private subs = new Set<() => void>();
   constructor(w: number, h: number) { super(w, h); this.w = w; this.h = h; }
   override size() { return { width: this.w, height: this.h }; }
-  override onResize(fn: () => void) { this.subs.add(fn); return () => { this.subs.delete(fn); }; }
+  onResize(fn: () => void) { this.subs.add(fn); return () => { this.subs.delete(fn); }; }
   resize(w: number, h: number) { this.w = w; this.h = h; for (const fn of this.subs) fn(); }
 }
 // A request message's text — a plain string on this wire, but read defensively, the way
@@ -201,7 +208,7 @@ test('the surface is laid out again when the terminal is resized', async () => {
     [{ text: 'Here it is.' }],
   );
   const backend = new ResizableBackend(120, 32);
-  const ui = await bootApp(model, 120, 32, (make) => [buildCanvasPlugin({ make, config: {} })], {}, { chatMode: 'panel', backend });
+  const ui = await bootApp(model, 120, 32, (make) => [canvasPlugin(make)], {}, { chatMode: 'panel', backend });
   await turn(ui, 'draw my pipeline');
   await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines'));
   // 120 columns: the chat is docked beside the canvas, the surface has 78 cells, and the
@@ -293,7 +300,7 @@ test('a layout is saved as a recipe and drawn again from it — the frame shows 
 // for the frame to show it, and at 110 columns the chat docks BELOW the canvas, leaving
 // the body one row short of this tree (the ScrollBox scrolls, and the demo is about
 // reading it without scrolling). Beside the canvas is also how the design draws it.
-const bootDemo = (model: ScriptedModel) => bootApp(model, 140, 32, (make) => [buildCanvasPlugin({ make, config: {} })], {}, { chatMode: 'panel' });
+const bootDemo = (model: ScriptedModel) => bootApp(model, 140, 32, (make) => [canvasPlugin(make)], {}, { chatMode: 'panel' });
 
 test('a pipeline is drawn from gitlab-shaped data and redrawn after a press', async () => {
   const pipeline = (job: string, passed: number) => ['Box', { flexDirection: 'column', gap: 1 },

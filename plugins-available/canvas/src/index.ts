@@ -16,7 +16,8 @@ import { canvasKeycaps, canvasPanel, canvasView, type TSurfaceApi } from './view
 import type { TStore } from './store.ts';
 import type { TCache } from './templates.ts';
 
-type Make = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
+export type TMake = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
+type Make = TMake;
 type THost = {
   store: Record<string, unknown>;
   notify: () => void;
@@ -25,7 +26,7 @@ type THost = {
 };
 type TApi = { host: THost };
 
-export default function buildCanvasPlugin({ config, make, z }: { config?: unknown; make: Make; z: unknown }): unknown {
+export default function buildCanvasPlugin({ config, make }: { config?: unknown; make: Make }): unknown {
   // One store for the run, made once — before the group is built, and put on
   // `host.store.canvas` in `setup`, the channel the host hands a plugin's components.
   const store: TStore = createStore();

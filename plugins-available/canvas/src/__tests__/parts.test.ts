@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { bar, fit, percentText, taskGlyph, toneToken } from '../parts.ts';
+import { bar, fit, percentText, taskGlyph, toneToken, type TTaskState } from '../parts.ts';
 const w = (s: string) => Array.from(s).reduce((n, ch) => n + (/[\u3000-\u9fff]/u.test(ch) ? 2 : 1), 0);
 
 test('bar rounds and never exceeds its width', () => {
@@ -18,7 +18,10 @@ test('percent is a whole number', () => {
 });
 
 test('task states have one glyph each', () => {
-  expect(['done', 'running', 'queued', 'failed'].map(taskGlyph)).toEqual(['✓', '●', '○', '✗']);
+  // Typed as the union, so a state the plugin renames fails to compile here instead of
+  // silently drawing the fallback glyph.
+  const states: Array<TTaskState> = ['done', 'running', 'queued', 'failed'];
+  expect(states.map(taskGlyph)).toEqual(['✓', '●', '○', '✗']);
 });
 
 test('tones map to palette tokens and anything else to default', () => {
