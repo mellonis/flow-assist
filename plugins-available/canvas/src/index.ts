@@ -1,11 +1,90 @@
-// Canvas plugin skeleton — the builder only: no surface, no tools yet.
-// `keycaps` returns `[]` so the host never mounts a surface of the plugin's
-// (docs/plugins.md, "Screens").
+// Canvas plugin builder — the `canvas` tool group, the screen its navigation tools
+// open, and what the model reads back: one context item per canvas, then the selected
+// canvas's outline. The surface itself (keycaps, keys, components) is the later task;
+// `keycaps` returns `[]` so the host never mounts one yet (docs/plugins.md, "Screens").
+//
 // `Make` mirrors the host's `make(name, shape)` (src/loader/plugin.ts): it fills the
 // name, the plugin's config slice and its keys into the shape the builder returns.
-// It is restated here — a plugin's typechecked sources stay under its own rootDir.
+// It is restated here, and so is the slice of `host` this builder reads — a plugin's
+// typechecked sources stay under its own rootDir (src/runtime/plugin-api.ts is where
+// the real `PluginApi` lives).
+import { createStore, outline, registryItems, selectCanvas, selectedCanvas } from './store.ts';
+import { buildGroup, SHOW_SCREEN, missingCanvas } from './tools.ts';
+import type { TStore } from './store.ts';
+
 type Make = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
+type THost = {
+  store: Record<string, unknown>;
+  notify: () => void;
+  services: { showMessage?: (text: string) => void };
+  open?: (screen: string, params?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
+};
+type TApi = { host: THost };
 
 export default function buildCanvasPlugin({ config, make, z }: { config?: unknown; make: Make; z: unknown }): unknown {
-  return make('canvas', { name: 'canvas', keycaps: () => [] });
+  // One store for the run, made once — before the group is built, and put on
+  // `host.store.canvas` in `setup`, the channel the host hands a plugin's components.
+  const store: TStore = createStore();
+  const now = () => Date.now();
+  // What the group asks the host to do. `host` arrives in `setup`, later than the
+  // shape, so the deps resolve it when they are called, never when they are built.
+  let host: THost | undefined;
+  const group = buildGroup({
+    store,
+    now,
+    notify: () => host?.notify(),
+    note: (text) => host?.services.showMessage?.(text),
+    open: (screen, params) => host?.open?.(screen, params),
+  });
+
+  // The screen the navigation tools open: it selects the canvas it was given and
+  // marks the person's side as up, which is what the surface's keycaps read (the
+  // host mounts a plugin's surface only while its keycaps say its context is active).
+  const showScreen = (_api: unknown, params: Record<string, unknown>): string => {
+    const id = typeof params.canvas === 'string' ? params.canvas.trim() : '';
+    if (id !== '' && !selectCanvas(store, id)) throw new Error(missingCanvas(id));
+    const selected = selectedCanvas(store);
+    if (selected === undefined) throw new Error('no canvas is drawn yet — canvas_draw draws one');
+    store.personOpened = true;
+    return `canvas «${selected.id}»`;
+  };
+  const hideScreen = (): void => { store.personOpened = false; };
+
+  // The person's screens as the model reads them: one short item per canvas (capped
+  // by `registryItems` for the chat's shared context budget), then, for the selected
+  // canvas only, its outline — which carries every bind's CURRENT value, so a session
+  // that did not draw the canvas still sees what was typed into it.
+  const chatContext = (): Array<{ label: string; text: string }> => {
+    const selected = selectedCanvas(store);
+    return [
+      ...registryItems(store, now),
+      ...(selected === undefined
+        ? []
+        : [{ label: selected.title !== '' ? selected.title : `Outline: «${selected.id}»`, text: outline(selected) }]),
+    ];
+  };
+
+  return make('canvas', {
+    name: 'canvas',
+    keycaps: () => [],
+    tools: [group],
+    screens: {
+      [SHOW_SCREEN]: {
+        entry: true,
+        title: 'canvas',
+        params: {
+          type: 'object',
+          properties: { canvas: { type: 'string', description: 'The canvas to show — canvas_list names them.' } },
+        },
+        tools: ['canvas_open', 'canvas_focus'],
+        open: showScreen,
+        close: hideScreen,
+      },
+    },
+    setup: (api: TApi) => {
+      host = api.host;
+      api.host.store.canvas = store;
+    },
+    chatContext,
+  });
 }
