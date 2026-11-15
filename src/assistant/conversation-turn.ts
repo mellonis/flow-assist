@@ -9,7 +9,7 @@ import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
-import { llmOpts } from './llm-endpoint.js';
+import { llmOpts, withModel } from './llm-endpoint.js';
 import { retryClock, retryLabel, type RetryInfo } from './llm-retry.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
@@ -271,7 +271,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   c.inTurn = true; // a project note from here on waits for the turn's end (the `finally`)
   try {
     const chatResult = await c.deps.chatLLM(wire, {
-      ...llmOpts(ai),
+      ...withModel(llmOpts(ai), c.model),
       signal: abort.signal,
       // A request that failed for a reason that passes waits to be made again: a log
       // line, and on a session's status line the countdown.
@@ -810,7 +810,7 @@ export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.paren
 // asked, and the summary folded under it.
 export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], signal: AbortSignal): ReturnType<typeof compactConversation> {
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
-  const result = await c.deps.compact(history, { ...llmOpts(ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
+  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   // The skills the history loaded are named after the summary: their text goes with it. The
   // person's loads are read from the kept history, where their mark is (the model's view drops it).
