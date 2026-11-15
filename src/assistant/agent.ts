@@ -301,11 +301,12 @@ export interface LiveView { update(data: unknown): void; discard(): void }
 export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
   const clean: ChatMessage[] = [];
   for (const m of messages) {
-    // 'note' is the host speaking to the person (/memory, what /clear kept) and 'view'
-    // is a block a tool asked the host to draw (a command's output): display only,
-    // both of them. The model already has the tool's own result — a second copy of it
-    // in the conversation would cost the context twice.
-    if (m.role === 'system' || m.role === 'note' || m.role === 'view') continue;
+    // 'note' is the host speaking to the person (/memory, what /clear kept), 'view'
+    // is a block a tool asked the host to draw (a command's output) and 'ask' is a
+    // question the person answered: display only, all three. The model already has the
+    // tool's own result — a second copy of it in the conversation would cost the
+    // context twice.
+    if (m.role === 'system' || m.role === 'note' || m.role === 'view' || m.role === 'ask') continue;
     // A background result and a `!command` the person ran reach the model as the user's.
     const out: ChatMessage = { role: m.role === 'bg' || m.role === 'shell' ? 'user' : m.role, content: m.content ?? null };
     // The images the person attached stay with their message for the rest of the

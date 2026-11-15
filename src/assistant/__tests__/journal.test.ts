@@ -59,6 +59,23 @@ test('a row as the screen kept it becomes a journal event — what an older sess
   expect(viewText({ kind: 'gone', phase: 'done', data: {} } as never, r)).toBe('');
 });
 
+test('a question the person answered is in the record and in the export, as the block they saw', () => {
+  const r = { console: renderConsole };
+  expect(rowOf({ role: 'ask', content: 'Strategy — Rebase or merge?', answer: 'merge' }, r))
+    .toEqual({ t: 'row', role: 'ask', text: 'Strategy — Rebase or merge?', answer: 'merge' });
+  expect(rowOf({ role: 'ask', content: 'Which checks?', answer: 'dismissed', dismissed: true }, r))
+    .toEqual({ t: 'row', role: 'ask', text: 'Which checks?', answer: 'dismissed', dismissed: true });
+  const md = exportMarkdown([
+    { t: 'start', id: 'x' },
+    { t: 'row', role: 'ask', text: 'Strategy — Rebase or merge?', answer: 'merge' },
+    { t: 'row', role: 'ask', text: 'Which checks?', answer: 'dismissed', dismissed: true },
+  ], { title: 't', id: 'x' });
+  expect(md).toContain('Question:* Strategy — Rebase or merge?');
+  expect(md).toContain('You answered: merge');
+  expect(md).toContain('Question:* Which checks?');
+  expect(md).toContain('You dismissed it.');
+});
+
 test('saves never trim the journal: a session longer than the cap still has its first line there', () => {
   const dir = tmp();
   const s = session();

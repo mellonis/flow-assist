@@ -30,6 +30,10 @@ const title = (label: string) => `? from «${label}»`;
 const notice = (label: string) => `a question from «${label}» waits — clear the field to answer it`;
 const ynNotice = (label: string) => `${label} waits for a y/n — clear the line to answer`;
 const OWN_Q = 'Pick one?';
+// The session's own question is UP — its two options are drawn, so it still takes the
+// keys. Once answered the block STAYS (a question the person answered keeps its place),
+// so the question's own text no longer says whether anything is waiting.
+const ownAskUp = (ui: UI) => { const f = frameOf(ui); return f.includes('1. A') && f.includes('2. B'); };
 const results = (req: { messages: { role: string; content?: unknown }[] } | undefined): string[] =>
   (req?.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content).replace(/^OK: /, ''));
 
@@ -269,15 +273,15 @@ async function ownOverDrawnQuestion() {
 test('the session\'s question arriving over a drawn subagent question wins; a key already on its way does not answer it; the typed answer is kept', async () => {
   const rig = await ownOverDrawnQuestion();
   rig.model.release();
-  await settleUntil(() => frameOf(rig.ui).includes(OWN_Q));
+  await settleUntil(() => ownAskUp(rig.ui));
   expect(frameOf(rig.ui)).not.toContain(title(labelOf('OVER')));
   // The next key of the person's typing is not an answer to the question that just came.
   await rig.ui.press('1');
   await settle(4);
-  expect(frameOf(rig.ui)).toContain(OWN_Q);
+  expect(ownAskUp(rig.ui)).toBe(true);
   pause();
   await rig.ui.press('1');
-  await settleUntil(() => !frameOf(rig.ui).includes(OWN_Q));
+  await settleUntil(() => !ownAskUp(rig.ui));
   // The subagent's question is back with what was typed; its answer needs the pause again.
   await settleUntil(() => shows(rig.ui, rig.kids[0]!));
   expect(frameOf(rig.ui)).toContain('ab');
@@ -390,7 +394,7 @@ test('the session\'s own ask_user block takes a line starting with / as the answ
   await ask(rig.ui, 'go');
   await settleUntil(() => rig.model.held);
   rig.model.release();
-  await settleUntil(() => frameOf(rig.ui).includes(OWN_Q));
+  await settleUntil(() => ownAskUp(rig.ui));
   await rig.ui.type('/subagent stop nobody');
   await rig.ui.press('return');
   await settleUntil(() => rig.model.requests.length >= 2);
@@ -422,9 +426,9 @@ const blocks: Blocked[] = [
       await ask(rig.ui, 'go');
       await settleUntil(() => rig.model.held);
       rig.model.release();
-      await settleUntil(() => frameOf(rig.ui).includes(OWN_Q));
+      await settleUntil(() => ownAskUp(rig.ui));
       pause();
-      return { ui: rig.ui, rig, still: () => frameOf(rig.ui).includes(OWN_Q), settled: () => rig.model.requests.length >= 2 };
+      return { ui: rig.ui, rig, still: () => ownAskUp(rig.ui), settled: () => rig.model.requests.length >= 2 };
     },
   },
 ];
@@ -573,7 +577,7 @@ for (const holder of holdersOfOwn) {
       await settleUntil(() => rig.model.held);
       await holder.open(rig);
       rig.model.release();
-      await settleUntil(() => frameOf(rig.ui).includes(kind === 'yn' ? BLOCK : OWN_Q));
+      await settleUntil(() => kind === 'yn' ? frameOf(rig.ui).includes(BLOCK) : ownAskUp(rig.ui));
       const key = kind === 'yn' ? 'y' : '1';
       const done = () => kind === 'yn' ? fs.existsSync(own) : rig.model.requests.some((r) => results(r).join('\n').includes('The user answered'));
       if (holder.armed) {

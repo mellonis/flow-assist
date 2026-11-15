@@ -2,7 +2,7 @@
 // waits, the session it is saved as. The chat draws one and drives it (AGENTS.md, "The chat").
 import crypto from 'node:crypto';
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
-import { askStart, type AskQuestion, type AskState } from './ask.js';
+import { askShown, askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
 import { parkedAt, type ConfirmPolicy } from './confirm-policy.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
@@ -1529,11 +1529,21 @@ export class Conversation {
     this.drawQuestion(state);
     this.deps.notify();
   }
-  answerQuestion(done: AskState): void {
+  answerQuestion(done: AskState, opts: { record?: boolean } = {}): void {
     const a = this.question;
     if (!a) return;
     this.question = null;
     this.drawQuestion(null);
+    // The question the person answered stays where it was asked: one block per
+    // question, the title it was shown under and the answer. The model already has the
+    // answer as the tool's result, so this is display only — saved with the session and
+    // drawn by `/export`, never sent (`apiHistory` drops it). A dismissal the HOST made
+    // (a stop, a close) records nothing: nobody answered it.
+    if (opts.record !== false) {
+      const rows = askShown(done).map((s): ChatMsg => ({ role: 'ask', content: s.title, answer: s.answer, ...(s.dismissed ? { dismissed: true } : {}) }));
+      if (rows.length) this.setRows((cur) => [...cur, ...rows]);
+      for (const r of rows) this.journal({ t: 'row', role: 'ask', text: String(r.content ?? ''), answer: r.answer, ...(r.dismissed ? { dismissed: true } : {}) });
+    }
     a.resolve(done);
     this.emit({ type: 'question', state: null });
     this.deps.notify();
@@ -1542,7 +1552,7 @@ export class Conversation {
   }
   // Leaving the chat or resetting it must not leave the tool hanging: an unanswered
   // question is reported to the model as dismissed.
-  dismissQuestion(): void { if (this.question) this.answerQuestion({ ...this.question.state, done: true, cancelled: true }); }
+  dismissQuestion(): void { if (this.question) this.answerQuestion({ ...this.question.state, done: true, cancelled: true }, { record: false }); }
   // No live view tracked and no coalesce timer pending — the state a session is opened
   // into (`applySession`).
   resetLiveViews(): void {

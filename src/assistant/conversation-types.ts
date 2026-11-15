@@ -33,6 +33,12 @@ export interface ChatMsg {
   // the same call still finds it (ids are places among drawn messages; removing the
   // message would move every fold id after it).
   discardedCallId?: string;
+  // A question the person answered, as the chat keeps it (role 'ask'): the title the
+  // block was shown under is `content`; `answer` is what the person gave, and
+  // `dismissed` says they never answered it. Display only: the model has the answer as
+  // the tool's result, and this never reaches it.
+  answer?: string;
+  dismissed?: boolean;
   [k: string]: unknown;
 }
 

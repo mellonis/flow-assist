@@ -23,6 +23,10 @@ const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 const pause = () => { clock.t += 700; };
 const title = (label: string) => `? from «${label}»`;
+// The SESSION's own question is up: its option list is drawn, and only a live block draws
+// one. The question's text says nothing — an answered block stays in the chat, and a
+// subagent's free-text block drawn under it is live at the same time.
+const ownQuestionUp = (ui: UI) => { const f = frameOf(ui); return f.includes('1. A') && f.includes('2. B'); };
 const notice = (label: string) => `a question from «${label}» waits — clear the field to answer it`;
 // The tool results a request carried, without the `OK: ` the loop puts in front of one.
 const results = (req: { messages: { role: string; content?: unknown }[] } | undefined): string[] =>
@@ -128,16 +132,19 @@ test('the session\'s own question comes first; the subagent\'s waits and is draw
   await ask(ui, '/subagent QOWN do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'go');
-  await settleUntil(() => frameOf(ui).includes('Pick one?'));
+  await settleUntil(() => ownQuestionUp(ui));
   a!.release();
   await settleUntil(() => a!.requests.length === 1 && !a!.held);
   await settle(8);
+  expect(ownQuestionUp(ui)).toBe(true);
   expect(frameOf(ui)).toContain('Pick one?');
   expect(frameOf(ui)).not.toContain(title('qown-do-it'));
   pause();
   await ui.press('1');
   await settleUntil(() => frameOf(ui).includes(title('qown-do-it')));
-  expect(frameOf(ui)).not.toContain('Pick one?');
+  // The answered block stays above with its answer; the child's block takes the keys.
+  expect(ownQuestionUp(ui)).toBe(false);
+  expect(frameOf(ui)).toContain('→ A');
   pause();
   await ui.type('late');
   await ui.press('return');

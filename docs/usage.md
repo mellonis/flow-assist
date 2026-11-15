@@ -649,6 +649,12 @@ they were made (`▸ 2 tools: read_file ×2`).
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.
 
+**A question the assistant asked you stays where it was asked.** Once you have answered
+it — an option picked, your own words typed, or a dismissal — the block remains in the
+conversation: the question under `?` and your answer under `→` (`→ dismissed` when you
+gave none), saved with the session and drawn by `/export`. It is not part of what the
+assistant is sent: your answer reaches it once, as the tool's result.
+
 ## Long answers
 
 **A long answer stays at its first line.** The conversation follows an answer while it

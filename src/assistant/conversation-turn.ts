@@ -476,8 +476,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // The call and what it changed go into the turn in its own order: under
         // the step that led to it, above whatever the model writes next. A call
         // that left a view is shown by that view (a message of its own, placed
-        // by `onToolLive`), so it is not drawn a second time as a trail line.
-        const call = run.views?.length ? null : callRun(run);
+        // by `onToolLive`), so it is not drawn a second time as a trail line; nor is
+        // `ask_user`, whose question and answer are a block of their own
+        // (`Conversation.answerQuestion`).
+        const call = run.views?.length || run.name === 'ask_user' ? null : callRun(run);
         const calls: CallRun[] = call ? [call] : [];
         const changed: TurnPart[] = (run.changes ?? []).map((change) => ({ kind: 'change', change }));
         if (!calls.length && !changed.length) { c.deps.notify(); return; }

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -444,8 +445,7 @@ test('a question of the session ends the watch', async () => {
   await watchFromRows(ui);
   expect(watching(ui)).toBe(true);
   model.release();
-  await settleUntil(() => frameOf(ui).includes('Which branch?'));
-  expect(frameOf(ui)).toContain('Which branch?');
+  await settleUntil(() => askUp(frameOf(ui)));
   expect(watching(ui)).toBe(false);
   a!.release();
   ui.app.unmount();
@@ -790,15 +790,16 @@ for (const where of ['watching', 'the cursor in the rows'] as const) {
     else await ui.press('down');
     expect(where === 'watching' ? watching(ui) : inRows(ui)).toBe(true);
     model.release();
-    await settleUntil(() => frameOf(ui).includes('Which branch?'));
+    await settleUntil(() => askUp(frameOf(ui)));
     expect(watching(ui)).toBe(false);
     clock.t += 50;
     await ui.press('return');
     await settle(6);
-    expect(frameOf(ui)).toContain('Which branch?');
+    // The key came before the pause: the question is still up.
+    expect(askUp(frameOf(ui))).toBe(true);
     clock.t += 700;
     await ui.press('return');
-    await settleUntil(() => !frameOf(ui).includes('Which branch?'));
+    await settleUntil(() => !askUp(frameOf(ui)));
     await settleUntil(() => frameOf(ui).includes('Using it.'));
     a!.release();
     ui.app.unmount();
@@ -810,10 +811,10 @@ test('a question with no watch and no cursor takes a key at once', async () => {
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
   model.release();
-  await settleUntil(() => frameOf(ui).includes('Which branch?'));
+  await settleUntil(() => askUp(frameOf(ui)));
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('Using it.'));
-  expect(frameOf(ui)).not.toContain('Which branch?');
+  expect(askUp(frameOf(ui))).toBe(false);
   ui.app.unmount();
 });
 
