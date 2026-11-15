@@ -129,3 +129,33 @@ test('with the chat holding the keys, a keystroke is the chat\'s — the canvas 
   await toPlugin(ui);
   expect(ui.backend.lastFrame).toContain('Pipelines');    // the surface is up and holds the keys
 });
+
+test('the : line owns every key while it is open — the surface\'s keys wait for it', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'canvas_draw', args: { canvas: 'ci', title: 'Pipelines', tree: ['Text', {}, 'body'] } },
+     { tool: 'canvas_open', args: { canvas: 'ci' } }],
+    [{ text: 'Drawn.' }],
+  );
+  const ui = await boot(model);
+  await turn(ui, 'draw it');
+  await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines'));
+  await toPlugin(ui);
+  // The `:` line takes its keys through the host's fallback — a consumer that swallows
+  // them first keeps them from it entirely.
+  await ui.press(':');
+  await ui.type('xx');
+  await settle();
+  expect(ui.backend.lastFrame).toContain(': xx');                        // the typing reached the line
+  expect(ui.backend.lastFrame).not.toContain('press x again to delete'); // the surface armed nothing
+  expect(ui.backend.lastFrame).toContain('canvas · «Pipelines»');        // x x deleted nothing
+  // Esc closes the line first — never the surface under it.
+  await ui.press('escape');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('canvas · «Pipelines»');
+  expect(ui.backend.lastFrame).not.toContain('an assistant in your terminal');
+  // Closed, the line hands the keys back: x is the surface's delete arm again.
+  await ui.press('x');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('press x again to delete');
+});

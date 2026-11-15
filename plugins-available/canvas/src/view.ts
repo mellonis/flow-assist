@@ -51,8 +51,9 @@ export type TSurfaceApi = {
 // The key map's vocabulary: the terminal's name with what was held with it. The host
 // builds `host.keys` in exactly this shape (its `keyId`, `src/playback/keys.ts`), so a
 // plugin matches a binding against a pressed key by building the same string — never
-// by comparing a binding's spelling, which a remap would break.
-const keyIdOf = (key: TInputKey): string => {
+// by comparing a binding's spelling, which a remap would break. Exported for the tests
+// that pin the copy to the host's original.
+export const keyIdOf = (key: TInputKey): string => {
   const name = String(key.name ?? '');
   const named = Array.from(name).length !== 1;
   return `${key.ctrl === true ? 'ctrl+' : ''}${key.meta === true ? 'alt+' : ''}${key.shift === true && named ? 'shift+' : ''}${name}`;
@@ -145,6 +146,10 @@ export function canvasKeycaps(api: { host: { keyCap(action: string): string } },
 export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
   const { ui, host } = api;
   return function CanvasView() {
+    // Every hook on every render — `useSurfaceSize`, the two `useState`, and the
+    // `useInputHandler` further down (a hook too, src/runtime/hooks.ts): the no-canvas
+    // guard must not skip one, or two renders' hook counts fall out of step (React's
+    // Rules of Hooks) the moment a delete empties the registry mid-life.
     const { width, height } = host.useSurfaceSize();
     // Read while drawing: the host redraws when it changes, and it is what gates a
     // control's own key-taking (`isFocused`) and the body's scrolling.
@@ -152,13 +157,11 @@ export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
     const [focusKey, setFocusKey] = ui.useState<string | null>(null);
     const [armed, setArmed] = ui.useState<boolean>(false);
     const canvas = selectedCanvas(store);
-    // The keycaps promise a canvas is drawn, but a delete can empty the registry
-    // between two frames: with none there is nothing to draw, and the host unmounts.
-    if (canvas === undefined) return null;
     // A held focus key a redraw took away (a rebuilt tree, one button fewer) is dropped
     // on this render — kept, `actionOf` would press nothing and `x`/`[`/`]` would stand
-    // down for a control that is no longer there.
-    const keys = focusKeys(canvas.tree);
+    // down for a control that is no longer there. With no canvas at all there are no
+    // keys, and the hold drops too.
+    const keys = canvas === undefined ? [] : focusKeys(canvas.tree);
     const focus = focusKey !== null && keys.includes(focusKey) ? focusKey : null;
     if (focus !== focusKey) setFocusKey(focus);
 
@@ -172,7 +175,11 @@ export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
       const message = pressMessage(current, label);
       const text = action === '' ? message : `${message}\naction: ${action}`;
       const postToChat = (host.services as { postToChat?: (text: string) => void }).postToChat;
-      postToChat?.(text);
+      // The press is queued — the footer may promise a turn — only when a channel took
+      // it. On an older host without `postToChat` the message goes nowhere, so nothing
+      // is armed: a `press queued` hint no answer would ever clear is a lie.
+      if (postToChat === undefined) return;
+      postToChat(text);
       // The press waits in the inbox while a turn runs: the footer says so until the
       // redraw the model's answer brings clears it (`drawCanvas`), and another
       // canvas's press keeps waiting when one canvas is deleted.
@@ -183,8 +190,12 @@ export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
     host.useInputHandler({
       mode: 'consume',
       // The base screen's priority (docs/plugins.md, "Commands, keys and the footer"):
-      // below an open modal, and below the chat while it holds the keyboard.
-      priority: () => 50,
+      // below an open modal, and below the chat while it holds the keyboard. The `:`
+      // line gets its keys only through the host's fallback, which runs when no
+      // consumer took the key — so while the line is open the surface drops out of the
+      // race entirely (0), as every other handler in the host does (`log.ts`, `core.ts`,
+      // the assistant, the remote adapter's surface).
+      priority: (ui: TUiState) => (ui.cmdOpen === true ? 0 : 50),
       mouse: true,
       handler: (key: TInputKey) => {
         const current = selectedCanvas(store);
@@ -243,6 +254,10 @@ export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
         return false;
       },
     });
+
+    // The keycaps promise a canvas is drawn, but a delete can empty the registry
+    // between two frames: with none there is nothing to draw, and the host unmounts.
+    if (canvas === undefined) return null;
 
     const header = headerLine(canvas) + (armed ? ' — press x again to delete' : '');
     const body = toElement(canvas.tree, {

@@ -66,8 +66,9 @@ const collectDeclared = (node: Node): Record<string, TValue> => {
 // prefill or reset); a vanished bind drops its value. `select: false` — a draw that
 // may not take the person's screen, a background agent's — leaves the person's
 // interaction state alone: the selection it found (unless nothing is selected yet,
-// because a surface with canvases never sits with none selected) and the pending
-// `pressed` confirm of a delete.
+// because a surface with canvases never sits with none selected) and the press queued
+// in `pressed` (the footer's `press queued`). Only a draw that takes the screen is the
+// answer the queued press waits for — its redraw clears the hint.
 export function drawCanvas(store: TStore, input: { id: string; title?: string; owner?: string; tree: Node; stats: TStats; select?: boolean }): TCanvas {
   const declared = collectDeclared(input.tree);
   const existing = store.canvases.get(input.id);
