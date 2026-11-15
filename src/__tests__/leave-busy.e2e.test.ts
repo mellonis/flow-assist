@@ -9,7 +9,7 @@ import { workHome } from '../assistant/conversation.ts';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
-import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
+import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const localConfig = () => path.join(hostStateDir(), 'config.local.json');
@@ -26,7 +26,7 @@ afterEach(() => {
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-leave-busy-'));
 type Saved = { id: string; messages: { role: string; content: unknown }[]; draft: string; answeredAt?: string; seenAt?: string };
-const saved = (dir: string, text: string): Saved | undefined => listTree(dir).filter((n) => n.endsWith('.json'))
+const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)
   .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as Saved)
   .find((s) => s.messages.some((m) => m.content === text));
 const journalOf = (dir: string, id: string): JournalEvent[] => {

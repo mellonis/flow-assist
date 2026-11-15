@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TreeNode } from '../conversation-types.ts';
 import { buildSecretSet, setActiveSecrets } from '../secrets.ts';
+import { closeSession, newSessionId, pruneSessions, SESSION_VERSION } from '../sessions.ts';
 import { buildStateFile, removeStateFile, startStateFiles, stateStamp } from '../state-file.ts';
-import type { StateFileInput, StateStamps } from '../state-file.ts';
+import type { StateFileInput, StateFileV1, StateStamps } from '../state-file.ts';
 
 const dirs: string[] = [];
 const writers: Array<{ stop(): void }> = [];
@@ -18,6 +19,17 @@ const read = (file: string): Record<string, unknown> => JSON.parse(fs.readFileSy
 const node = (key: string, over: Partial<TreeNode> = {}): TreeNode => ({
   key, label: key, kind: 'subagent', depth: 1, status: 'working', latest: '', startedAt: 0, until: null, below: 0, ...over,
 });
+
+// A saved session as the host writes one, as much of it as `loadSession` reads.
+const session = (dir: string, id: string, updatedAt: string): void => {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ version: SESSION_VERSION, id, title: 'a chat', createdAt: updatedAt, updatedAt, messages: [], api: [] }));
+};
+const stateFile = (dir: string, id: string, status = 'idle'): string => {
+  const file = path.join(dir, `${id}.state.json`);
+  fs.writeFileSync(file, JSON.stringify({ version: 1, id, status }));
+  return file;
+};
 
 const input = (over: Partial<StateFileInput> = {}): StateFileInput => ({
   id: 'ses-1',
@@ -173,4 +185,122 @@ test('a failing write never throws out of the tick', () => {
   expect(() => w.flushNow()).not.toThrow();
   expect(fs.readdirSync(dir)).toEqual([]);
   expect(() => removeStateFile(dir, 'ses-1')).not.toThrow();
+});
+
+test('the session\'s own last change is the moment its state changed, not the tick', () => {
+  const dir = tmp();
+  const file = path.join(dir, 'ses-1.state.json');
+  // What the chat hands the writer: the session's last change read as the moment of the
+  // snapshot, since a snapshot reaches the file only when it changed.
+  let tick = 1000;
+  const clock = () => tick;
+  let status: StateFileV1['status'] = 'working';
+  const w = writer({ dir, sources: () => [input({ status, updatedAt: clock() })], now: clock });
+
+  w.flushNow();
+  const first = fs.readFileSync(file, 'utf8');
+  expect(read(file).updatedAt).toBe(new Date(1000).toISOString());
+
+  // Every tick moves both times, the session itself did not change: nothing is written.
+  tick = 5000;
+  w.flushNow();
+  tick = 6000;
+  w.flushNow();
+  expect(fs.readFileSync(file, 'utf8')).toBe(first);
+
+  // A changed session is a new snapshot, stamped with the moment it changed.
+  status = 'waiting';
+  tick = 9000;
+  w.flushNow();
+  expect(read(file)).toMatchObject({ status: 'waiting', updatedAt: new Date(9000).toISOString() });
+});
+
+test('each session\'s state file is written beside its own session file', () => {
+  const dir = tmp();
+  const homeA = path.join(dir, 'a');
+  const homeB = path.join(dir, 'b');
+  const w = writer({
+    dir,
+    sources: () => [
+      input({ id: 'ses-a' }),
+      input({ id: 'ses-b', status: 'waiting' }),
+    ],
+    dirOf: (i) => (i.id === 'ses-a' ? homeA : homeB),
+    now: () => 1000,
+  });
+  w.flushNow();
+  // A directory of a session that has not been saved yet is made for its file.
+  expect(read(path.join(homeA, 'ses-a.state.json'))).toMatchObject({ id: 'ses-a' });
+  expect(read(path.join(homeB, 'ses-b.state.json'))).toMatchObject({ id: 'ses-b', status: 'waiting' });
+  expect(fs.readdirSync(dir).sort()).toEqual(['a', 'b']);
+});
+
+test('a session moved to another project takes its state file along', () => {
+  const dir = tmp();
+  const homeA = path.join(dir, 'a');
+  const homeB = path.join(dir, 'b');
+  let home = homeA;
+  const w = writer({
+    dir,
+    sources: () => [input({ id: 'ses-a' })],
+    dirOf: () => home,
+    now: () => 1000,
+  });
+  w.flushNow();
+  const moved = path.join(homeB, 'ses-a.state.json');
+  expect(fs.existsSync(path.join(homeA, 'ses-a.state.json'))).toBe(true);
+
+  // The picker's `^p` moves the session — and its mirror follows, though nothing about the
+  // snapshot itself changed, leaving nothing behind in the directory it left.
+  home = homeB;
+  w.flushNow();
+  expect(read(moved)).toMatchObject({ id: 'ses-a' });
+  expect(fs.existsSync(path.join(homeA, 'ses-a.state.json'))).toBe(false);
+});
+
+test('a session with no directory keeps no state file', () => {
+  const dir = tmp();
+  const home = path.join(dir, 'a');
+  let place: string | null = home;
+  const w = writer({
+    dir,
+    sources: () => [input({ id: 'ses-a' })],
+    dirOf: () => place,
+    now: () => 1000,
+  });
+  w.flushNow();
+  expect(fs.existsSync(path.join(home, 'ses-a.state.json'))).toBe(true);
+
+  place = null;
+  w.flushNow();
+  expect(fs.existsSync(path.join(home, 'ses-a.state.json'))).toBe(false);
+});
+
+// ---- the session lifecycle: a state file goes with the session it mirrors ----
+
+test('closing a session takes its state file with it', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  session(dir, id, new Date(1000).toISOString());
+  const state = stateFile(dir, id, 'waiting');
+  expect(fs.existsSync(state)).toBe(true);
+
+  closeSession(dir, id);
+  // The session's own file stays — `/clear` keeps it for `/resume` — and the mirror goes.
+  expect(fs.existsSync(path.join(dir, `${id}.json`))).toBe(true);
+  expect(fs.existsSync(state)).toBe(false);
+});
+
+test('pruning old sessions takes their state files with them', () => {
+  const dir = tmp();
+  const old = newSessionId(new Date(1000));
+  const recent = newSessionId(new Date(2000));
+  session(dir, old, new Date(1000).toISOString());
+  session(dir, recent, new Date(2000).toISOString());
+  const oldState = stateFile(dir, old);
+  const recentState = stateFile(dir, recent);
+
+  expect(pruneSessions(dir, 1)).toBe(1);
+  expect(fs.existsSync(oldState)).toBe(false);
+  expect(fs.existsSync(recentState)).toBe(true);
 });

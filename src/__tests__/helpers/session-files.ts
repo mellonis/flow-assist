@@ -23,6 +23,13 @@ export function homeIn(dir: string, id: string): string {
 // A session's id from a file's name.
 export const sessionIdOf = (name: string) => path.basename(name).replace(/\.(json|lock|log\.jsonl)$/, '');
 
+// A session's own state file — `<id>.json` — and never the mirror of a live one,
+// `<id>.state.json` (`src/assistant/state-file.ts`), which lies beside it and which
+// `listTree` lists too, so a test that counts sessions counts these alone.
+export const isSessionFile = (name: string): boolean =>
+  path.basename(name).endsWith('.json') && !path.basename(name).endsWith('.state.json');
+export const sessionFiles = (dir: string): string[] => listTree(dir).filter(isSessionFile);
+
 // The project an app booted with no `shell.roots` starts in — this checkout's git root,
 // or none — and its sessions directory under `dir`: where a fixture a start should
 // continue is written, with that project recorded in it.

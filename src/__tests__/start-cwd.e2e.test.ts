@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { journalPath, projectHome } from '../assistant/sessions';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { listTree } from './helpers/session-files';
+import { isSessionFile, listTree, sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -51,7 +51,7 @@ test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up
   await ui.press('escape', 'escape'); // closed — written at once
   const home = projectHome(sessDir, repo);
   const files = listTree(sessDir);
-  const state = files.find((n) => n.endsWith('.json'));
+  const state = files.find(isSessionFile);
   expect(state).toBeDefined();
   expect(path.dirname(path.join(sessDir, state!))).toBe(home);
   const id = path.basename(state!).replace(/\.json$/, '');
@@ -98,7 +98,7 @@ test('the start-up note repeats on every restart from outside the roots, but is 
   ui1.app.unmount();
 
   const home = projectHome(sessDir, root);
-  const files = listTree(sessDir).filter((n) => n.endsWith('.json'));
+  const files = sessionFiles(sessDir);
   expect(files.length).toBe(1);
   const id = path.basename(files[0]!).replace(/\.json$/, '');
   const firstSaved = JSON.parse(fs.readFileSync(path.join(sessDir, files[0]!), 'utf8'));

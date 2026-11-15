@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { ScriptedModel, bootApp, settle, type RecordedRequest } from './helpers/scripted';
-import { listTree, sessionIdOf } from './helpers/session-files';
+import { listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -16,7 +16,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const system = (req: RecordedRequest): string => String(req.messages.find((m) => m.role === 'system')?.content ?? '');
 type Saved = { id: string; messages: { role: string; content: unknown }[] };
-const saved = (dir: string, text: string): Saved | undefined => listTree(dir).filter((n) => n.endsWith('.json'))
+const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)
   .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as Saved)
   .find((s) => s.messages.some((m) => m.content === text));
 const journalOf = (dir: string, id: string): JournalEvent[] => {

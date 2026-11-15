@@ -10,7 +10,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 import type { Make } from '../loader/plugin';
-import { listTree } from './helpers/session-files';
+import { sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
@@ -228,7 +228,7 @@ test('a restart that continues the session brings the mode back and says so', as
   await stepAuto(ui, 2);
   expect(shownMode(ui.backend.lastFrame)).toBe('writes');
   await new Promise((r) => setTimeout(r, 350)); // the debounced save
-  const saved = listTree(dir).filter((n) => n.endsWith('.json'));
+  const saved = sessionFiles(dir);
   expect(saved).toHaveLength(1);
   expect(JSON.parse(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).autoMode).toBe('all');
   ui.app.unmount();
@@ -257,7 +257,7 @@ test('the mode set right before a kill is kept: the save is not left to a turn',
   await new Promise((r) => setTimeout(r, 350));
   await stepAuto(ui, 1); // the key, and nothing after it
   await new Promise((r) => setTimeout(r, 350));
-  const saved = listTree(dir).filter((n) => n.endsWith('.json'));
+  const saved = sessionFiles(dir);
   expect(JSON.parse(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).autoMode).toBe('reads');
   ui.app.unmount();
 });

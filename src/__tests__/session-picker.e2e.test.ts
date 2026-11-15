@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { acquireLock, journalPath, lockPath, projectHome } from '../assistant/sessions';
-import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
+import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -16,7 +16,7 @@ const flat = (s: string) => s.replace(/[\s│╭╮╰╯─]+/g, '');
 type Sent = { role: string; content: unknown }[];
 const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 // The session file whose conversation holds `text`.
-const fileWith = (dir: string, text: string) => listTree(dir).filter((n) => n.endsWith('.json'))
+const fileWith = (dir: string, text: string) => sessionFiles(dir)
   .map((n) => ({ n, s: JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) }))
   .find(({ s }) => s.messages.some((m: { content: unknown }) => m.content === text));
 const rowOf = (frame: string, text: string) => frame.split('\n').find((r) => r.includes(text)) ?? '';

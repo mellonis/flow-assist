@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { ScriptedModel, bootApp, settle, type RecordedRequest } from './helpers/scripted';
-import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
+import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -21,7 +21,7 @@ const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-headless-e2e-'));
 const system = (req: RecordedRequest): string => String(req.messages.find((m) => m.role === 'system')?.content ?? '');
 type Saved = { id: string; messages: { role: string; content: unknown }[]; draft: string };
 // The saved session whose conversation holds `text`.
-const saved = (dir: string, text: string): Saved | undefined => listTree(dir).filter((n) => n.endsWith('.json'))
+const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)
   .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as Saved)
   .find((s) => s.messages.some((m) => m.content === text));
 const bgRows = (s: Saved | undefined) => (s?.messages ?? []).filter((m) => m.role === 'bg').map((m) => String(m.content));
@@ -172,7 +172,7 @@ test('/resume of the session on screen with nothing running keeps its lock as it
 const rowOf = (frame: string, text: string) => frame.split('\n').find((r) => r.includes(text)) ?? '';
 const chord = async (ui: Awaited<ReturnType<typeof bootApp>>, name: string) => { ui.backend.press({ name, ctrl: true }); await settle(); };
 const titleIn = (dir: string, id: string): string => {
-  const name = listTree(dir).find((n) => sessionIdOf(n) === id && n.endsWith('.json'));
+  const name = sessionFiles(dir).find((n) => sessionIdOf(n) === id);
   return name ? String((JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as { title?: unknown }).title ?? '') : '';
 };
 

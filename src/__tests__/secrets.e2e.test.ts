@@ -8,7 +8,7 @@ import path from 'node:path';
 import { setActiveSecrets } from '../assistant/secrets.ts';
 import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { listTree } from './helpers/session-files';
+import { listTree, sessionFiles } from './helpers/session-files';
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.e2e-wiki-token-body.signature-part';
 const realFetch = globalThis.fetch;
@@ -43,7 +43,7 @@ test('a configured token a tool returns reaches the model, the screen, the sessi
   await ui.press('return');
   await settleUntil(() => model.requests.length >= 2 && ui.backend.lastFrame.includes('done.'));
   // The session is saved a moment after the answer ends.
-  await settleUntil(() => listTree(dir).some((n) => n.endsWith('.json')) && fs.readFileSync(path.join(dir, listTree(dir).find((n) => n.endsWith('.json'))!), 'utf8').includes('done.'));
+  await settleUntil(() => sessionFiles(dir).length > 0 && fs.readFileSync(path.join(dir, sessionFiles(dir)[0]!), 'utf8').includes('done.'));
 
   const request = JSON.stringify(model.requests[1]);
   expect(request).not.toContain(TOKEN);
@@ -53,7 +53,7 @@ test('a configured token a tool returns reaches the model, the screen, the sessi
   expect(frame).not.toContain(TOKEN.slice(0, 20));
   expect(frame).toContain('‹secret WIKI_TOKEN›');
 
-  const session = fs.readFileSync(path.join(dir, listTree(dir).find((n) => n.endsWith('.json'))!), 'utf8');
+  const session = fs.readFileSync(path.join(dir, sessionFiles(dir)[0]!), 'utf8');
   expect(session).not.toContain(TOKEN);
   expect(session).toContain('‹secret WIKI_TOKEN›');
 
