@@ -67,6 +67,7 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
+import { startStateFiles, stateSources, type StateFileInput } from '../assistant/state-file.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
@@ -342,6 +343,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }
           const registry = registryRef.current;
           const lockToken = registry.lockToken;
+          // The state files a menu-bar watcher reads (`state-file.ts`): each live session's
+          // snapshot mirrored beside its own `<id>.json`, written only when it changed. A
+          // task or a subagent is a node of its session's tree, never a session of its own.
+          // Made once, beside the registry it reads, and stopped when the chat unmounts.
+          const stateFilesRef = ui.useRef<{ stop(): void } | null>(null);
+          if (!stateFilesRef.current) {
+            const root = sessionsDir(host.config);
+            if (root) {
+              stateFilesRef.current = startStateFiles({
+                dir: root,
+                dirOf: (i: StateFileInput) => registry.bySession(i.id)?.homes.get(i.id) ?? root,
+                sources: stateSources(registry, process.pid),
+              });
+            }
+          }
           // The conversation this chat draws. `useRef`'s argument is evaluated on every render,
           // so the object is made once, into an empty ref, as the registry is.
           const convRef = ui.useRef<Conversation | null>(null);
@@ -835,6 +851,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           ui.useEffect(() => () => {
             const c = convRef.current!;
             if (c.liveTimer) clearTimeout(c.liveTimer);
+            stateFilesRef.current?.stop();
             registryRef.current!.flushAll();
           }, []);
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.

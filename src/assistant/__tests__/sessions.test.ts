@@ -530,6 +530,22 @@ test('moveSessionToProject moves the state file, its journal and a .sub director
   expect(loadSession(toHome, s.id)!.project).toBe('/Users/me/to');
 });
 
+test('moveSessionToProject carries the state-file mirror a crashed run left behind, and leaves none at the source', () => {
+  const root = tmp();
+  const fromHome = projectHome(root, '/Users/me/from');
+  const toHome = projectHome(root, '/Users/me/to');
+  const s = session({ id: '2026-09-21T09-00-00-ffff', project: '/Users/me/from' });
+  saveSession(fromHome, s);
+  // No live chat holds this session — a move takes its lock — so the writer's own
+  // "directory changed" path never runs for it: the mirror would stay behind for good.
+  fs.writeFileSync(path.join(fromHome, `${s.id}.state.json`), JSON.stringify({ version: 1, id: s.id, status: 'waiting' }));
+
+  expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/to', 'tok-me', alive)).toBe('moved');
+
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.state.json`))).toBe(false);
+  expect(JSON.parse(fs.readFileSync(path.join(toHome, `${s.id}.state.json`), 'utf8'))).toMatchObject({ id: s.id, status: 'waiting' });
+});
+
 test('moveSessionToProject refuses a held session or this token\'s own, without moving anything', () => {
   const root = tmp();
   const fromHome = projectHome(root, '/Users/me/from');

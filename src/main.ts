@@ -44,7 +44,8 @@ import { consoleBridge } from './runtime/console-log.js';
 import { Conversation } from './assistant/conversation.js';
 import { oneShotOutcome } from './assistant/oneshot.js';
 import { ConversationRegistry } from './assistant/registry.js';
-import { exitOnSignals, runExitHooks } from './assistant/sessions.js';
+import { startStateFiles, stateSources } from './assistant/state-file.js';
+import { exitOnSignals, runExitHooks, sessionsDir } from './assistant/sessions.js';
 import { ONESHOT_WITHHELD } from './assistant/conversation-turn.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
@@ -387,6 +388,7 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
   const out = deps.out ?? ((text: string) => { process.stdout.write(text); });
   const err = deps.err ?? ((text: string) => { process.stderr.write(text); });
   let conv: Conversation | null = null;
+  let stateFiles: { stop(): void } | null = null;
   try {
     const plugins = await loadPlugins({ config, repo, renders, enabledDir: dir });
     const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
@@ -417,6 +419,15 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
       canAsk: false,
       withhold: ONESHOT_WITHHELD,
     });
+    // The mirror of live sessions a menu-bar watcher reads (`state-file.ts`), wired where
+    // every CLI path builds its registry. This one holds no session — a one-shot run
+    // neither saves one nor continues one — so it writes nothing; a registry that does
+    // save sessions is mirrored by the same rule.
+    stateFiles = startStateFiles({
+      dir: sessionsDir(config),
+      dirOf: (i) => conversations.bySession(i.id)?.homes.get(i.id) ?? sessionsDir(config),
+      sources: stateSources(conversations, process.pid),
+    });
     conv = conversations.fresh({
       kind: 'oneshot',
       policy: deps.allowWrites ? { kind: 'allow-writes', say: (line) => err(`${line}\n`) } : { kind: 'none' },
@@ -435,6 +446,7 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
   } finally {
     // Its timers go with it (the save it arms, with nowhere to save), or they would hold
     // the process open.
+    stateFiles?.stop();
     conv?.close('exit');
   }
 }

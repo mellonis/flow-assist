@@ -19,7 +19,7 @@ import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { createServices } from '../../runtime/services.ts';
 import type { ScriptedModel } from './scripted.ts';
-import { homeIn, listTree } from './session-files.ts';
+import { homeIn, isSessionFile, listTree } from './session-files.ts';
 
 export interface RigOptions {
   kind?: ConversationKind;              // 'session' unless said
@@ -141,9 +141,11 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
       conv = attached(() => registry.restore(session, fingerprint, dir, { policy: init.policy }));
       return conv;
     },
-    // Every journal / state file under the sessions directory, as paths relative to it.
+    // Every journal / session file under the sessions directory, as paths relative to it.
+    // A rig runs no state-file writer, and the mirror of a live session is excluded anyway:
+    // these are the states a session is saved as.
     journals(): string[] { return sessionsDir ? listTree(sessionsDir).filter((n) => n.endsWith('.log.jsonl')) : []; },
-    stateFiles(): string[] { return sessionsDir ? listTree(sessionsDir).filter((n) => n.endsWith('.json')) : []; },
+    stateFiles(): string[] { return sessionsDir ? listTree(sessionsDir).filter(isSessionFile) : []; },
     // A session's journal (this conversation's by default); [] with none.
     journal(id = conv.sessionId): JournalEvent[] {
       if (!sessionsDir || !id) return [];

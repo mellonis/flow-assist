@@ -9,6 +9,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { isSessionFile } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -80,7 +81,7 @@ const watchFromRows = async (ui: UI) => { await ui.press('down'); await ui.press
 
 // The saved session that has an answer (the sessions directory holds one per conversation).
 function answeredSession(dir: string): { answeredAt?: string; seenAt?: string } | null {
-  const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.json') ? [path.join(d, e.name)] : []);
+  const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : isSessionFile(e.name) ? [path.join(d, e.name)] : []);
   for (const f of walk(dir)) {
     const s = JSON.parse(fs.readFileSync(f, 'utf8')) as { answeredAt?: string; seenAt?: string };
     if (s.answeredAt) return s;

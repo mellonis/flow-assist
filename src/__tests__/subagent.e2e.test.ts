@@ -9,7 +9,7 @@ import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
 import { listSessions } from '../assistant/sessions.ts';
-import { listTree } from './helpers/session-files';
+import { listTree, sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -233,9 +233,9 @@ test('started where nobody has spoken, the conversation is a saved session: list
   await ask(ui, '/subagent FRESH-ONE look around');
   await settleUntil(() => child.held);
   // The state file follows the save timer; nothing else has asked for a save.
-  await settleUntil(() => listTree(dir).some((n) => n.endsWith('.json')), 200);
+  await settleUntil(() => sessionFiles(dir).length > 0, 200);
   const files = listTree(dir);
-  const state = files.find((n) => n.endsWith('.json'))!;
+  const state = sessionFiles(dir)[0]!;
   expect(state).toBeDefined();
   const id = path.basename(state, '.json');
   const journal = files.find((n) => n.endsWith('.log.jsonl'));
@@ -253,9 +253,9 @@ test('started where nobody has spoken, the conversation is a saved session: list
 
 // The person's rows of the session saved in `dir`, once its state file stands.
 async function savedUsers(dir: string): Promise<string[]> {
-  await settleUntil(() => listTree(dir).some((n) => n.endsWith('.json')), 200);
+  await settleUntil(() => sessionFiles(dir).length > 0, 200);
   await new Promise((r) => setTimeout(r, 400));
-  const state = listTree(dir).find((n) => n.endsWith('.json'));
+  const state = sessionFiles(dir)[0];
   if (!state) return [];
   const saved = JSON.parse(fs.readFileSync(path.join(dir, state), 'utf8')) as { messages: { role: string; content: string }[] };
   return saved.messages.filter((m) => m.role === 'user').map((m) => m.content);

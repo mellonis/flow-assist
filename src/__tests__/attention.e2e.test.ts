@@ -8,7 +8,7 @@ import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { acquireLock } from '../assistant/sessions.ts';
-import { homeIn, listTree } from './helpers/session-files';
+import { homeIn, listTree, sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -22,7 +22,7 @@ afterEach(() => {
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-attention-'));
 type Saved = { id: string; messages: { role: string; content: unknown }[] };
-const saved = (dir: string, text: string): Saved | undefined => listTree(dir).filter((n) => n.endsWith('.json'))
+const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)
   .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as Saved)
   .find((s) => s.messages.some((m) => m.content === text));
 const lockOf = (dir: string, id: string) => path.join(homeIn(dir, id), `${id}.lock`);

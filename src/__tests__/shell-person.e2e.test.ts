@@ -7,6 +7,7 @@ import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
 import { lockPath } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { isSessionFile } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -410,7 +411,7 @@ test('a switch refused after the question (the session is open in another proces
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   // Meanwhile another process takes session A.
   const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
-  const aFile = walk(sessions).find((f) => { if (!f.endsWith('.json')) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
+  const aFile = walk(sessions).find((f) => { if (!isSessionFile(f)) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
   fs.writeFileSync(lockPath(path.dirname(aFile), path.basename(aFile, '.json')), JSON.stringify({ pid: process.ppid, host: os.hostname(), token: 'another-process', at: new Date().toISOString() }));
   await ui.press('k');
   await settleUntil(() => frameOf(ui).includes('is open in another flow-assist process'));
@@ -434,7 +435,7 @@ test('/resume n refused after the question leaves the chat as it was: no picker 
   await ask(ui, '/resume 2');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
-  const aFile = walk(sessions).find((f) => { if (!f.endsWith('.json')) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
+  const aFile = walk(sessions).find((f) => { if (!isSessionFile(f)) return false; const t = fs.readFileSync(f, 'utf8'); return t.includes('session A question') && !t.includes('session B question'); })!;
   fs.writeFileSync(lockPath(path.dirname(aFile), path.basename(aFile, '.json')), JSON.stringify({ pid: process.ppid, host: os.hostname(), token: 'another-process', at: new Date().toISOString() }));
   await ui.press('k');
   await settleUntil(() => frameOf(ui).includes('is open in another flow-assist process'));

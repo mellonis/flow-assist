@@ -50,6 +50,7 @@ import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { createRecallState, saveRecallState } from './recall.js';
 import { readLegacyView, type ViewRecord } from './views.js';
+import { moveStateFile, removeStateFile } from './state-file.js';
 import { realOf, runMark, within } from './shell.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
@@ -559,9 +560,12 @@ export function sessionRows(root: string, token: string, deps: LockDeps = {}): S
 }
 
 // `/clear`: the conversation stays on the list, but a restart does not bring it back.
+// Its state file is a mirror of a live session, so it goes: a watcher must not read a
+// wait that nobody is going to answer.
 export function closeSession(dir: string, id: string): void {
   const s = loadSession(dir, id);
   if (s) saveSession(dir, { ...s, closed: true });
+  removeStateFile(dir, id);
 }
 
 // What a start continues: the newest session of the current project, unless it was
@@ -593,6 +597,7 @@ export function deleteSession(dir: string, id: string): void {
   try { fs.unlinkSync(fileOf(dir, id)); } catch { /* already gone */ }
   try { fs.unlinkSync(journalPath(dir, id)); } catch { /* none, or already gone */ }
   removeSub(dir, id);
+  removeStateFile(dir, id);
 }
 
 // The `.sub` entries of a directory whose session has neither a state file nor a
@@ -951,6 +956,11 @@ export function moveSessionToProject(dir: string, id: string, root: string, proj
       if (!fs.existsSync(destJrnl)) fs.linkSync(jrnl, destJrnl);
       fs.unlinkSync(jrnl);
     }
+    // The state file's mirror follows too. No live chat can be moved (it holds the lock),
+    // so the mirror the writer would move itself never gets the chance: one left by a
+    // crashed run, or written just before its session was put away, would stay in the
+    // directory the session left — invisible to a watcher, and blocking its pruning.
+    moveStateFile(dir, dest, id);
     const sub = path.join(dir, `${id}.sub`);
     const destSub = path.join(dest, `${id}.sub`);
     const moveSub = () => { if (fs.existsSync(sub) && !fs.existsSync(destSub)) fs.renameSync(sub, destSub); };

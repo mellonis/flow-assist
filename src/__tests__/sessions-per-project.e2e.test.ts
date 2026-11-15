@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, journalPath, newSessionId, projectHome, saveSession, type Session } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { listTree } from './helpers/session-files';
+import { isSessionFile, sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -44,11 +44,11 @@ test('a session started in a root lands under its mirror directory — the state
   expect(lock).toBeDefined(); // held from the first message, beside where the file goes
   await t.ui.press('escape', 'escape'); // closed — written at once
   const files = fs.readdirSync(home);
-  const state = files.find((n) => n.endsWith('.json'))!;
+  const state = files.find(isSessionFile)!;
   const id = state.replace(/\.json$/, '');
   expect(JSON.parse(fs.readFileSync(path.join(home, state), 'utf8')).project).toBe(app);
   expect(fs.existsSync(journalPath(home, id))).toBe(true);
-  expect(listTree(dir).filter((n) => n.endsWith('.json'))).toEqual([path.relative(dir, path.join(home, state))]); // nothing at the top level
+  expect(sessionFiles(dir)).toEqual([path.relative(dir, path.join(home, state))]); // nothing at the top level
   t.ui.app.unmount();
 });
 
@@ -68,7 +68,7 @@ test('a flat file from an older host still loads — as a session with no projec
   expect(t.ui.backend.lastFrame).toContain('an old flat question');
   await t.ask('and one more');
   await t.ui.press('escape', 'escape');
-  expect(listTree(dir).filter((n) => n.endsWith('.json'))).toEqual([`${legacy.id}.json`]);
+  expect(sessionFiles(dir)).toEqual([`${legacy.id}.json`]);
   const back = JSON.parse(fs.readFileSync(path.join(dir, `${legacy.id}.json`), 'utf8'));
   expect(back.messages.some((m: { content: unknown }) => m.content === 'and one more')).toBe(true);
   expect(back.project ?? null).toBeNull(); // no project, as it was
@@ -126,7 +126,7 @@ test('the project is decided at the first message: a cd into another root later 
   await t.ui.press('backspace'); // out of shell mode
   await t.ask('second in B');
   await t.ui.press('escape', 'escape');
-  const files = listTree(dir).filter((n) => n.endsWith('.json'));
+  const files = sessionFiles(dir);
   expect(files).toHaveLength(1);
   expect(path.join(dir, path.dirname(files[0]!))).toBe(projectHome(dir, a));
   const saved = JSON.parse(fs.readFileSync(path.join(dir, files[0]!), 'utf8'));
