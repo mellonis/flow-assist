@@ -26,7 +26,7 @@ the way an unknown tool group already degrades.
   nothing means the provider's own default, exactly as today.
 - **Inheritance.** A child started without a role runs its parent's model. The parent's
   model is materialised on the child at its start, so a task started by a subagent that
-  runs `coder-mini` runs `coder-mini` too.
+  runs `small-model` runs `small-model` too.
 - **`ai.model` is never read as a role.** It is a model id; a role that resolved to
   itself would be a circle.
 - **An unknown role is not an error.** The agent or the task runs on the conversation's
@@ -52,6 +52,11 @@ the way an unknown tool group already degrades.
   its own, and it lives as long as the child.
 - **A run with no conversation of its own** — the one-shot prompt, a plugin's
   `services.chatLLM` — keeps `ai.model`: nothing there names a role.
+- **No endpoint's own model id appears in the tree.** Tests, source comments and the
+  docs use neutral ids — `small-model`, `default-model`, `big-model`, `unlisted-model` —
+  and roles `fast` / `deep`. A real id in a fixture reads as a statement about some
+  machine, and the same names in a test and in a config invite a copy-paste that only
+  works on one endpoint.
 
 ## File structure
 
@@ -91,12 +96,12 @@ import { withModel, llmOpts } from '../llm-endpoint.ts';
 import { DEFAULT_CONTEXT_WINDOW } from '../context-meter.ts';
 import { hostConfigSchema } from '../../config/schema.ts';
 
-const ai = { model: 'coder-medium', roles: { fast: 'coder-mini' }, models: { 'coder-mini': { contextWindow: 256_000 }, coder: { contextWindow: 512_000 } }, contextWindow: 300_000 };
+const ai = { model: 'default-model', roles: { fast: 'small-model' }, models: { 'small-model': { contextWindow: 256_000 }, 'big-model': { contextWindow: 512_000 } }, contextWindow: 300_000 };
 
 describe('roles', () => {
   test('a role is the model id ai.roles names for it', () => {
-    expect(roleModel(ai, 'fast')).toBe('coder-mini');
-    expect(roleModel(ai, '  fast  ')).toBe('coder-mini');
+    expect(roleModel(ai, 'fast')).toBe('small-model');
+    expect(roleModel(ai, '  fast  ')).toBe('small-model');
   });
   test('a role nothing defines has no model', () => {
     expect(roleModel(ai, 'deep')).toBeUndefined();
@@ -104,11 +109,11 @@ describe('roles', () => {
     expect(roleModel(ai, undefined)).toBeUndefined();
   });
   test('ai.model is a model id, never read as a role', () => {
-    expect(baseModel({ model: 'fast', roles: { fast: 'coder-mini' } })).toBe('fast');
+    expect(baseModel({ model: 'fast', roles: { fast: 'small-model' } })).toBe('fast');
     expect(baseModel({})).toBeUndefined();
   });
   test('a start that asks for a role gets the model, or one note', () => {
-    expect(roleStart(ai, 'fast')).toEqual({ model: 'coder-mini' });
+    expect(roleStart(ai, 'fast')).toEqual({ model: 'small-model' });
     expect(roleStart(ai, 'deep')).toEqual({ note: 'role "deep" is not defined (ai.roles) — using the conversation\'s model' });
     expect(roleStart(ai, '')).toEqual({});
   });
@@ -116,11 +121,11 @@ describe('roles', () => {
 
 describe('the window', () => {
   test('a model in the catalogue has its own', () => {
-    expect(modelWindow(ai, 'coder')).toBe(512_000);
-    expect(modelWindow(ai, 'coder-mini')).toBe(256_000);
+    expect(modelWindow(ai, 'big-model')).toBe(512_000);
+    expect(modelWindow(ai, 'small-model')).toBe(256_000);
   });
   test('a model the catalogue does not name falls back to ai.contextWindow', () => {
-    expect(modelWindow(ai, 'gpt-x')).toBe(300_000);
+    expect(modelWindow(ai, 'unlisted-model')).toBe(300_000);
     expect(modelWindow(ai, undefined)).toBe(300_000);
   });
   test('with neither, 200k — and a nonsense value is no value', () => {
@@ -131,25 +136,25 @@ describe('the window', () => {
 
 describe('withModel', () => {
   test('a conversation on its own model overrides ai.model, and nothing else', () => {
-    const base = llmOpts({ model: 'coder-medium', maxTokens: 4096 });
-    expect(withModel(base, 'coder-mini')).toMatchObject({ model: 'coder-mini', maxTokens: 4096 });
-    expect(withModel(base, 'coder-mini').provider).toBe(base.provider);
+    const base = llmOpts({ model: 'default-model', maxTokens: 4096 });
+    expect(withModel(base, 'small-model')).toMatchObject({ model: 'small-model', maxTokens: 4096 });
+    expect(withModel(base, 'small-model').provider).toBe(base.provider);
   });
   test('no model of its own leaves the options as they are', () => {
-    const base = llmOpts({ model: 'coder-medium' });
+    const base = llmOpts({ model: 'default-model' });
     expect(withModel(base, undefined)).toBe(base);
   });
 });
 
 describe('the schema', () => {
   test('takes the catalogue and the roles', () => {
-    const parsed = hostConfigSchema.parse({ ai: { models: { coder: { contextWindow: 512_000 } }, roles: { fast: 'coder-mini' } } });
-    expect(parsed.ai?.models).toEqual({ coder: { contextWindow: 512_000 } });
-    expect(parsed.ai?.roles).toEqual({ fast: 'coder-mini' });
+    const parsed = hostConfigSchema.parse({ ai: { models: { 'big-model': { contextWindow: 512_000 } }, roles: { fast: 'small-model' } } });
+    expect(parsed.ai?.models).toEqual({ 'big-model': { contextWindow: 512_000 } });
+    expect(parsed.ai?.roles).toEqual({ fast: 'small-model' });
   });
   test('refuses a window that is not a positive integer', () => {
-    expect(hostConfigSchema.safeParse({ ai: { models: { coder: { contextWindow: 0 } } } }).success).toBe(false);
-    expect(hostConfigSchema.safeParse({ ai: { models: { coder: { contextWindow: 1.5 } } } }).success).toBe(false);
+    expect(hostConfigSchema.safeParse({ ai: { models: { 'big-model': { contextWindow: 0 } } } }).success).toBe(false);
+    expect(hostConfigSchema.safeParse({ ai: { models: { 'big-model': { contextWindow: 1.5 } } } }).success).toBe(false);
   });
 });
 ```
@@ -248,8 +253,8 @@ Inside `ai`, after `model: z.string().optional(),` add:
 `'ai.provider'`), so `config_schema` explains both keys without printing a value:
 
 ```ts
-  'ai.roles': 'what a name an agent file or the subagent tool asks for runs on: config set ai.roles.fast coder-mini makes model: fast in an agent file mean coder-mini here. Roles travel between machines, model ids do not — a role this machine does not define runs the agent on the conversation\'s model and says so',
-  'ai.models': 'what a model can hold, by model id: config set ai.models.coder \'{"contextWindow":512000}\'. The API cannot be asked for it, and the meter, the automatic compaction and the recall threshold measure against the window of the model a conversation runs. A model not named here uses ai.contextWindow (200000 otherwise)',
+  'ai.roles': 'what a name an agent file or the subagent tool asks for runs on: config set ai.roles.fast small-model makes model: fast in an agent file mean small-model here. Roles travel between machines, model ids do not — a role this machine does not define runs the agent on the conversation\'s model and says so',
+  'ai.models': 'what a model can hold, by model id: config set ai.models.big-model \'{"contextWindow":512000}\'. The API cannot be asked for it, and the meter, the automatic compaction and the recall threshold measure against the window of the model a conversation runs. A model not named here uses ai.contextWindow (200000 otherwise)',
 ```
 
 **Note:** both keys sit under `ai`, which `isLeashKey` already covers; do **not** add a
@@ -301,10 +306,10 @@ import { ScriptedModel } from './helpers/scripted';
 afterEach(closeRigs);
 
 const AI = {
-  model: 'coder-medium',
+  model: 'default-model',
   contextWindow: 300_000,
-  models: { 'coder-medium': { contextWindow: 262_000 }, 'coder-mini': { contextWindow: 256_000 }, coder: { contextWindow: 512_000 } },
-  roles: { fast: 'coder-mini', deep: 'coder' },
+  models: { 'default-model': { contextWindow: 262_000 }, 'small-model': { contextWindow: 256_000 }, 'big-model': { contextWindow: 512_000 } },
+  roles: { fast: 'small-model', deep: 'big-model' },
 };
 
 test('a conversation runs ai.model and measures against that model\u2019s window', async () => {
@@ -312,8 +317,8 @@ test('a conversation runs ai.model and measures against that model\u2019s window
   const rig = conversationRig(model, { ai: AI });
   model.script([{ text: 'ok' }]);
   await rig.conv.send('hi');
-  expect(model.requests.at(-1)?.model).toBe('coder-medium');
-  expect(rig.conv.effectiveModel()).toBe('coder-medium');
+  expect(model.requests.at(-1)?.model).toBe('default-model');
+  expect(rig.conv.effectiveModel()).toBe('default-model');
   expect(rig.conv.contextWindow()).toBe(262_000);
 });
 
@@ -443,24 +448,24 @@ notes join gains `started.note ?? ''`. Import `roleStart` from
 **Tests.**
 
 `agent-model.test.ts` (pure): a starter whose `ai()` answers the catalogue —
-- an agent file with `model: fast` → `plan.model === 'coder-mini'`, `plan.roleNote === ''`;
-- the call's `model: 'deep'` over an agent file that says `fast` → `plan.model === 'coder'`;
+- an agent file with `model: fast` → `plan.model === 'small-model'`, `plan.roleNote === ''`;
+- the call's `model: 'deep'` over an agent file that says `fast` → `plan.model === 'big-model'`;
 - an unknown role → `plan.model` undefined, `plan.roleNote` the one sentence;
 - no role anywhere → no `model`, no `note`.
 
 `subagent-model.rig.test.ts` (rig):
 - an agent file with `model: fast`, started by the model through the tool: the child's
-  requests carry `model: 'coder-mini'` (`model.requests` filtered by `firstUser`, as
-  `subagent-agent-model.rig.test.ts` does), the session's still `coder-medium`, and
+  requests carry `model: 'small-model'` (`model.requests` filtered by `firstUser`, as
+  `subagent-agent-model.rig.test.ts` does), the session's still `default-model`, and
   `[...rig.conv.children][0].contextWindow()` is 256 000;
 - the tool's `model: 'fast'` on a PLAIN task → the same;
 - an unknown role on a plain task → the tool's answer (`rig.journal()`'s `call` event)
-  contains `role "nope" is not defined`, and the child's requests carry `coder-medium`;
-- a child with no role → inherits `coder-medium`.
+  contains `role "nope" is not defined`, and the child's requests carry `default-model`;
+- a child with no role → inherits `default-model`.
 
 `subagent-agent-start.e2e.test.ts` (the person's typed path): one more case — a project
 agent file with `model: fast`, trusted, started with `/subagent @id`, and the child's
-requests carry `coder-mini` (follow the file's existing helper for writing and trusting a
+requests carry `small-model` (follow the file's existing helper for writing and trusting a
 project agent file and for reading requests).
 
 **Run:** `bun test ./src/assistant/__tests__/agent-model.test.ts ./src/__tests__/subagent-model.rig.test.ts ./src/__tests__/subagent-agent-start.e2e.test.ts ./src/__tests__/subagent-agent-model.rig.test.ts`
@@ -487,10 +492,10 @@ project agent file and for reading requests).
 4. The journal: `startChild`'s `subagent` start line and `task-start` line gain
    `...(child.model ? { model: child.model } : {})`.
 
-**Tests:** in `agent-tree.test.ts` — a node with `model: 'coder-mini'` and
-`chatModel: 'coder-medium'` reads `· coder-mini` in the detail; with the same model as
+**Tests:** in `agent-tree.test.ts` — a node with `model: 'small-model'` and
+`chatModel: 'default-model'` reads `· small-model` in the detail; with the same model as
 the chat, nothing is added; the ended rows are unchanged. In the rig test — the journal's
-`subagent` start line carries `model: 'coder-mini'`.
+`subagent` start line carries `model: 'small-model'`.
 
 **Run:** `bun test ./src/assistant/__tests__/agent-tree.test.ts ./src/__tests__/subagent-model.rig.test.ts`
 
@@ -551,7 +556,7 @@ From the worktree, in this order:
 3. Read the diff with the contract above in hand: every request the host makes carries
    the conversation's model; the window has one reader; no key under `ai` carries a mark.
 4. A manual look with the real endpoint (the person's three models): an agent file with
-   `model: fast` and `/agents` showing `coder-mini` while the chat says nothing.
+   `model: fast` and `/agents` showing `small-model` while the chat says nothing.
 
 Then a PR against `master`, and — after the merge — the binary rebuilt
 (`bun run test:binary`, `bun run build:binary`, `rm` the installed file before `cp`,
