@@ -1210,6 +1210,9 @@ export class Conversation {
     child.label = spec.label;
     child.spawnedBy = spec.by;
     child.agent = spec.agent ?? null;
+    // A child without a role of its own runs its parent's model, materialised here so a
+    // task started by a subagent runs what that subagent runs.
+    child.model = spec.model ?? this.effectiveModel();
     // The allow-list is inherited: a child of a conversation that has one gets it, and the
     // intersection when it names its own.
     child.toolGroups = this.toolGroups && spec.toolGroups ? spec.toolGroups.filter((g) => this.toolGroups!.includes(g)) : (spec.toolGroups ?? this.toolGroups);

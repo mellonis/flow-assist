@@ -20,6 +20,7 @@ import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import { planAgentStart, type AgentStarter } from '../assistant/agent-model.js';
+import { roleStart } from '../assistant/model-roles.js';
 import { SKILL_FILE_MAX_CHARS, skillToolResult } from '../assistant/skill-model.js';
 import { SKILL_TOOL } from '../assistant/skill-file.js';
 import type { FoundSkills } from '../assistant/skill-find.js';
@@ -48,6 +49,9 @@ import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS } from '../assistant/llm-endpoin
 // workspace the memory and the workspace tools work in — absent, where the call's shell
 // is), the config.local.json path, and the active plugin's identity token.
 export interface CoreCtx {
+  // The host's config as it stands: the ctx carries it through `allServices`. The
+  // `subagent` tool resolves a role against its `ai.roles` here.
+  config?: Record<string, unknown>;
   workspaceProject?: () => string | null;
   configLocalPath?: string;
   pluginToken?: symbol;
@@ -441,6 +445,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           write: { type: 'boolean', description: 'Optional, default false (read-only: writes and commands are declined). true: the task may write and run commands, and each one stops for the person\'s yes in the chat that started it. Use it only when the job must change something.' },
           agent: { type: 'string', description: 'Optional: an agent from the system prompt\'s list, by its id (with or without @). It starts with its own prompt, tools and auto mode; `task` is then optional.' },
           args: { type: 'object', description: 'With `agent`: its parameter values by name, e.g. {"ticket": "T-1"}.' },
+          model: { type: 'string', description: 'Optional: a ROLE from ai.roles (e.g. "fast", "deep") — the model the work runs on. Roles are defined by the person; a model id here is not one. Costs the person pays for, so name one only when the work needs it (a big context, a cheap mechanical job).' },
         }, required: [] },
       },
     },
@@ -795,6 +800,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // and the tool says so in the toast and the log line.
         const agentName = String(args.agent ?? '').trim();
         let task = String(args.task ?? '').trim();
+        const role = String(args.model ?? '').trim();
         if (!agentName && !task) return 'task is required — the work to do in the background.';
         let label = String(args.label ?? '').trim() || task.slice(0, 40);
         // A named agent: its file's prompt (parameters filled, `task` after it), label,
@@ -803,12 +809,18 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (agentName) {
           const starter = (ctx as CoreCtx).agentStarter;
           if (!starter) return 'subagent: starting an agent by name is not available here.';
-          const plan = planAgentStart(starter, { agent: agentName, args: args.args, prompt: task });
+          const plan = planAgentStart(starter, { agent: agentName, args: args.args, prompt: task, model: role });
           if (!plan.ok) return plan.message;
           named = plan;
           task = plan.prompt;
           label = plan.label;
         }
+        // The plan resolved the file's role (or the call's, which wins); a plain task
+        // resolves the call's alone. A role nothing defines leaves the model absent, and
+        // the note says so in the answer.
+        const started = named
+          ? { model: named.model, note: named.roleNote }
+          : roleStart((ctx as CoreCtx).config?.ai, role);
         // Start delay: `in`/`at` (like remind), or immediately when neither is given.
         let ms = 0;
         const inStr = String(args.in ?? '').trim();
@@ -830,13 +842,13 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // An agent task may write under the person's y/n, as one started with `write: true`
         // does; whether it can ask is `startChild`'s rule.
         const writes = args.write === true || !!named;
-        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;
         if (named && named.mode !== 'ask') scheduled.child.setAutoMode(named.mode);
-        const absent = named ? [absentGroupsNote(named.id, named.absent), named.note].filter(Boolean).join('\n') : '';
-        return `${absent ? `${absent}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
+        const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? ''].filter(Boolean).join('\n');
+        return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
       case 'todo': {
         // Not write-confirmed (like memory): a y/n pause on every `todo add` would

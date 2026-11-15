@@ -91,6 +91,7 @@ export function agentStarterOf(c: Conversation): AgentStarter {
     labels: () => c.runningChildren().map((r) => r.label),
     running: () => runningAgentKeys(c),
     preload: (names, agentId) => preloadSkills(names, agentId, skillsFinderOf(c)),
+    ai: () => c.deps.config().ai,
   };
 }
 
