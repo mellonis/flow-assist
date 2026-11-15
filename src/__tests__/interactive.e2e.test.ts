@@ -48,7 +48,7 @@ function fakeScript(seen: Seen, backend: () => { suspended: boolean }): Interact
     const rec = args[1]!;
     seen.recordings.push(rec);
     seen.commands.push(fs.readFileSync(args.at(-1)!, 'utf8'));
-    const p = Bun.spawn([args[2]!, ...args.slice(3)], { cwd, stdin: new TextEncoder().encode('Ruslan\n'), stdout: 'pipe', stderr: 'pipe' });
+    const p = Bun.spawn([args[2]!, ...args.slice(3)], { cwd, env: { ...process.env }, stdin: new TextEncoder().encode('Ruslan\n'), stdout: 'pipe', stderr: 'pipe' });
     const out = await new Response(p.stdout).text();
     const code = await p.exited;
     fs.writeFileSync(rec, `^D\b\b${out.replace(/\n/g, '\r\n')}`);

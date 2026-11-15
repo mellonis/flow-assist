@@ -4,12 +4,19 @@ import {
   resolveColorRefs,
   resolveAppTheme,
   DEFAULT_THEME,
+  type Theme,
 } from '../theme';
+
+type Palette = Record<string, string>;
+// `Theme.modals` holds the flat base and the named palettes in one record; these
+// helpers say which of the two a test reads.
+const modalsOf = (theme: Theme): Record<string, Palette> => theme.modals as Record<string, Palette>;
+const baseOf = (theme: Theme): Palette => theme.modals as Palette;
 
 test('resolveModalPalettes merges base + modal default + plugin colors + override', () => {
   const theme = { modals: { bg: 'black', border: 'cyan' } };
   const out = resolveModalPalettes(theme, [{ name: 'chat', colors: { userBg: '#000' } }], {});
-  expect(out.modals.chat.userBg).toBe('#000');
+  expect(modalsOf(out).chat.userBg).toBe('#000');
 });
 
 test('resolveColorRefs expands ${token} against the theme', () => {
@@ -17,7 +24,7 @@ test('resolveColorRefs expands ${token} against the theme', () => {
 });
 
 test('DEFAULT_THEME carries the abstract modal base palette (bg/border/borderBg/text/selected/fieldBg/fieldBorder)', () => {
-  const m = DEFAULT_THEME.modals ?? {};
+  const m = baseOf(DEFAULT_THEME);
   expect(m.bg).toBe('black');
   expect(m.border).toBe('cyan');
   expect(m.borderBg).toBe('black');
@@ -33,45 +40,45 @@ test('DEFAULT_THEME carries the abstract modal base palette (bg/border/borderBg/
 test('resolveModalPalettes lays the base palette + MODAL_COLOR_DEFAULTS down on each modal', () => {
   const out = resolveModalPalettes(DEFAULT_THEME, [], {});
   // chat inherits the base (border/bg) and gets its own userBg default.
-  expect(out.modals.chat.border).toBe('cyan');
-  expect(out.modals.chat.bg).toBe('black');
-  expect(out.modals.chat.userBg).toBe('#2b2b40');
+  expect(modalsOf(out).chat.border).toBe('cyan');
+  expect(modalsOf(out).chat.bg).toBe('black');
+  expect(modalsOf(out).chat.userBg).toBe('#2b2b40');
   // The host ships no palette for a modal it does not draw.
-  expect(out.modals.relation).toBeUndefined();
+  expect(modalsOf(out).relation).toBeUndefined();
 });
 
 test("a plugin's modals take their palettes from its `modalColors`, over the base, under the person's override", () => {
   const boards = { name: 'boards', modalColors: { move: { border: 'blue' }, drop: { border: 'red', selected: 'yellow' } } };
   const out = resolveModalPalettes(DEFAULT_THEME, [boards], { plugins: { drop: { colors: { border: '${success}' } } } });
-  expect(out.modals.move).toEqual({ ...DEFAULT_THEME.modals, border: 'blue' });
-  expect(out.modals.drop.selected).toBe('yellow');
-  expect(out.modals.drop.border).toBe('green'); // the override, its `${success}` resolved
-  expect(out.modals.drop.bg).toBe('black');
+  expect(modalsOf(out).move).toEqual({ ...DEFAULT_THEME.modals, border: 'blue' });
+  expect(modalsOf(out).drop.selected).toBe('yellow');
+  expect(modalsOf(out).drop.border).toBe('green'); // the override, its `${success}` resolved
+  expect(modalsOf(out).drop.bg).toBe('black');
 });
 
 test("a plugin's `modalColors` never restyles a host modal, and the first plugin to name a modal keeps it", () => {
   const a = { name: 'a', modalColors: { chat: { userBg: '#ffffff' }, pick: { border: 'blue' } } };
   const b = { name: 'b', modalColors: { pick: { border: 'red' } } };
   const out = resolveModalPalettes(DEFAULT_THEME, [a, b], {});
-  expect(out.modals.chat.userBg).toBe('#2b2b40');
-  expect(out.modals.pick.border).toBe('blue');
+  expect(modalsOf(out).chat.userBg).toBe('#2b2b40');
+  expect(modalsOf(out).pick.border).toBe('blue');
 });
 
 test('resolveAppTheme merges the user theme over the base and resolves palettes + plugin colors', () => {
   const out = resolveAppTheme(undefined, [{ name: 'keycaps', colors: { bg: '#1a1b26' } }], {});
   // base + per-modal defaults present.
-  expect(out.modals.chat.border).toBe('cyan');
-  expect(out.modals.chat.userBg).toBe('#2b2b40');
+  expect(modalsOf(out).chat.border).toBe('cyan');
+  expect(modalsOf(out).chat.userBg).toBe('#2b2b40');
   // top-level palette keys survive.
   expect(out.selected).toBe('green');
   expect(out.error).toBe('red');
   // a plugin palette (non-modal) resolves into theme.<name>.
-  expect(out.keycaps.bg).toBe('#1a1b26');
+  expect((out.keycaps as Palette).bg).toBe('#1a1b26');
 });
 
 test('resolveAppTheme lets the user theme override the base palette', () => {
   const out = resolveAppTheme({ modals: { border: 'red' }, error: 'yellow' }, [], {});
-  expect(out.modals.chat.border).toBe('red');
+  expect(modalsOf(out).chat.border).toBe('red');
   expect(out.error).toBe('yellow');
 });
 
@@ -99,14 +106,14 @@ test('every colour the host ships is one flowtty can paint', async () => {
 test('each scheme has its own grounds, and the person\'s theme wins over every scheme', () => {
   const dark = resolveAppTheme(undefined, [], {}, 'dark');
   const light = resolveAppTheme(undefined, [], {}, 'light');
-  expect(dark.modals.chat.bg).toBe('black');
-  expect(light.modals.chat.bg).toBe('#f4f4f6');
-  expect(light.modals.chat.text).toBe('black');
-  expect(light.modals.chat.userBg).not.toBe(dark.modals.chat.userBg);
+  expect(modalsOf(dark).chat.bg).toBe('black');
+  expect(modalsOf(light).chat.bg).toBe('#f4f4f6');
+  expect(modalsOf(light).chat.text).toBe('black');
+  expect(modalsOf(light).chat.userBg).not.toBe(modalsOf(dark).chat.userBg);
   // A plugin palette written as `${token}` follows the scheme.
   const panel = { name: 'panel', colors: { bg: '${panelBg}' } };
-  expect(resolveAppTheme(undefined, [panel], {}, 'dark').panel.bg).toBe('#1a1b26');
-  expect(resolveAppTheme(undefined, [panel], {}, 'light').panel.bg).toBe('#ececf2');
+  expect((resolveAppTheme(undefined, [panel], {}, 'dark').panel as Palette).bg).toBe('#1a1b26');
+  expect((resolveAppTheme(undefined, [panel], {}, 'light').panel as Palette).bg).toBe('#ececf2');
   // A colour the person set stays theirs, on light as on dark.
   const mine = resolveAppTheme({ error: 'magenta' }, [], {}, 'light');
   expect(mine.error).toBe('magenta');

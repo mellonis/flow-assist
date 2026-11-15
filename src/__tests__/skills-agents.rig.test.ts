@@ -26,7 +26,7 @@ afterEach(() => {
 
 const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); return file; };
 const skillDoc = (name: string, body: string) => `---\ndescription: ${name} words\n---\n${body}\n`;
-const toolNames = (req: { tools?: unknown }): string[] => ((req.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+const toolNames = (req: { tools?: unknown; [k: string]: unknown }): string[] => ((req.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
 
 function record(dir: string, source: { kind: 'person' } | { kind: 'project' }): void {
   const fresh = loadSkillFresh(dir, source);

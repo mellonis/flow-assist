@@ -193,7 +193,7 @@ async function readCapped(res: Response, maxBytes: number, charset: string): Pro
   let at = 0;
   for (const c of chunks) { all.set(c, at); at += c.length; }
   let text: string;
-  try { text = new TextDecoder(charset).decode(all); } catch { text = new TextDecoder('utf-8').decode(all); }
+  try { text = new TextDecoder(charset as ConstructorParameters<typeof TextDecoder>[0]).decode(all); } catch { text = new TextDecoder('utf-8').decode(all); }
   return { text, cut };
 }
 

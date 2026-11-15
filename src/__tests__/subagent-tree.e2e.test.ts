@@ -1,12 +1,12 @@
 // The conversation's live subagents and tasks as rows under the field (AGENTS.md (agent
-// tree)). The real app on the scripted model; a child is held with `{ hold: true }` until
+// tree)). The real app on the scripted model; a child is held with `{ hold: true as const }` until
 // the test lets it go.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -25,7 +25,7 @@ const boards = (make: any) => [make('boards', { name: 'boards', keycaps: () => [
 
 // A booted chat with one scripted child per mark. `hold`: the child waits before it acts;
 // `writes`: it then asks for a write, else it just answers.
-async function boot(marks: { mark: string; writes?: boolean; script?: any[][] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; ui?: Record<string, unknown>; main?: any[][]; guest?: boolean } = {}) {
+async function boot(marks: { mark: string; writes?: boolean; script?: Turn[] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; ui?: Record<string, unknown>; main?: Turn[]; guest?: boolean } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tree-')));
@@ -33,11 +33,11 @@ async function boot(marks: { mark: string; writes?: boolean; script?: any[][] }[
   const model = new ScriptedModel();
   const children = marks.map(({ mark, writes, script }) => {
     const child = model.when((req) => firstUser(req).includes(mark));
-    if (script) child.script(...script as never);
-    else child.script([{ hold: true }, ...(writes ? [{ tool: 'run_command', args: { command: `touch ${path.join(root, `${mark}.txt`)}` } }] : [])], [{ text: `${mark} settled` }]);
+    if (script) child.script(...script);
+    else child.script([{ hold: true as const }, ...(writes ? [{ tool: 'run_command', args: { command: `touch ${path.join(root, `${mark}.txt`)}` } }] : [])] as Turn, [{ text: `${mark} settled` }]);
     return child;
   });
-  if (opts.main) model.script(...opts.main as never);
+  if (opts.main) model.script(...opts.main);
   const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, boards as never, { sessions: { dir: sessions }, shell: { roots: [root] }, ...(opts.ui ? { ui: opts.ui } : {}), ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });
   await ui.press('F');
   return { children, ui, model, root, sessions };
@@ -78,7 +78,7 @@ test('a subagent that waits for a y/n is marked ⏸ and, with more nodes than ro
 
 test('a grandchild is indented under its parent', async () => {
   const { children: [outer, inner], ui } = await boot([
-    { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'OUTER', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true as const }, { text: 'outer settled' }]] },
     { mark: 'INNER' },
   ]);
   await ask(ui, '/subagent OUTER go');
@@ -249,7 +249,7 @@ test('the ↓ that ends a history walk, or follows a cleared history entry, does
 
 test('x then y stops the node as the person and journals it so; x then n does not; a node stops what it started', async () => {
   const { children: [outer, inner, other], ui, sessions } = await boot([
-    { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'OUTER', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true as const }, { text: 'outer settled' }]] },
     { mark: 'INNER' },
     { mark: 'OTHER' },
   ]);
@@ -286,7 +286,7 @@ test('x then y stops the node as the person and journals it so; x then n does no
 });
 
 test('a key typed in the rows reaches neither the field nor the model, and Esc there is not the turn\'s stop or the exit arm', async () => {
-  const { children: [a, b], ui, model } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true }, { text: 'main answer' }]] });
+  const { children: [a, b], ui, model } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true as const }, { text: 'main answer' }]] });
   await ask(ui, '/subagent AAA go');
   await ask(ui, '/subagent BBB go');
   await settleUntil(() => a!.held && b!.held);
@@ -476,7 +476,7 @@ test('x then y with a child\'s request waiting stops the node and approves nothi
 
 test('an own y/n that arrives while the cursor is in the rows takes the keys, and the cursor does not come back', async () => {
   const root0 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tree-own-')));
-  const { children: [a, b], ui, model, root } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${path.join(root0, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
+  const { children: [a, b], ui, model, root } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(root0, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
   void root;
   await ask(ui, '/subagent AAA go');
   await ask(ui, '/subagent BBB go');
@@ -508,7 +508,7 @@ test('an own y/n that arrives while the cursor is in the rows takes the keys, an
 // not approve the write.
 async function ownRequestOver(open: 'rows' | 'agents') {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tree-own-')));
-  const booted = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${path.join(dir, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
+  const booted = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(dir, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
   const { children: [a, b], ui, model } = booted;
   await ask(ui, '/subagent AAA go');
   await ask(ui, '/subagent BBB go');
@@ -580,7 +580,7 @@ test('/agents with nothing to show says so, and Esc closes it', async () => {
 
 test('/agents lists live nodes in tree order with their time (a subagent that answered among them, idle) and then the ended ones; x on an ended row is refused', async () => {
   const { children: [outer, inner, other], ui } = await boot([
-    { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'OUTER', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true as const }, { text: 'outer settled' }]] },
     { mark: 'INNER' },
     { mark: 'OTHER' },
   ]);

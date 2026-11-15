@@ -10,7 +10,9 @@
     "build": "tsc",
     "build:binary": "bun build --compile --define 'process.env.NODE_ENV=\"production\"' src/cli.ts --outfile dist/flow-assist",
     "plugin:publish": "bun run scripts/publish.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && bun run typecheck:tests",
+    "typecheck:src": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "bun test",
     "test:binary": "FLOW_ASSIST_BINARY_TEST=1 bun test src/__tests__/binary.test.ts"
   },

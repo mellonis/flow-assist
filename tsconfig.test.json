@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["bun", "node"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/**/__tests__/**/*.ts",
+    "src/**/__tests__/**/*.tsx",
+    "packages/remote/src/**/__tests__/**/*.ts",
+    "plugins-available/*/src/**/__tests__/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

@@ -59,11 +59,11 @@ test('remind parses a duration/clock and delegates to the host setReminder', asy
   const ctx = { setReminder: (text: string, ms: number) => { called = { text, ms }; } } as any;
   const out = await reg.exec('remind', { text: 'blink', in: '3 minutes' }, ctx);
   expect(out).toContain('Reminder set');
-  expect(called).toEqual({ text: 'blink', ms: 180000 });
+  expect(called!).toEqual({ text: 'blink', ms: 180000 });
   // A wall-clock time (`at`) also schedules; past time rolls to tomorrow.
   let atMs: number | null = null;
   const atOut = await reg.exec('remind', { text: 'stand up', at: '01:30' }, { setReminder: (_t: string, ms: number) => { atMs = ms; } } as any);
-  expect(atOut).toContain('Reminder set');
+  expect(String(atOut)).toContain('Reminder set');
   expect(typeof atMs).toBe('number');
   // An unparseable duration is rejected, not thrown.
   const bad = await reg.exec('remind', { text: 'x', in: 'three minutes' }, { setReminder: () => {} } as any);
@@ -312,7 +312,7 @@ test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', (
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
   const wireDef = reg.tools.find((t) => t.function.name === 't:wide');
   expect(wireDef).toBeDefined();
-  expect((wireDef as Record<string, unknown>).maxResultChars).toBeUndefined();
+  expect((wireDef as unknown as Record<string, unknown>).maxResultChars).toBeUndefined();
 });
 
 test('background\'s description promises only what the default keeps: the results land after the turn, and one turn reads them', () => {
@@ -404,13 +404,13 @@ test('host:plugins_list reports the always-loaded built-ins, not just the (empty
   // LLM would conclude "no plugins" (as it once did in the chat: "there is no keycaps plugin").
   const plugins = ['core', 'assistant', 'keycaps', 'log'].map(name => make(name, { keys: {} }));
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
-  const out = JSON.parse(await reg.exec('host:plugins_list', {}, {})) as { name: string; builtin?: boolean }[];
+  const out = JSON.parse(String(await reg.exec('host:plugins_list', {}, {}))) as { name: string; builtin?: boolean }[];
   const names = out.map(e => e.name);
   expect(names).toEqual(['core', 'assistant', 'keycaps', 'log']);
   expect(out.every(e => e.builtin === true)).toBe(true);
   // A registry plugin is still listed alongside the built-ins (deduped by name).
   const reg2 = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => ([{ name: 'tracker', version: '1.0', description: '', active: true, missingDeps: [], source: 'registry' }]) } as any });
-  const out2 = JSON.parse(await reg2.exec('host:plugins_list', {}, {})) as { name: string; builtin?: boolean }[];
+  const out2 = JSON.parse(String(await reg2.exec('host:plugins_list', {}, {}))) as { name: string; builtin?: boolean }[];
   expect(out2.map(e => e.name)).toContain('tracker');
   expect(out2.filter(e => e.name === 'tracker')[0].builtin).toBeUndefined();
 });
@@ -422,7 +422,7 @@ test('plugin tool exec receives the HOST-issued pluginToken, ignoring a caller-s
     tools: [{
       id: 'keycaps', alwaysOn: false,
       tools: [{ type: 'function', function: { name: 'keycaps:who', description: '', parameters: {} } }],
-      exec: async (_n, _a, ctx) => { token = ctx.pluginToken; return 'ok'; },
+      exec: async (_n: string, _a: unknown, ctx: { pluginToken?: symbol }) => { token = ctx.pluginToken; return 'ok'; },
     }],
   })];
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });

@@ -131,11 +131,20 @@ export async function reach(send: () => Promise<Response>, signal?: AbortSignal)
   }
 }
 
+// The part of a body reader a round reads: the host's fetch and `@types/node` declare
+// `ReadableStreamDefaultReader` differently (one adds `readMany`), so a round takes this
+// structural view of it.
+export type ChunkRead = { done: true; value?: undefined } | { done: false; value: Uint8Array };
+export interface ChunkReader {
+  read(): Promise<ChunkRead>;
+  cancel(reason?: unknown): Promise<void>;
+}
+
 // One `reader.read()` of a streamed body. A failure of the connection while the body is
 // read is the network's, by the same rule as `reach`; the reader is cancelled before the
 // error goes on, and `withRetry` repeats the round only if it has delivered nothing. A
 // stop by the person stays an abort.
-export async function readChunk(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal): ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']> {
+export async function readChunk(reader: ChunkReader, signal?: AbortSignal): Promise<ChunkRead> {
   try {
     return await reader.read();
   } catch (e) {

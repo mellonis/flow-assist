@@ -1,6 +1,6 @@
 // Watching a child (AGENTS.md (watching a child)): ⏎ on a subagent's row shows its conversation
 // where the list is, the session's own values stay the session's, and Esc steps back. The
-// real app on the scripted model; a child is held with `{ hold: true }` until the test lets
+// real app on the scripted model; a child is held with `{ hold: true as const }` until the test lets
 // it go.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { isSessionFile } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -40,9 +40,9 @@ const boards = (make: any) => [make('boards', {
   },
 })];
 
-const STEP = (mark: string) => [[{ hold: true }, { text: `${mark} step`, tool: 'datetime', args: {} }], [{ hold: true }, { text: `${mark} settled` }]];
+const STEP = (mark: string): Turn[] => [[{ hold: true as const }, { text: `${mark} step`, tool: 'datetime', args: {} }], [{ hold: true as const }, { text: `${mark} settled` }]];
 
-async function boot(marks: { mark: string; script?: any[][] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; main?: any[][]; root?: string } = {}) {
+async function boot(marks: { mark: string; script?: Turn[] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; main?: Turn[]; root?: string } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = opts.root ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-')));
@@ -50,17 +50,17 @@ async function boot(marks: { mark: string; script?: any[][] }[], opts: { cols?: 
   const model = new ScriptedModel();
   const children = marks.map(({ mark, script }) => {
     const child = model.when((req) => firstUser(req).includes(mark));
-    child.script(...(script ?? STEP(mark)) as never);
+    child.script(...(script ?? STEP(mark)));
     return child;
   });
-  if (opts.main) model.script(...opts.main as never);
+  if (opts.main) model.script(...opts.main);
   const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, boards as never, { sessions: { dir: sessions }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });
   await ui.press('F');
   return { children, ui, model, root, sessions };
 }
 
 // One held child named after `mark`, with the cursor on its row.
-async function oneHeld(mark = 'WATA', opts: Parameters<typeof boot>[1] = {}, script?: any[][]) {
+async function oneHeld(mark = 'WATA', opts: Parameters<typeof boot>[1] = {}, script?: Turn[]) {
   const b = await boot([{ mark, script }], opts);
   await ask(b.ui, `/subagent ${mark} do it`);
   await settleUntil(() => b.children[0]!.held);
@@ -69,7 +69,7 @@ async function oneHeld(mark = 'WATA', opts: Parameters<typeof boot>[1] = {}, scr
 }
 // One held background task the model starts (a task ends after its answer; a subagent the
 // person starts stays), named after `mark`, with the cursor on its row.
-async function oneHeldTask(mark: string, opts: Parameters<typeof boot>[1] = {}, script?: any[][]) {
+async function oneHeldTask(mark: string, opts: Parameters<typeof boot>[1] = {}, script?: Turn[]) {
   const label = `${mark.toLowerCase()}-do-it`;
   const b = await boot([{ mark, script }], { ...opts, main: [[{ tool: 'subagent', args: { task: `${mark} do it`, label } }], [{ text: 'started' }]] });
   await ask(b.ui, 'run it');
@@ -266,7 +266,7 @@ test('x asks in the hint row; n and Esc drop the question and the watch stays; y
 });
 
 test('a session\'s answer that arrives while watching is not marked seen until Esc', async () => {
-  const { children: [a], ui, model, sessions } = await boot([{ mark: 'WATC' }], { main: [[{ hold: true }, { text: 'MAIN-ANSWER' }]] });
+  const { children: [a], ui, model, sessions } = await boot([{ mark: 'WATC' }], { main: [[{ hold: true as const }, { text: 'MAIN-ANSWER' }]] });
   await ask(ui, '/subagent WATC do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
@@ -295,7 +295,7 @@ for (const pause of [50, 700]) {
   test(`the session's own y/n ends the watch and is armed: a y ${pause} ms after it ${pause < 600 ? 'approves nothing' : 'approves it'}`, async () => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-own-')));
     const own = path.join(dir, 'OWN.txt');
-    const { children: [a], ui, model } = await boot([{ mark: 'WATD' }], { main: [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'main done' }]] });
+    const { children: [a], ui, model } = await boot([{ mark: 'WATD' }], { main: [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'main done' }]] });
     await ask(ui, '/subagent WATD do it');
     await settleUntil(() => a!.held);
     await ask(ui, 'main go');
@@ -360,7 +360,7 @@ test('the details key opens the watched rows and leaves the session\'s folds as 
 
 test('a grandchild\'s breadcrumb has two labels', async () => {
   const { children: [outer, inner], ui } = await boot([
-    { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'OUTER', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true as const }, { text: 'outer settled' }]] },
     { mark: 'INNER' },
   ]);
   await ask(ui, '/subagent OUTER go');
@@ -385,7 +385,7 @@ test('a grandchild\'s breadcrumb has two labels', async () => {
 // A child with a long prompt overflows the list at once; its last answer arrives later.
 const LONG = Array.from({ length: 90 }, (_, i) => `word${i}`).join(' ');
 async function overflowing() {
-  const b = await boot([{ mark: 'WATF', script: [[{ hold: true }, { text: 'WATF step', tool: 'datetime', args: {} }], [{ hold: true }, { text: 'ARRIVED-LATER' }]] }], { cols: 70, rows: 22 });
+  const b = await boot([{ mark: 'WATF', script: [[{ hold: true as const }, { text: 'WATF step', tool: 'datetime', args: {} }], [{ hold: true as const }, { text: 'ARRIVED-LATER' }]] }], { cols: 70, rows: 22 });
   await ask(b.ui, `/subagent WATF ${LONG}`);
   await settleUntil(() => b.children[0]!.held);
   await settleUntil(() => frameOf(b.ui).includes('⚙ watf-'));
@@ -435,7 +435,7 @@ test('the sessions key ends the watch and opens the picker', async () => {
 });
 
 test('a question of the session ends the watch', async () => {
-  const { children: [a], ui, model } = await boot([{ mark: 'WATH' }], { main: [[{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]] });
+  const { children: [a], ui, model } = await boot([{ mark: 'WATH' }], { main: [[{ hold: true as const }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]] });
   await ask(ui, '/subagent WATH do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
@@ -510,7 +510,7 @@ test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on 
 const BLOCK = 'Confirm write: run_command';
 const tmpRoot = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-ask-')));
 // A child that waits to be released, asks to write `file`, and then says it is settled.
-const asks = (mark: string, file: string) => [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${file}` } }], [{ text: `${mark} settled` }]];
+const asks = (mark: string, file: string) => [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${file}` } }], [{ text: `${mark} settled` }]];
 
 // One child that will ask, watched; the request lands on `release`.
 async function watchedAsker(mark: string, label: string, opts: Parameters<typeof boot>[1] & { via?: 'agents' } = {}) {
@@ -679,7 +679,7 @@ test('a grandchild\'s request is drawn while its parent is watched, labelled wit
   const root = tmpRoot();
   const file = path.join(root, 'DEEP.txt');
   const { children: [outer, inner], ui } = await boot([
-    { mark: 'OUTR', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNR work', label: 'inner', write: true } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'OUTR', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNR work', label: 'inner', write: true } }], [{ hold: true as const }, { text: 'outer settled' }]] },
     { mark: 'INNR', script: asks('INNR', file) },
   ], { root });
   await ask(ui, '/subagent OUTR go');
@@ -776,7 +776,7 @@ test('where the block would undock the chat, the watch says so in one line and n
 
 // ---- the session's own question over a watch or the tree cursor ----
 
-const QUESTION = [[{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]];
+const QUESTION = [[{ hold: true as const }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]];
 
 for (const where of ['watching', 'the cursor in the rows'] as const) {
   test(`the session's own question that arrives while ${where} takes no key for the pause, then ⏎ answers it`, async () => {
@@ -835,7 +835,7 @@ function unguardSettings() {
   fs.rmSync(acceptedConfigPath(), { force: true });
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 }
-const HELD_MAIN = [[{ hold: true }, { tool: 'datetime', args: {} }], [{ text: 'main done' }]];
+const HELD_MAIN = [[{ hold: true as const }, { tool: 'datetime', args: {} }], [{ text: 'main done' }]];
 
 test('the settings file\'s y/n ends a watch: a y inside the pause creates the child\'s file in no case, and after it only the setting is applied', async () => {
   guardSettings();
@@ -929,8 +929,8 @@ test('x, y on a watched node that has not begun ends the watch on `ended: stoppe
 
 test('the breadcrumb follows a task that hands its child up while the child is watched, and stays as it was once the child ends', async () => {
   const { children: [outer, inner], ui } = await boot([
-    { mark: 'OUTQ', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNQ work', label: 'innq' } }], [{ hold: true }, { text: 'outer settled' }]] },
-    { mark: 'INNQ', script: [[{ hold: true }, { text: 'inner step', tool: 'datetime', args: {} }], [{ hold: true }, { text: 'inner settled' }]] },
+    { mark: 'OUTQ', script: [[{ hold: true as const }, { tool: 'subagent', args: { task: 'INNQ work', label: 'innq' } }], [{ hold: true as const }, { text: 'outer settled' }]] },
+    { mark: 'INNQ', script: [[{ hold: true as const }, { text: 'inner step', tool: 'datetime', args: {} }], [{ hold: true as const }, { text: 'inner settled' }]] },
   ], { main: [[{ tool: 'subagent', args: { task: 'OUTQ go', label: 'outq-go' } }], [{ text: 'started' }]] });
   await ask(ui, 'run it');
   await settleUntil(() => outer!.held);
@@ -956,7 +956,7 @@ test('the breadcrumb follows a task that hands its child up while the child is w
 test('a session\'s answer that arrives while watching counts as seen when its own y/n ends the watch', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-seen-')));
   const own = path.join(dir, 'SEEN.txt');
-  const { children: [a], ui, model, sessions } = await boot([{ mark: 'WATS' }], { main: [[{ hold: true }, { text: 'FIRST-ANSWER' }], [{ tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'second done' }]] });
+  const { children: [a], ui, model, sessions } = await boot([{ mark: 'WATS' }], { main: [[{ hold: true as const }, { text: 'FIRST-ANSWER' }], [{ tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'second done' }]] });
   await ask(ui, '/subagent WATS do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
@@ -1050,7 +1050,7 @@ test('in /agents ⏎ under a stop question starts no watch', async () => {
 });
 
 test('Ctrl+C in a watch does not stop the session\'s turn: it arms the exit, and a second one exits', async () => {
-  const { children: [a], ui, model } = await boot([{ mark: 'WCC' }], { main: [[{ hold: true }, { text: 'main answer' }]] });
+  const { children: [a], ui, model } = await boot([{ mark: 'WCC' }], { main: [[{ hold: true as const }, { text: 'main answer' }]] });
   await ask(ui, '/subagent WCC do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');

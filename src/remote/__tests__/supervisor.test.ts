@@ -4,7 +4,7 @@ import type { Transport } from '../transport';
 
 // A transport the test closes by hand; `made` holds one entry per factory call, in order.
 function scripted() {
-  const made: Array<{ t: Transport & { start(): Promise<void> }; close: (why: { code?: number }) => void; sent: string[] }> = [];
+  const made: Array<{ t: Transport & { start(): Promise<void> }; close: (why: { code?: number }) => void; sent: string[]; lines: Array<(l: string) => void> }> = [];
   const factory = () => {
     const closes: Array<(w: { code?: number }) => void> = []; const lines: Array<(l: string) => void> = []; const sent: string[] = [];
     const t = { send: (l: string) => { sent.push(l); }, onLine: (f: (l: string) => void) => { lines.push(f); }, onClose: (f: (w: { code?: number }) => void) => { closes.push(f); }, close: async () => {}, start: async () => {} };

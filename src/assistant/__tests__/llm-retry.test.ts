@@ -164,7 +164,7 @@ test('the real wait ends the moment the signal aborts', async () => {
 test('a failure that lands because the person stopped is the stop, not a failure to repeat', async () => {
   // Some runtimes surface an abort mid-request as a plain network TypeError.
   const stop = new AbortController();
-  globalThis.fetch = (async () => { stop.abort(); throw new TypeError('terminated'); }) as typeof fetch;
+  globalThis.fetch = (async () => { stop.abort(); throw new TypeError('terminated'); }) as unknown as typeof fetch;
   const stopped = await fails(chat({ signal: stop.signal }));
   expect(stopped.message).toBe('terminated');
   expect(stopped).toBeInstanceOf(TypeError); // passed through, not made a request error

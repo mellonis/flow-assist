@@ -3,7 +3,7 @@ import { loadPlugins } from '../loader/build';
 import { assembleToolRegistry } from '../loader/tools';
 import { createPluginRepo } from '../loader/repo';
 import { makeFactory } from '../loader/plugin';
-import type { PluginShape } from '../loader/plugin';
+import type { Plugin } from '../loader/plugin';
 import { hostConfigSchema } from '../config/schema';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -133,7 +133,7 @@ test('command line: ESC-only close, buffer clear, and up/down history', async ()
   // command-line fixes — `:` opens but does NOT close a typed line, executing a
   // command clears the buffer for the next open, and up/down recall history.
   const config: Record<string, unknown> = {};
-  const plugins: PluginShape[] = [];
+  const plugins: Plugin[] = [];
   const backend = new TestBackend(80, 24);
   const handle = await renderApp(backend, { plugins, config, onExit: () => {} });
   await flush();

@@ -83,7 +83,7 @@ test('D17: the answer is printed once, when the turn ends — no step and no str
 
 test('Q3: a turn that ends with reasoning and no text prints one empty line — never an earlier step — and exits 0', async () => {
   const model = new ScriptedModel();
-  model.script([{ text: 'Next: read the clock', tool: 'datetime', args: {} }], [{ thinking: 'nothing more to say' }]);
+  model.script([{ text: 'Next: read the clock', tool: 'datetime', args: {} }], [{ thinking: 'nothing more to say', signature: '' }]);
   const r = await oneShot(model);
   expect(r.code).toBe(0);
   expect(r.out).toBe('\n');

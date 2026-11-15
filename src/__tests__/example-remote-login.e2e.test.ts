@@ -73,7 +73,7 @@ test('the example follows a remap: its own actions are consumed on the keys the 
 
 test('the plugin process exits once its stdin closes, as it does when the host that spawned it dies', async () => {
   const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
-  const proc = Bun.spawn(['bun', 'src/index.ts'], { cwd: dir, stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' });
+  const proc = Bun.spawn(['bun', 'src/index.ts'], { cwd: dir, env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' });
   try {
     await proc.stdin.end();
     const code = await Promise.race([

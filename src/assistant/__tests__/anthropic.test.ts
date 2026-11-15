@@ -264,7 +264,7 @@ test('the provider is read as written by a person; a value this host does not kn
 });
 
 test('tools are name, description and input_schema only', () => {
-  expect(toAnthropicTools([tool('x')])).toEqual([{ name: 'x', description: 'x does it', input_schema: { type: 'object', properties: { p: { type: 'string' } } } }]);
+  expect(toAnthropicTools([tool('x')]) as unknown).toEqual([{ name: 'x', description: 'x does it', input_schema: { type: 'object', properties: { p: { type: 'string' } } } }]);
 });
 
 test('the endpoint: an OpenAI-compatible API unless the provider says anthropic, which brings its own defaults', () => {

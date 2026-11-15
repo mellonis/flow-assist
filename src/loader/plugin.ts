@@ -83,6 +83,9 @@ export type PluginShape = {
   ready?: Promise<unknown>;
 };
 
+// What a builder hands to `make`: the host injects the name.
+export type PluginInput = Omit<PluginShape, 'name'> & { name?: string };
+
 // A plugin command. The host prefixes the command name at load time; the base
 // fields (`usage`/`minArgs`/`maxArgs`/`description`/`run`) are optional because
 // a plugin command may rely on being merged with a base command of the same name
@@ -158,7 +161,7 @@ export type MakeFactoryConfig = {
 // set while the app runs (`config set`, the model's `config_set`) is laid on the
 // running config, and a plugin handed a detached `{}` would never see it.
 export function makeFactory(config: MakeFactoryConfig = {}) {
-  return (name: string, shape: PluginShape): Plugin => {
+  return (name: string, shape: PluginInput): Plugin => {
     const plugins = (config.plugins ??= {});
     const own = plugins[name];
     // A value that is not an object (a hand-edited `true`) is left as it is.

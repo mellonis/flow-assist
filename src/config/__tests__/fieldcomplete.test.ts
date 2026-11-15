@@ -9,7 +9,7 @@ import { realOf } from '../../assistant/shell';
 import { lineTab, lineView, type TabWalk } from '../commandline';
 import { completePath, completeSlash, listDirectory, type PathDeps } from '../fieldcomplete';
 
-type Entry = { name: string; dir: boolean };
+type Entry = { name: string; dir: boolean; link?: boolean };
 const tree: Record<string, Entry[]> = {
   '/w': [
     { name: 'snake-project', dir: true }, { name: 'sandbox', dir: true }, { name: 'README.md', dir: false },

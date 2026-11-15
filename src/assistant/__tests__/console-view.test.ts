@@ -140,7 +140,7 @@ test('capConsoleData caps a console view like a confirmed run_command does', () 
   const capped = capConsoleData({ command: 'c'.repeat(VIEW_CAPS.command + 50), text: long, exitCode: 0, ms: 1, cwd: '~', weird: 'nope' } as unknown);
   expect(capped.command).toHaveLength(VIEW_CAPS.command + 1);
   expect(capped.text.split('\n')).toHaveLength(VIEW_CAPS.lines);
-  expect((capped as Record<string, unknown>).weird).toBeUndefined();
+  expect((capped as unknown as Record<string, unknown>).weird).toBeUndefined();
 });
 
 test('capConsoleData keeps a multi-line command\'s own line breaks — every other field is flattened to one line', () => {

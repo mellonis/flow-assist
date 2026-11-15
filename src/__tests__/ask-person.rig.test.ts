@@ -7,7 +7,7 @@ import { askKey } from '../assistant/ask.ts';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import { parkedAt } from '../assistant/confirm-policy.ts';
 import { NO_ANSWER, type Conversation } from '../assistant/conversation.ts';
-import type { ChildSpec } from '../assistant/conversation-types.ts';
+import type { ChildQuestion, ChildSpec } from '../assistant/conversation-types.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
@@ -46,11 +46,11 @@ test('a question of a subagent the person started stays parked for the person, n
   const o = rig.conv.offered()!;
   expect(o).toMatchObject({ kind: 'ask', owner: child, path: ['maker'] });
   expect(o.request).toBe(child.parentAsk!);
-  const q = child.parentAsk!.state.questions;
+  const q = (child.parentAsk as ChildQuestion).state.questions;
   expect(q).toEqual([{ question: 'which one?', header: 'from «maker»', options: [] }]);
   expect(sessionRequests(model)).toHaveLength(0);
   typed(child, 'b', 'l', 'u', 'e');
-  expect(rig.conv.offered()!.request.state.text).toBe('blue');
+  expect((rig.conv.offered()!.request as ChildQuestion).state.text).toBe('blue');
   expect(sub.requests).toHaveLength(1);
   typed(child, 'return');
   await settledAll(rig);

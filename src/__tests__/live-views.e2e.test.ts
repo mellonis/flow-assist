@@ -402,7 +402,7 @@ test('a tool that opens a live view, updates it and discards it: on screen while
         return 'card shown and discarded';
       },
     }],
-    viewRenderers: { card: (data: { title?: string }) => [[{ text: `card: ${String(data?.title ?? '')}` }]] },
+    viewRenderers: { card: (data: unknown) => [[{ text: `card: ${String((data as { title?: string } | null)?.title ?? '')}` }]] },
   })];
   const ui = await bootApp(model, 100, 24, guests, {});
   await ui.press('F');

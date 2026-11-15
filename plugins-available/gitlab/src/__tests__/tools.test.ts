@@ -4,9 +4,10 @@ import { buildGitlabGroup } from '../tools.ts';
 describe('gitlab tool group', () => {
   const group = buildGitlabGroup({ clip: (x: unknown) => x, glabAvailable: async () => true, runGlab: async () => '{}' });
   it('write predicate is true only for write methods', () => {
-    const glab = group.tools[0];
-    expect(glab.write({ method: 'POST' })).toBe(true);
-    expect(glab.write({ method: 'GET' })).toBe(false);
+    const glab = group.tools[0]!;
+    const write = glab.write as (args: { method: string }) => boolean;
+    expect(write({ method: 'POST' })).toBe(true);
+    expect(write({ method: 'GET' })).toBe(false);
   });
   // The valid methods are GET/POST/PUT/PATCH/DELETE, so DELETE would pass: the
   // invalid case is a method that is none of them.

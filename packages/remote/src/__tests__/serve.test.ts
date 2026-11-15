@@ -155,7 +155,7 @@ async function listeningOn(p: string): Promise<void> {
 
 test('a --serve plugin that holds a handle of its own still exits once its idle timer ends it', async () => {
   const { dir, path: p } = sock();
-  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { stdout: 'ignore', stderr: 'inherit' });
+  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { env: { ...process.env }, stdout: 'ignore', stderr: 'inherit' });
   try {
     await listeningOn(p);
     const c = await client(p);
@@ -170,7 +170,7 @@ test('a --serve plugin that holds a handle of its own still exits once its idle 
 
 test('a --serve plugin that holds a handle of its own ends on SIGTERM, by that signal, its socket removed', async () => {
   const { dir, path: p } = sock();
-  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { stdout: 'ignore', stderr: 'inherit' });
+  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { env: { ...process.env }, stdout: 'ignore', stderr: 'inherit' });
   try {
     await listeningOn(p);
     proc.kill('SIGTERM');

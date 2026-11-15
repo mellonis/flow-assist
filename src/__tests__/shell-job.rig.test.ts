@@ -50,7 +50,7 @@ test('the journal gets job-start, the output coalesced by id, and job-end with t
   await rig.until(() => jobEvents(rig, c, 'job-end').length === 1);
   const events = rig.journal(c.sessionId);
   expect(events.find((e) => e.t === 'job-start')).toMatchObject({ id: 'sh-1', command: 'echo one; sleep 0.05; echo two; exit 3', by: 'person' });
-  expect((events.find((e) => e.t === 'job-start') as { cwd: string }).cwd).toContain(path.basename(rig.root));
+  expect((events.find((e) => e.t === 'job-start') as unknown as { cwd: string }).cwd).toContain(path.basename(rig.root));
   // Two prints a moment apart are one journal line, as `shell-out` coalesces them.
   const outs = jobEvents(rig, c, 'job-out');
   expect(outs).toHaveLength(1);

@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -27,12 +27,12 @@ const notice = (label: string) => `a question from «${label}» waits — clear 
 // The tool results a request carried, without the `OK: ` the loop puts in front of one.
 const results = (req: { messages: { role: string; content?: unknown }[] } | undefined): string[] =>
   (req?.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content).replace(/^OK: /, ''));
-const asking = (mark: string, hold: boolean) => [
-  [...(hold ? [{ hold: true }] : []), { tool: 'ask_parent', args: { question: `Q-${mark}?` } }],
+const asking = (mark: string, hold: boolean): Turn[] => [
+  [...(hold ? [{ hold: true as const }] : []), { tool: 'ask_parent', args: { question: `Q-${mark}?` } }] as Turn,
   [{ text: `${mark} settled` }],
 ];
 
-async function boot(marks: string[], opts: { hold?: boolean; main?: any[][]; root?: string } = {}) {
+async function boot(marks: string[], opts: { hold?: boolean; main?: Turn[]; root?: string } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = opts.root ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-subq-')));
@@ -40,10 +40,10 @@ async function boot(marks: string[], opts: { hold?: boolean; main?: any[][]; roo
   const model = new ScriptedModel();
   const children = marks.map((mark) => {
     const child = model.when((req) => firstUser(req).includes(mark));
-    child.script(...asking(mark, opts.hold ?? false) as never);
+    child.script(...asking(mark, opts.hold ?? false));
     return child;
   });
-  if (opts.main) model.script(...opts.main as never);
+  if (opts.main) model.script(...opts.main);
   const ui = await bootApp(model, 140, 34, undefined, { sessions: { dir: sessions }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
   await ui.press('F');
   return { children, ui, model, root };
@@ -124,7 +124,7 @@ test('a key before the pause, at the block\'s appearing or right after another k
 
 test('the session\'s own question comes first; the subagent\'s waits and is drawn after it', async () => {
   const main = [[{ tool: 'ask_user', args: { questions: [{ question: 'Pick one?', options: [{ label: 'A' }, { label: 'B' }] }] } }], [{ text: 'picked' }]];
-  const { children: [a], ui } = await boot(['QOWN'], { hold: true, main });
+  const { children: [a], ui } = await boot(['QOWN'], { hold: true as const, main });
   await ask(ui, '/subagent QOWN do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'go');
@@ -149,7 +149,7 @@ test('the session\'s own question comes first; the subagent\'s waits and is draw
 test('the session\'s own y/n comes first; the subagent\'s question is drawn after it', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-subq-w-')));
   const main = [[{ tool: 'run_command', args: { command: `touch ${path.join(root, 'own.txt')}` } }], [{ text: 'done' }]];
-  const { children: [a], ui } = await boot(['QYN'], { hold: true, main, root });
+  const { children: [a], ui } = await boot(['QYN'], { hold: true as const, main, root });
   await ask(ui, '/subagent QYN do it');
   await settleUntil(() => a!.held);
   await ask(ui, 'go');
@@ -167,7 +167,7 @@ test('the session\'s own y/n comes first; the subagent\'s question is drawn afte
 });
 
 test('two subagents ask: the older question first, then the other', async () => {
-  const { children: [a, b], ui } = await boot(['QOLD', 'QNEW'], { hold: true });
+  const { children: [a, b], ui } = await boot(['QOLD', 'QNEW'], { hold: true as const });
   await ask(ui, '/subagent QOLD first');
   await settleUntil(() => a!.held);
   await ask(ui, '/subagent QNEW second');
@@ -193,7 +193,7 @@ test('two subagents ask: the older question first, then the other', async () => 
 });
 
 test('the watch of the subagent draws its question and its keys answer it', async () => {
-  const { children: [a], ui } = await boot(['QWATCH'], { hold: true });
+  const { children: [a], ui } = await boot(['QWATCH'], { hold: true as const });
   await ask(ui, '/subagent QWATCH do it');
   await settleUntil(() => a!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ qwatch-do-it'));
@@ -229,7 +229,7 @@ test('Esc dismisses the question: the subagent reads the no-answer text', async 
 });
 
 test('with the cursor in the tree rows the question is a notice, not answerable; stopping the subagent ends its wait', async () => {
-  const { children: [a], ui } = await boot(['QSTOP'], { hold: true });
+  const { children: [a], ui } = await boot(['QSTOP'], { hold: true as const });
   await ask(ui, '/subagent QSTOP do it');
   await settleUntil(() => a!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ qstop-do-it'));

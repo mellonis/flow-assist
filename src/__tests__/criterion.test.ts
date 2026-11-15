@@ -23,7 +23,7 @@ test('C2: CLI subcommands classify correctly', async () => {
 
 // C3 — the host config schema is tracker-agnostic (no tracker keys).
 test('C3: host schema exposes no tracker keys', () => {
-  const shape = hostConfigSchema.shape;
+  const shape = hostConfigSchema.shape as unknown as Record<string, unknown>;
   expect(shape.boardCode).toBeUndefined();
   expect(shape.reportsDir).toBeUndefined();
   expect(shape.trackerLanguage).toBeUndefined();
