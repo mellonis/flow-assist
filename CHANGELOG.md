@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A plugin can put a message into the chat — `services.postToChat`.** A press on a plugin's
+  own surface, or anything else it needs the model to act on, reaches the session whose work it
+  is as a plugin's message — framed as data from a plugin, never as your words — and the chat
+  shows it as one row. It never cuts into a running turn: the item waits in the inbox and lands
+  when the turn ends, starting one follow-up turn for everything that landed; with nothing
+  running it starts that turn at once. A conversation nobody draws starts no turn, and
+  `ai.backgroundFollowUp: false` leaves every post as a row. `chatNote` stays display-only. The
+  service is on every JS plugin's `host.services` — the App binds it over the chat's own `post`,
+  so a plugin's press reaches the session whose work it is.
+
 - **Completion opens a list.** In the chat's field and in the `:` line, two or more candidates
   open a list over the line by themselves: each row is the name and what it is (a command's
   description, a config key's value (masked at a secret-looking key) and meaning, an agent's

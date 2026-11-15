@@ -228,7 +228,7 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_save',
-          description: 'Keep a drawn canvas as a recipe — its tree and its title, never the values the person typed — so canvas_draw can draw it again, in this session or a later one. canvas — the canvas to keep; template — the recipe\'s name (lower-case letters, digits and . _ -); scope — \'project\' (the default) or \'global\'. Saving an existing name replaces it. Display only.',
+          description: 'Keep a drawn canvas as a recipe — its tree and its title, never the values the person typed — so canvas_draw can draw it again, in this session or a later one. canvas — the canvas to keep; template — the recipe\'s name (lower-case letters, digits and . _ -); scope — \'project\' (the default) or \'global\'. Saving an existing name replaces it. The recipe is kept in the host\'s cache — the plugin\'s own store, as memory is: nothing outside the app changes, the person can clear it, and no y/n is asked.',
           parameters: {
             type: 'object',
             properties: {

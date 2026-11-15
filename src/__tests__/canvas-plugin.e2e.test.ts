@@ -189,3 +189,61 @@ test('a layout is saved as a recipe and drawn again from it — the frame shows 
   expect(saved).toHaveLength(1);
   expect(saved[0]!).toContain('pipeline');
 });
+
+// ── The demo (Task 10) ───────────────────────────────────────────────────────
+// The design's pipeline panel, in the shape `gitlab`'s tools really return
+// (`gitlab_mr_status`: the latest pipeline and its failed jobs; `glab_api`:
+// `projects/:id/pipelines/:id/jobs`) — nothing domain-specific in this plugin, and no
+// network: the script stands in for the model's calls. The first draw's tree is the
+// vocabulary's own example, line for line; the second changes only the data in it.
+//
+// Its own boot, wider than the file's: the whole panel has to be on screen at a glance
+// for the frame to show it, and at 110 columns the chat docks BELOW the canvas, leaving
+// the body one row short of this tree (the ScrollBox scrolls, and the demo is about
+// reading it without scrolling). Beside the canvas is also how the design draws it.
+const bootDemo = (model: ScriptedModel) => bootApp(model, 140, 32, (make) => [buildCanvasPlugin({ make, config: {} })], {}, { chatMode: 'panel' });
+
+test('a pipeline is drawn from gitlab-shaped data and redrawn after a press', async () => {
+  const pipeline = (job: string, passed: number) => ['Box', { flexDirection: 'column', gap: 1 },
+    ['badge', { text: 'failed · 2m', tone: 'error' }],
+    ['rows', { items: [{ label: 'project', value: 'portals/frontend-services/prices-index' }, { label: 'commit', value: 'a3f19c2' }] }],
+    ['progress', { label: 'jobs passed', value: passed, tone: 'warn' }],
+    ['tasks', { items: [{ text: 'build', state: 'done' }, { text: 'lint', state: 'done' }, { text: 'test:unit', state: job }, { text: 'deploy:stage', state: 'queued' }] }],
+    ['Box', { flexDirection: 'row', gap: 2 },
+      ['input', { bind: 'branch', label: 'branch', value: 'feature-MP-123' }],
+      ['check', { bind: 'watch', label: 'watch it', value: true }],
+      ['button', { label: 'check again', action: 'check the pipeline for this branch again' }]],
+    ['Link', { url: 'https://gitlab…/pipelines/1234' }]];
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'canvas_draw', args: { canvas: 'ci', title: 'Pipelines · prices-index', owner: 'reviewer', tree: pipeline('running', 75) } },
+     { tool: 'canvas_open', args: { canvas: 'ci' } }],
+    [{ text: 'Here it is.' }],
+    // The press answers with the pipeline as it is now: the running job failed.
+    [{ tool: 'canvas_draw', args: { canvas: 'ci', tree: pipeline('failed', 66) } }],
+  );
+  const ui = await bootDemo(model);
+  await turn(ui, 'draw my pipeline');
+  await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines · prices-index'));
+  const drawn = ui.backend.lastFrame;
+  // The picture a person reads instead of the JSON: the status, the bar, the jobs and
+  // the way to ask again.
+  expect(drawn).toContain('failed · 2m');
+  expect(drawn).toContain('75%');
+  expect(drawn).toContain('build');
+  expect(drawn).toContain('check again');
+  await toPlugin(ui);
+  // Tab to the button (the field, the checkbox, then the button — tree order) and press
+  // it: Enter on a focused button is the keyboard path the footer promises.
+  await ui.press('tab', 'tab', 'tab');
+  await ui.press('return');
+  // The press is one message: the agent's follow-up request carries the values as the
+  // person left them, and its answer redraws the canvas with the jobs as they are now.
+  await settleUntil(ui, () => ui.backend.lastFrame.includes('66%'));
+  const answered = model.requests.at(-1)!.messages as Array<{ role: string; content?: unknown }>;
+  const pressed = answered.filter((message) => msgText(message).includes('pressed «check again»'));
+  expect(pressed).toHaveLength(1);
+  expect(msgText(pressed[0]!)).toContain('branch: feature-MP-123 · watch: on');
+  expect(ui.backend.lastFrame).toContain('failed · 2m');
+  expect(ui.backend.lastFrame).toContain('check again');
+});
