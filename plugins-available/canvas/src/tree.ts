@@ -98,7 +98,12 @@ const ALLOWED: Record<string, TypeRule> = {
 
 const TYPES = Object.keys(ALLOWED);
 const INTERACTIVE = new Set(['input', 'check', 'select', 'button']);
+// The types whose value lives under a `bind` — and so contribute a focus key.
+const BINDABLE = new Set(['input', 'check', 'select']);
 const TASK_STATES = ['done', 'running', 'queued', 'failed'];
+// The prefix the focus model mints button keys under (see `focus.ts`): a field's bind
+// must never sit in it, or a field and a button would share one key.
+const BUTTON_PREFIX = 'btn:';
 const KIND_NAME: Record<PropKind, string> = { string: 'a string', number: 'a number', boolean: 'a boolean', array: 'an array', object: 'an object' };
 // A string the canvas prints as text, capped by LIMITS.text; every other string prop
 // is a value (a typed field, a label, an action), capped by LIMITS.value.
@@ -118,6 +123,9 @@ export function checkTree(tree: unknown): TChecked {
   const problems: string[] = [];
   const problem = (message: string) => { problems.push(message); };
   const stats: TStats = { nodes: 0, deepest: 0, interactive: 0 };
+  // Every bind met so far, mapped to the type that claimed it: a bind is the control's
+  // focus key, so the focus model reads the canvas as a flat list of unique strings.
+  const binds = new Map<string, string>();
 
   // A node as the reader sees it: the second element is the props only when it is a
   // plain object; null/undefined/false children are dropped, as the host's
@@ -229,6 +237,21 @@ export function checkTree(tree: unknown): TChecked {
     }
   };
 
+  // A bind is a control's focus key, and the focus model reads the canvas as one
+  // ordered list of unique keys: a blank bind could never be reached by Tab, a duplicate
+  // would trap the cycle on its first copy (both copies also draw focused), and a bind
+  // in the `btn:` namespace would answer for a button.
+  const checkBind = (type: string, props: Record<string, unknown>) => {
+    if (!BINDABLE.has(type)) return;
+    const bind = props.bind;
+    if (typeof bind !== 'string') return;
+    if (bind.trim() === '') { problem(`${type}'s bind is empty — a bind names the control it belongs to`); return; }
+    if (bind.startsWith(BUTTON_PREFIX)) { problem(`the bind «${bind}» starts with ${BUTTON_PREFIX} — that prefix names buttons, not fields`); return; }
+    const first = binds.get(bind);
+    if (first !== undefined) { problem(`the bind «${bind}» is used by ${first} and ${type} — a bind names one control`); return; }
+    binds.set(bind, type);
+  };
+
   const checkChildren = (type: string, rule: TypeRule, children: unknown[], depth: number) => {
     // A type whose data lives in its props is drawn from the props alone: a child
     // would be validated and then silently dropped, so it is refused.
@@ -274,6 +297,7 @@ export function checkTree(tree: unknown): TChecked {
       return;
     }
     checkProps(type, rule, props);
+    checkBind(type, props);
     checkChildren(type, rule, children, depth);
   };
 
@@ -316,6 +340,7 @@ check: bind, label, value?
 select: bind, label?, options ({value, label}[]), value?
 button: label, action, tone?
 caps: ≤ 400 nodes · depth ≤ 8 · ≤ 100 children per node · ≤ 2000 chars of text · ≤ 200 chars per value · ≤ 40 interactive nodes · ≤ 64 KB serialized
+binds: one per control, non-empty, unique within the canvas, never starting with btn:
 palette tokens: ok, warn, error, accent, dim, muted, default
 example — a GitLab pipeline:
 [Box, {flexDirection: 'column', gap: 1},

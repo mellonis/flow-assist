@@ -19,7 +19,10 @@ const partsOf = (node: unknown[]): { type: string; props: Record<string, unknown
   return { type: str(node[0]), props: hasProps ? second : {}, children: hasProps ? node.slice(2) : node.slice(1) };
 };
 
-const buttonKey = (index: number): string => `btn:${index}`;
+// A button's focus key: `n` its index among the buttons alone, in tree order. The
+// renderer imports this too, so the marker it draws and the keyboard path agree on
+// which button a key names.
+export const buttonKey = (index: number): string => `btn:${index}`;
 
 // Every focus key of a tree, depth-first: a field contributes its bind, a button its
 // `btn:<n>`. A field with no bind and a string child contribute nothing.

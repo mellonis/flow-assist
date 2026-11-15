@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { focusKeys } from '../focus.ts';
 import { TOKEN_COLOR, toElement, type TRenderCtx } from '../render.ts';
 import { checkTree, TONE_TOKENS } from '../tree.ts';
 
@@ -199,6 +200,22 @@ test('a button is bold in its tone, never selectable, and needs no focus key to 
   expect(typeof el.props.onClick).toBe('function');
   expect(el.props.isFocused).toBeUndefined();
   expect(el.children).toEqual(['go']);
+});
+
+test('a focused button is marked inverse, in lockstep with the focus keys', () => {
+  const tree = ['Box', { flexDirection: 'row' },
+    ['input', { bind: 'branch' }],
+    ['button', { label: 'go', action: 'check it' }],
+    ['button', { label: 'stop', action: 'stop it' }]] as never;
+  const keys = focusKeys(tree);
+  expect(keys).toEqual(['branch', 'btn:0', 'btn:1']);
+  const marks = (el: T): Array<unknown> => (el.children as T[]).filter((child) => child.type === 'Text').map((child) => child.props.inverse);
+  const second = toElement(tree, ctx({ focusKey: keys[2], values: { branch: 'main' } })) as T;
+  expect(marks(second)).toEqual([undefined, true]);
+  const first = toElement(tree, ctx({ focusKey: keys[1], values: { branch: 'main' } })) as T;
+  expect(marks(first)).toEqual([true, undefined]);
+  const muted = toElement(tree, ctx({ focusKey: keys[2], values: { branch: 'main' }, hasKeyboard: false })) as T;
+  expect(marks(muted)).toEqual([undefined, undefined]);
 });
 
 test('a validated tree of every interactive type still draws', () => {

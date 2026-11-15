@@ -14,6 +14,7 @@ test('a button index counts buttons alone, not the fields between them', () => {
 
 test('Tab wraps forward and backward; empty stays null', () => {
   expect(nextKey(['a', 'b'], null, 1)).toBe('a');
+  expect(nextKey(['a', 'b'], null, -1)).toBe('b');
   expect(nextKey(['a', 'b'], 'a', 1)).toBe('b');
   expect(nextKey(['a', 'b'], 'b', 1)).toBe('a');
   expect(nextKey(['a', 'b'], 'a', -1)).toBe('b');

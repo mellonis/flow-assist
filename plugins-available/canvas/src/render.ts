@@ -10,9 +10,11 @@
 // The interactive types (`input`, `check`, `select`, `button`) are live controls: a
 // field takes its value from the canvas's map and reports edits through `ctx.onValue`,
 // a button presses through `ctx.onPress`, and a control is focused only while the
-// canvas holds the keys and carries its focus key. The renderer still keeps no state
-// of its own — the surface owns the values and the focus.
+// canvas holds the keys and carries its focus key. The renderer keeps nothing between
+// calls — the surface owns the values and the focus — and numbers buttons in draw order
+// only so a focused button can mark itself.
 import { bar, fit, percentText, taskGlyph, toneToken, type TTaskState } from './parts.ts';
+import { buttonKey } from './focus.ts';
 import type { Node } from './tree.ts';
 import type { TValue } from './store.ts';
 
@@ -155,6 +157,10 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
   // A control takes the focus only while the canvas holds the keys: a canvas drawn
   // beside the chat never pulls the caret away from the prompt.
   const focused = (key: string): boolean => ctx.hasKeyboard && ctx.focusKey === key;
+  // Buttons are numbered in draw order, the order `focus.ts` counts them in, so a button
+  // knows its own focus key and can mark itself. `draw` descends through the children in
+  // tree order, and a validated tree nests them only in a Box or a ScrollBox.
+  let buttons = 0;
 
   const draw = (child: Node | string): unknown => {
     if (typeof child === 'string') return ui.h(ui.Text, {}, child);
@@ -278,16 +284,15 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
           isFocused: focused(bind),
         });
       }
-      // A button draws as bold text in its tone; a click presses it, the way the
-      // keyboard path calls the same handler with the focus key's action.
+      // A button draws as bold text in its tone, inverse while it holds the focus — the
+      // marker this repo already draws for a pressable Text. A click presses through the
+      // same `ctx.onPress` the keyboard path calls with the focus key's action.
       case 'button': {
         const label = str(props.label);
-        return ui.h(ui.Text, {
-          bold: true,
-          color: paint(props.tone),
-          selectable: false,
-          onClick: () => ctx.onPress(label, str(props.action)),
-        }, label);
+        const style: TProps = { bold: true, color: paint(props.tone), selectable: false, onClick: () => ctx.onPress(label, str(props.action)) };
+        if (focused(buttonKey(buttons))) style.inverse = true;
+        buttons += 1;
+        return ui.h(ui.Text, style, label);
       }
       default:
         return dimLine(`▸ ${type}`);

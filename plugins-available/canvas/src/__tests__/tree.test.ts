@@ -103,6 +103,48 @@ test('Table cells and column labels stay under the text cap', () => {
   if (!col.ok) expect(col.error).toContain(`chars — the limit is ${LIMITS.text}`);
 });
 
+test("an empty or blank bind is refused — a bind is the control's focus key", () => {
+  const empty = checkTree(['Box', {}, ['input', { bind: '' }]]);
+  expect(empty.ok).toBe(false);
+  if (!empty.ok) {
+    expect(empty.error).toContain('input');
+    expect(empty.error).toContain('bind is empty');
+  }
+  const blank = checkTree(['Box', {}, ['check', { bind: '   ', label: 'watch' }]]);
+  expect(blank.ok).toBe(false);
+  if (!blank.ok) {
+    expect(blank.error).toContain('check');
+    expect(blank.error).toContain('bind is empty');
+  }
+});
+
+test('a duplicate bind is refused, naming both nodes', () => {
+  const r = checkTree(['Box', {}, ['input', { bind: 'branch' }], ['check', { bind: 'branch', label: 'watch' }]]);
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('branch');
+    expect(r.error).toContain('input');
+    expect(r.error).toContain('check');
+  }
+});
+
+test('a bind in the btn: namespace is refused — that prefix names buttons', () => {
+  const r = checkTree(['Box', {}, ['input', { bind: 'btn:0' }], ['button', { label: 'go', action: 'go' }]]);
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('btn:');
+    expect(r.error).toContain('buttons');
+  }
+});
+
+test('distinct binds pass', () => {
+  const r = checkTree(['Box', {},
+    ['input', { bind: 'branch' }],
+    ['check', { bind: 'watch', label: 'watch' }],
+    ['select', { bind: 'env', options: [{ value: 'dev', label: 'dev' }] }]]);
+  expect(r.ok).toBe(true);
+});
+
 test('the node cap bites: 401 nodes refuse, 400 pass', () => {
   // 100 inner Boxes of three Texts each: 1 + 100 + 300 = 401 nodes, depth 3,
   // 100 children on the root — only the node cap is broken.
