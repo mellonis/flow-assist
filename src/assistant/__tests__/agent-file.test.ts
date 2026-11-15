@@ -143,3 +143,21 @@ test('skills: a malformed or repeated name is an error on the key\'s line, and t
   expect(at('skills: a\nskills: b')[0]).toMatchObject({ line: 4, message: expect.stringContaining('duplicate key "skills"') });
   expect(at('skill: a')[0]!.message).toContain('skills');
 });
+
+test('model: a role name from ai.roles, trimmed; an omitted key leaves it out', () => {
+  const at = (header: string) => parseAgentFile('/a/b.md', `---\ndescription: d\n${header}\n---\nbody`);
+  const fast = at('model: fast');
+  expect(fast.ok && fast.agent.model).toBe('fast');
+  const deep = at('model:   deep  ');
+  expect(deep.ok && deep.agent.model).toBe('deep');
+  const none = parseAgentFile('/a/b.md', '---\ndescription: d\n---\nbody');
+  expect(none.ok && none.agent.model).toBeUndefined();
+  expect(none.ok && Object.hasOwn(none.agent, 'model')).toBe(false);
+});
+
+test('model: an empty value is an error on its own line; the key is known, and a repeated one is a duplicate', () => {
+  const at = (header: string) => errorsOf(`---\ndescription: d\n${header}\n---\nbody`);
+  expect(at('model:')[0]).toMatchObject({ path: P, line: 3, message: expect.stringContaining('role name') });
+  expect(at('model:   ')[0]).toMatchObject({ line: 3, message: expect.stringContaining('role name') });
+  expect(at('model: fast\nmodel: deep')[0]).toMatchObject({ line: 4, message: expect.stringContaining('duplicate key "model"') });
+});

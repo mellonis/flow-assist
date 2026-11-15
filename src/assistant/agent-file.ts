@@ -9,6 +9,8 @@
 //   tools:       comma-separated tool group ids
 //   skills:      comma-separated skill names, loaded into the agent's first message when it starts
 //   auto:        ask | reads | all (omitted: ask)
+//   model:       a role from ai.roles — never a model id, so the file travels
+//                between machines unchanged
 //
 // An unknown or repeated key is an error, a `{{name}}` the header does not declare is
 // an error, and so is a declared parameter the body never uses. Single braces in the
@@ -26,6 +28,7 @@ export interface Agent {
   tools: string[] | null; // null — the key is omitted
   skills: string[]; // the skills preloaded at the start, in order; [] — the key is omitted
   auto: AgentAuto;
+  model?: string; // a role from ai.roles, as written; absent — the key is omitted
   body: string;
   path: string;
   source: AgentSource;
@@ -34,7 +37,7 @@ export interface Agent {
 export interface AgentError { path: string; line: number; message: string }
 export type ParsedAgent = { ok: true; agent: Agent } | { ok: false; errors: AgentError[] };
 
-export const AGENT_KEYS = ['description', 'params', 'tools', 'skills', 'auto'] as const;
+export const AGENT_KEYS = ['description', 'params', 'tools', 'skills', 'auto', 'model'] as const;
 export const AGENT_AUTOS: readonly AgentAuto[] = ['ask', 'reads', 'all'];
 const NAME = /^[A-Za-z0-9-]+$/;
 // A skill's name: `name`, or `<plugin>/<name>` (the grammar of a skill id).
@@ -132,6 +135,14 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
     else err(autoAt.line, `auto is «${autoAt.value}» — ask, reads or all`);
   }
 
+  // A role, not a model id: the file stays portable, and `ai.roles` says what it runs on.
+  let model: string | undefined;
+  const modelAt = seen.get('model');
+  if (modelAt) {
+    const value = modelAt.value.trim();
+    if (value) model = value; else err(modelAt.line, 'model is empty — a role name from ai.roles');
+  }
+
   // The body's placeholders, each on its own line.
   const used = new Set<string>();
   for (let i = close + 1; i < lines.length; i++) {
@@ -146,7 +157,7 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
 
   if (errors.length || name === null || !description) return { ok: false, errors };
   const body = lines.slice(close + 1).join('\n').replace(/^\s*\n/, '').trimEnd();
-  return { ok: true, agent: { name, description: description.value, params, tools, skills, auto, body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
+  return { ok: true, agent: { name, description: description.value, params, tools, skills, auto, ...(model ? { model } : {}), body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
 }
 
 // The body with every `{{name}}` replaced by its value; a name with none (an optional
