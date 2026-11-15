@@ -83,7 +83,7 @@ const ALLOWED: Record<string, TypeRule> = {
   tasks: { props: { items: 'array' }, required: ['items'], children: 'none' },
   rule: { props: { label: 'string' }, required: [], children: 'none' },
   input: {
-    props: { bind: 'string', label: 'string', placeholder: 'string', value: 'string', width: 'number' },
+    props: { bind: 'string', label: 'string', value: 'string', width: 'number' },
     required: ['bind'],
     children: 'none',
   },
@@ -335,7 +335,7 @@ badge: text, tone
 rows: items ({label, value, tone?}, ≤ 100)
 tasks: items ({text, state: done|running|queued|failed}, ≤ 100)
 rule: label?
-input: bind, label?, placeholder?, value?, width?
+input: bind, label?, value?, width?
 check: bind, label, value?
 select: bind, label?, options ({value, label}[]), value?
 button: label, action, tone?

@@ -252,13 +252,21 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
       case 'input': {
         const bind = str(props.bind);
         const live = ctx.values[bind];
-        return ui.h(ui.TextInput, {
+        const field = ui.h(ui.TextInput, {
           frame: 'field',
           width: props.width ?? FIELD_WIDTH,
           value: typeof live === 'string' ? live : str(props.value),
           onChange: (next: string) => ctx.onValue(bind, next),
           isFocused: focused(bind),
         });
+        // A label draws as a dim caption before the field: flowtty's TextInput has none
+        // of its own, and the vocabulary promises one. Its colour goes through the
+        // palette, so a person's theme reaches it too.
+        const label = str(props.label);
+        if (label === '') return field;
+        return ui.h(ui.Box, { flexDirection: 'row', gap: 1 },
+          ui.h(ui.Text, { dim: true, color: paint('dim') }, label),
+          field);
       }
       case 'check': {
         const bind = str(props.bind);

@@ -8,6 +8,15 @@ const h = (type: unknown, props: Record<string, unknown> = {}, ...children: unkn
 const ui = { h, Box: 'Box', Text: 'Text', Markdown: 'Markdown', Table: 'Table', ScrollBox: 'ScrollBox', Link: 'Link', TextInput: 'TextInput', Checkbox: 'Checkbox', Select: 'Select' };
 const ctx = (over: Partial<TRenderCtx> = {}): TRenderCtx => ({ ui, width: 80, stringWidth: (s) => s.length, focusKey: null, hasKeyboard: true, values: {}, onValue: () => {}, onPress: () => {}, ...over });
 
+// The TextInput an input node yields: the element itself when it has no label, or the
+// field after the label inside the row a label puts in front of it.
+const fieldOf = (el: T): T => {
+  if (el.type === 'TextInput') return el;
+  const field = (el.children as T[]).find((child) => child.type === 'TextInput');
+  if (field === undefined) throw new Error('the input drew no TextInput');
+  return field;
+};
+
 test('Text keeps its props and resolves the colour through the palette', () => {
   const el = toElement(['Text', { color: 'error', bold: true }, 'hello'], ctx()) as T;
   expect(el.type).toBe('Text');
@@ -120,33 +129,55 @@ test('containers recurse, and Markdown keeps its one string', () => {
 });
 
 test('a field is focusable only when the canvas has the keys', () => {
-  const focused = toElement(['input', { bind: 'branch', value: 'main' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: true })) as T;
+  const focused = fieldOf(toElement(['input', { bind: 'branch', value: 'main' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: true })) as T);
   expect(focused.props.isFocused).toBe(true);
-  const muted = toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: false })) as T;
+  const muted = fieldOf(toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: false })) as T);
   expect(muted.props.isFocused).toBe(false);
-  const other = toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'watch', values: { branch: 'main' } })) as T;
+  const other = fieldOf(toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'watch', values: { branch: 'main' } })) as T);
   expect(other.props.isFocused).toBe(false);
+  const labelled = fieldOf(toElement(['input', { bind: 'branch', label: 'branch' }], ctx({ focusKey: 'branch' })) as T);
+  expect(labelled.props.isFocused).toBe(true);
 });
 
 test('a field reports an edit with its bind', () => {
   const seen: Array<[string, unknown]> = [];
-  const el = toElement(['input', { bind: 'branch' }], ctx({ values: { branch: 'main' }, onValue: (bind, v) => seen.push([bind, v]) })) as T;
+  const el = fieldOf(toElement(['input', { bind: 'branch' }], ctx({ values: { branch: 'main' }, onValue: (bind, v) => seen.push([bind, v]) })) as T);
   (el.props.onChange as (v: string) => void)('feature-x');
   expect(seen).toEqual([['branch', 'feature-x']]);
 });
 
 test('a field takes its value from the canvas, falling back to the declared one', () => {
-  const live = toElement(['input', { bind: 'branch', value: 'main' }], ctx({ values: { branch: 'typed' } })) as T;
+  const live = fieldOf(toElement(['input', { bind: 'branch', value: 'main' }], ctx({ values: { branch: 'typed' } })) as T);
   expect(live.type).toBe('TextInput');
   expect(live.props.value).toBe('typed');
   expect(live.props.frame).toBe('field');
   expect(live.props.width).toBe(24);
-  const declared = toElement(['input', { bind: 'branch', value: 'main' }], ctx()) as T;
+  const declared = fieldOf(toElement(['input', { bind: 'branch', value: 'main' }], ctx()) as T);
   expect(declared.props.value).toBe('main');
-  const blank = toElement(['input', { bind: 'branch' }], ctx()) as T;
+  const blank = fieldOf(toElement(['input', { bind: 'branch' }], ctx()) as T);
   expect(blank.props.value).toBe('');
-  const wide = toElement(['input', { bind: 'branch', width: 40 }], ctx()) as T;
+  const wide = fieldOf(toElement(['input', { bind: 'branch', width: 40 }], ctx()) as T);
   expect(wide.props.width).toBe(40);
+});
+
+test('an input with a label draws the label and the field in a row', () => {
+  const el = toElement(['input', { bind: 'branch', label: 'branch' }], ctx({ colors: { dim: '#123456' } })) as T;
+  expect(el.type).toBe('Box');
+  expect(el.props).toEqual({ flexDirection: 'row', gap: 1 });
+  const [caption, field] = el.children as T[];
+  expect(caption?.type).toBe('Text');
+  expect(caption?.props).toEqual({ dim: true, color: '#123456' });
+  expect(caption?.children).toEqual(['branch']);
+  expect(field?.type).toBe('TextInput');
+  expect(field?.props.width).toBe(24);
+  expect(el.children.length).toBe(2);
+});
+
+test('an input without a label is the field itself', () => {
+  const el = toElement(['input', { bind: 'branch' }], ctx()) as T;
+  expect(el.type).toBe('TextInput');
+  expect(el.props.value).toBe('');
+  expect(el.children).toEqual([]);
 });
 
 test('a check shows its state, carries its label and reports a boolean', () => {

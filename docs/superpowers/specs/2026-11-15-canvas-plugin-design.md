@@ -228,7 +228,7 @@ how its current value is read back:
 
 | type | props | behaviour |
 |---|---|---|
-| `input` | `bind`, `label?`, `placeholder?`, `value?`, `width?` | one-line `TextInput`; typed text lives in the canvas's values |
+| `input` | `bind`, `label?`, `value?`, `width?` | one-line `TextInput`; typed text lives in the canvas's values |
 | `check` | `bind`, `label`, `value?` | `Checkbox` |
 | `select` | `bind`, `label?`, `options: Array<{ value, label }>`, `value?` | `Select` (dropdown over the host's `DialogHost`) |
 | `button` | `label`, `action`, `tone?` | pressable; `action` is a sentence handed to the agent verbatim ("check the pipeline for this branch again") |

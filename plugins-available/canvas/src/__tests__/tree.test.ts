@@ -137,6 +137,16 @@ test('a bind in the btn: namespace is refused — that prefix names buttons', ()
   }
 });
 
+test("an input takes no placeholder — flowtty's field has none", () => {
+  const r = checkTree(['Box', {}, ['input', { bind: 'branch', placeholder: 'feature-x' }]]);
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('placeholder');
+    expect(r.error).toContain('bind');
+    expect(r.error).toContain('width');
+  }
+});
+
 test('distinct binds pass', () => {
   const r = checkTree(['Box', {},
     ['input', { bind: 'branch' }],
