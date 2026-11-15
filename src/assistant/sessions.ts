@@ -50,7 +50,7 @@ import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { createRecallState, saveRecallState } from './recall.js';
 import { readLegacyView, type ViewRecord } from './views.js';
-import { removeStateFile } from './state-file.js';
+import { moveStateFile, removeStateFile } from './state-file.js';
 import { realOf, runMark, within } from './shell.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
@@ -956,6 +956,11 @@ export function moveSessionToProject(dir: string, id: string, root: string, proj
       if (!fs.existsSync(destJrnl)) fs.linkSync(jrnl, destJrnl);
       fs.unlinkSync(jrnl);
     }
+    // The state file's mirror follows too. No live chat can be moved (it holds the lock),
+    // so the mirror the writer would move itself never gets the chance: one left by a
+    // crashed run, or written just before its session was put away, would stay in the
+    // directory the session left — invisible to a watcher, and blocking its pruning.
+    moveStateFile(dir, dest, id);
     const sub = path.join(dir, `${id}.sub`);
     const destSub = path.join(dest, `${id}.sub`);
     const moveSub = () => { if (fs.existsSync(sub) && !fs.existsSync(destSub)) fs.renameSync(sub, destSub); };

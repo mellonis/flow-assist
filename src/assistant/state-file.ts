@@ -125,7 +125,7 @@ export function buildStateFile(input: StateFileInput, stamps: StateStamps, now: 
   return {
     version: 1,
     id: input.id,
-    project: input.project,
+    project: input.project === null ? null : redactSecrets(input.project),
     title: redactSecrets(input.title),
     pid: input.pid,
     writtenAt: new Date(now).toISOString(),
@@ -170,6 +170,33 @@ const ownStatus = (c: Conversation): StateNode['status'] =>
 const ownLatest = (c: Conversation): string =>
   c.confirm ? `${c.confirm.name} — y/n` : c.question?.state.questions[c.question.state.index]?.question ?? '';
 
+// What `stateSources` reads a host's live conversations through: the chat's own registry
+// (registry.ts) or a test rig's, whichever holds them.
+export interface StateSource {
+  live(): readonly Conversation[];
+  statusOf(id: string): StateFileV1['status'] | null;
+}
+
+// The writer's `sources`: the live sessions alone — a task or a subagent is a node of its
+// session's tree, never a session — each read by `stateInputOf`. One conversation is read
+// inside its own try: a snapshot that cannot be built says nothing about the others and
+// must not stop them, and a conversation skipped here is simply absent from the list, which
+// the writer reads as one that left and takes away the file it wrote for it.
+export function stateSources(convs: StateSource, pid: number, now: () => number = Date.now): () => StateFileInput[] {
+  return () => {
+    const inputs: StateFileInput[] = [];
+    for (const c of convs.live()) {
+      try {
+        if (c.kind !== 'session' || c.closed || c.sessionId === '') continue;
+        inputs.push(stateInputOf(c, convs.statusOf(c.sessionId) ?? 'idle', pid, now()));
+      } catch {
+        // A conversation whose snapshot cannot be built leaves no mirror behind: see above.
+      }
+    }
+    return inputs;
+  };
+}
+
 const STATE_SUFFIX = '.state.json';
 
 // The file one session's snapshot lives in, beside its `<id>.json`.
@@ -187,6 +214,25 @@ export function removeStateFile(dir: string, id: string): void {
     fs.unlinkSync(statePath(dir, id));
   } catch {
     // Not there, or not ours to remove.
+  }
+}
+
+// Carries a session's mirror into the directory the session itself moved to (sessions.ts,
+// `moveSessionToProject`). A file a crashed run left behind — or one written in the second
+// before its session was put away — would otherwise stay where the session no longer is,
+// invisible to a watcher and keeping that directory from being pruned. A destination that
+// already holds a mirror keeps it and the source copy goes: both read the same session, and
+// the writer rewrites the one that stays. Best-effort, like the remove above.
+export function moveStateFile(from: string, to: string, id: string): void {
+  const src = statePath(from, id);
+  try {
+    if (!fs.existsSync(src)) return;
+    const dest = statePath(to, id);
+    if (fs.existsSync(dest)) fs.unlinkSync(src);
+    else fs.renameSync(src, dest);
+  } catch {
+    // A mirror that could not follow never stays behind as a stale one.
+    removeStateFile(from, id);
   }
 }
 

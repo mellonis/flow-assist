@@ -67,7 +67,7 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
-import { startStateFiles, stateInputOf, type StateFileInput } from '../assistant/state-file.js';
+import { startStateFiles, stateSources, type StateFileInput } from '../assistant/state-file.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
@@ -354,9 +354,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               stateFilesRef.current = startStateFiles({
                 dir: root,
                 dirOf: (i: StateFileInput) => registry.bySession(i.id)?.homes.get(i.id) ?? root,
-                sources: () => registry.live()
-                  .filter((c) => c.kind === 'session' && !c.closed && c.sessionId !== '')
-                  .map((c) => stateInputOf(c, registry.statusOf(c.sessionId) ?? 'idle', process.pid, Date.now())),
+                sources: stateSources(registry, process.pid),
               });
             }
           }

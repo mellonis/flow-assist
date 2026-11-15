@@ -44,7 +44,7 @@ import { consoleBridge } from './runtime/console-log.js';
 import { Conversation } from './assistant/conversation.js';
 import { oneShotOutcome } from './assistant/oneshot.js';
 import { ConversationRegistry } from './assistant/registry.js';
-import { startStateFiles, stateInputOf } from './assistant/state-file.js';
+import { startStateFiles, stateSources } from './assistant/state-file.js';
 import { exitOnSignals, runExitHooks, sessionsDir } from './assistant/sessions.js';
 import { ONESHOT_WITHHELD } from './assistant/conversation-turn.js';
 import { createServices } from './runtime/services.js';
@@ -426,9 +426,7 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     stateFiles = startStateFiles({
       dir: sessionsDir(config),
       dirOf: (i) => conversations.bySession(i.id)?.homes.get(i.id) ?? sessionsDir(config),
-      sources: () => conversations.live()
-        .filter((c) => c.kind === 'session' && !c.closed && c.sessionId !== '')
-        .map((c) => stateInputOf(c, conversations.statusOf(c.sessionId) ?? 'idle', process.pid, Date.now())),
+      sources: stateSources(conversations, process.pid),
     });
     conv = conversations.fresh({
       kind: 'oneshot',

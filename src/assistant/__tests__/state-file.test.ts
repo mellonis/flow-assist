@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { TreeNode } from '../conversation-types.ts';
+import type { Conversation } from '../conversation.ts';
 import { buildSecretSet, setActiveSecrets } from '../secrets.ts';
 import { closeSession, newSessionId, pruneSessions, SESSION_VERSION } from '../sessions.ts';
-import { buildStateFile, removeStateFile, startStateFiles, stateStamp } from '../state-file.ts';
+import { buildStateFile, removeStateFile, startStateFiles, stateStamp, stateSources } from '../state-file.ts';
 import type { StateFileInput, StateFileV1, StateStamps } from '../state-file.ts';
 
 const dirs: string[] = [];
@@ -42,6 +43,11 @@ const input = (over: Partial<StateFileInput> = {}): StateFileInput => ({
   nodes: [],
   ...over,
 });
+
+// A conversation as `stateInputOf` reads one — only the fields it touches, the rest of a
+// real conversation never reached by a snapshot.
+const conv = (id: string, over: Partial<Record<string, unknown>> = {}): Conversation =>
+  ({ kind: 'session', closed: false, sessionId: id, currentProject: () => null, title: id, status: 'idle', confirm: null, question: null, parentAsk: undefined, tree: () => [], ...over }) as unknown as Conversation;
 
 afterEach(() => {
   for (const w of writers.splice(0)) w.stop();
@@ -93,6 +99,7 @@ test('labels, latest text and commands are redacted', () => {
   setActiveSecrets(buildSecretSet({}, { TEST_TOKEN: token }));
   const file = buildStateFile(
     input({
+      project: `/Users/me/${token}`,
       title: `chat about ${token}`,
       own: { status: 'working', latest: `running ${token}`, answered: false },
       nodes: [
@@ -110,6 +117,8 @@ test('labels, latest text and commands are redacted', () => {
   const json = JSON.stringify(file);
   expect(json).not.toContain(token);
   expect(json).toContain('‹secret');
+  // Every string in the file is redacted, the session's own project path included.
+  expect(file.project).toBe('/Users/me/‹secret TEST_TOKEN›');
 });
 
 test('stateStamp re-stamps only when the status changes', () => {
@@ -121,6 +130,34 @@ test('stateStamp re-stamps only when the status changes', () => {
 });
 
 // ---- the writer: a mirror of each live session, beside its session file ----
+
+test('one conversation whose snapshot cannot be built is skipped, never stopping the others, and its mirror goes', () => {
+  const dir = tmp();
+  const a = conv('ses-a');
+  const b = conv('ses-b');
+  let broken = false;
+  // `statusOf` is read lazily, inside the source call, as the registry's own is: a throw
+  // there must cost that conversation alone.
+  const source = {
+    live: () => [a, b],
+    statusOf: (id: string): StateFileV1['status'] | null => {
+      if (broken && id === 'ses-b') throw new Error('boom');
+      return 'idle';
+    },
+  };
+  const w = writer({ dir, sources: stateSources(source, 7, () => 1000) });
+  w.flushNow();
+  const bFile = path.join(dir, 'ses-b.state.json');
+  expect(read(path.join(dir, 'ses-a.state.json'))).toMatchObject({ id: 'ses-a', pid: 7 });
+  expect(fs.existsSync(bFile)).toBe(true);
+
+  // b's snapshot can no longer be built. A conversation absent from the sources is one
+  // that left, so its file goes; a's keeps being written, and a's alone.
+  broken = true;
+  expect(() => w.flushNow()).not.toThrow();
+  expect(fs.existsSync(bFile)).toBe(false);
+  expect(fs.readdirSync(dir)).toEqual(['ses-a.state.json']);
+});
 
 test('a state file is written only when the snapshot changes', () => {
   const dir = tmp();

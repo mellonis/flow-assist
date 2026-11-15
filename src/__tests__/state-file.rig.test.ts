@@ -5,7 +5,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { startStateFiles, stateInputOf } from '../assistant/state-file.ts';
+import { startStateFiles, stateSources } from '../assistant/state-file.ts';
 import { ScriptedModel } from './helpers/scripted.ts';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation.ts';
 import { homeIn } from './helpers/session-files.ts';
@@ -32,9 +32,7 @@ const mirror = (rig: Rig) =>
   startStateFiles({
     dir: rig.sessionsDir,
     dirOf: (i) => rig.registry.bySession(i.id)?.homes.get(i.id) ?? rig.sessionsDir,
-    sources: () => rig.registry.live()
-      .filter((c) => c.kind === 'session' && !c.closed && c.sessionId !== '')
-      .map((c) => stateInputOf(c, rig.registry.statusOf(c.sessionId) ?? 'idle', process.pid, Date.now())),
+    sources: stateSources(rig.registry, process.pid),
   });
 
 const stateOf = (home: string, id: string): Shown =>
