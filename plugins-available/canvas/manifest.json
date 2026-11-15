@@ -1,8 +1,0 @@
-{
-  "name": "canvas",
-  "version": "0.1.0",
-  "hostApi": 2,
-  "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38",
-  "description": "A canvas the model draws: live panels for state and pipelines",
-  "tools": ["canvas"]
-}

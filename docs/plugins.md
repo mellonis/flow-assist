@@ -18,8 +18,8 @@ bun run src/cli.ts plugins trust notes            # …which loads once you trus
 bun run src/cli.ts plugins install <name>         # or one from the plugin registry
 ```
 
-`plugins-available/` holds the bundled ones (`repo`, `gitlab`, `mcp`, `canvas`); a plugin of
-your own can live in a repository of its own and be linked from there. A plugin runs
+`plugins-available/` holds the bundled ones (`repo`, `gitlab`, `mcp`); a plugin of your own —
+the `canvas` surface, say — lives in a repository of its own and is linked from there. A plugin runs
 with the host's rights, so the host loads only one the person trusts: `plugins install`
 trusts what it installs, and a link made any other way — by hand, by an installer
 script — waits for `plugins trust <name>`; until then the start screen says
