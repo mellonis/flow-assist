@@ -1874,7 +1874,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   title: 'Agents',
                   follow: true,
                   empty: 'no subagents here',
-                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending(), asked.endedShellsListed().map((j) => ({ id: j.id, command: j.command, state: j.statusText, ms: j.ms, lines: j.lines }))),
+                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending(), asked.endedShellsListed().map((j) => ({ id: j.id, command: j.command, state: j.statusText, ms: j.ms, lines: j.lines })), asked.effectiveModel()),
                   get keys() { return pending() !== null ? answerKeys : [...stopKeys, watchKey]; },
                 });
                 return;

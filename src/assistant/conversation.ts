@@ -687,6 +687,7 @@ export class Conversation {
           key: child.key, label: child.label, kind: child.kind as TreeNode['kind'], depth, status: s.status,
           latest: s.status === 'working' ? child.toolLabel || child.verb : '', startedAt: s.startedAt, until: s.until, below: 0,
           ...(s.answered ? { answered: true } : {}),
+          ...(child.model ? { model: child.model } : {}),
         };
         out.push(node);
         node.below = walk(child, depth + 1);
@@ -1246,9 +1247,9 @@ export class Conversation {
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
     this.treeChanged(this);
-    if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}), ...(spec.agent ? { agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash } : {}) });
+    if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}), ...(spec.agent ? { agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash } : {}), ...(child.model ? { model: child.model } : {}) });
     // A task writes no start line, except one started from an agent file: it names the file.
-    if (spec.kind === 'task' && spec.agent) about({ t: 'task-start', label: spec.label, by: spec.by, agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash });
+    if (spec.kind === 'task' && spec.agent) about({ t: 'task-start', label: spec.label, by: spec.by, agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash, ...(child.model ? { model: child.model } : {}) });
     // A subagent the person started stays after its answer (see `staying`).
     const stays = spec.kind === 'subagent' && spec.by === 'person';
     for (const s of spec.skills ?? []) about({ t: 'skill-load', name: s.id, source: s.source, path: s.path, hash: s.hash, by: 'agent', ...(spec.agent ? { agent: spec.agent.id } : {}) });

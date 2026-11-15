@@ -65,6 +65,10 @@ test('the role an agent file names runs the child on that model; the session kee
   expect(child.requests[0]!.model).toBe('small-model');
   expect([...rig.conv.children][0]!.contextWindow()).toBe(256_000);
   expect(sessionModels(model, 'ROLE-A')).toEqual(['default-model', 'default-model']);
+  // The journal's start line names the file's fields and the model the child runs.
+  expect(rig.journal().filter((e) => e.t === 'task-start').at(-1)).toMatchObject({
+    label: 'job', by: 'model', agent: 'job', source: 'project', path: expect.any(String), hash: expect.any(String), model: 'small-model',
+  });
   child.release();
   await over(rig);
 });
@@ -129,4 +133,24 @@ test('a task a child starts runs what that child runs, not the session\'s model'
   expect(grand.requests[0]!.model).toBe('small-model');
   grand.release();
   await over(rig);
+});
+
+test('a subagent\'s start line in the journal names its file and its model, and its tree node carries it', async () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { ...AI, backgroundFollowUp: false } });
+  const sub = model.when((req) => firstUser(req).includes('ROLE-F'));
+  sub.script([{ hold: true }, { text: 'ok' }]);
+  const id = rig.conv.journal({ t: 'row', role: 'user', text: 'q' }, { person: true });
+  const agent = { id: 'job', source: 'project' as const, path: '/nowhere/job.md', hash: 'abc' };
+  const started = rig.conv.startChild({ kind: 'subagent', label: 'clock', prompt: 'ROLE-F go', by: 'person', agent, model: 'small-model' }, id);
+  if ('refused' in started) throw new Error(started.refused);
+  const running = started.run();
+  await rig.until(() => sub.held);
+  expect(rig.journal().filter((e) => e.t === 'subagent' && e.event === 'start').at(-1)).toMatchObject({
+    label: 'clock', by: 'person', agent: 'job', source: 'project', path: '/nowhere/job.md', hash: 'abc', model: 'small-model',
+  });
+  expect(rig.conv.tree().find((n) => n.label === 'clock')?.model).toBe('small-model');
+  sub.release();
+  await running;
+  started.child.stopSubtree('');
 });

@@ -333,8 +333,8 @@ export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 
 // A live descendant of a conversation, as the agent tree draws it (`Conversation.tree`).
 // `key` is the descendant's conversation key; `depth` is 1 for a child of the conversation
 // asked; `latest` is the tool it runs, else the verb of its round while it works, else '';
-// `below` counts its live descendants.
-export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'] | 'shell'; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean; shell?: ShellNode }
+// `below` counts its live descendants; `model` is the model it runs, when it has one.
+export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'] | 'shell'; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean; model?: string; shell?: ShellNode }
 // What a background shell adds to its tree node: the row says `<id> · <command> · <state> ·
 // <lines>`. The node is `working` while the job runs and `idle` + `answered` after it ended
 // until the person has opened it. `state` is the job's words (`running`, `exited 0`,

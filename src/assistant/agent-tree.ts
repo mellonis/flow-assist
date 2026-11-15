@@ -132,8 +132,9 @@ export interface EndedShell { id: string; command: string; state: string; ms: nu
 // `/agents`: the whole tree in the panel's rows. The live nodes first in tree order, indented,
 // each with its state and the time it has spent; then the ended ones as the listing words
 // them. A live row's id is its node key, an ended row's `ended:<n>`. `asking`: the key of a
-// node whose stop question is up, drawn in place of that row's text.
-export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null, endedShells: readonly EndedShell[] = []): PanelRow[] {
+// node whose stop question is up, drawn in place of that row's text. `chatModel`: the model
+// the conversation itself sends — a node running another names it in its detail.
+export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null, endedShells: readonly EndedShell[] = [], chatModel?: string): PanelRow[] {
   const rows: PanelRow[] = nodes.map((n): PanelRow => {
     if (n.key === asking) return { id: n.key, text: stopQuestion(n), tone: 'warn' };
     if (n.shell) {
@@ -146,10 +147,11 @@ export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly Ende
     }
     const task = n.kind === 'task' ? ' (task)' : '';
     const spent = n.startedAt !== null ? ` · ${formatDuration(Math.max(0, now - n.startedAt))}` : '';
+    const model = n.model && n.model !== chatModel ? ` · ${n.model}` : '';
     return {
       id: n.key,
       text: `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task}`,
-      detail: `${stateOf(n, now)}${spent}`,
+      detail: `${stateOf(n, now)}${spent}${model}`,
       ...(toneOf(n) === 'warn' ? { tone: 'warn' as const } : {}),
     };
   });
