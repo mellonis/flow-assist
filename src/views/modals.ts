@@ -816,11 +816,13 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         if (seg.kind === 'reasoning') {
           // Each thought is its own block where the model wrote it: folded in `step`,
           // open in `open`. It is `thinking` until the turn moves on, then `thought`;
-          // a leading bold title becomes the header's name.
+          // a leading bold title becomes the header's name. Its round is over once
+          // another message follows it (a tool's view is one), since nothing lands
+          // above a message that is still being written.
           const id = foldId(at, 'reasoning', seg.n);
           const foldable = notes !== 'open';
           const opened = !foldable || isOpen(folds, id);
-          const done = m.duration != null || !!m.live || si < segs.length - 1;
+          const done = m.duration != null || !!m.live || si < segs.length - 1 || !last;
           const summary = reasoningSummary(seg.text);
           const label = `${done ? 'thought' : 'thinking'}${summary.title ? `: ${summary.title}` : ''}`;
           rows.push({ role, reasonHeader: true, open: opened, label, ...(foldable ? { fold: id, foldLine: true } : {}) });

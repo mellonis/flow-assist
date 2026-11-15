@@ -166,6 +166,26 @@ test('a thought still being written reads thinking, and becomes thought once the
   ui.app.unmount();
 });
 
+test('a thought reads thought once the turn moved on, even when a tool block landed under it', async () => {
+  // A command's output is a message of its own (`placeViews`), so the message that
+  // carries only the thought stops being the last one and never gets the turn's
+  // duration — its round is over all the same.
+  const model = new ScriptedModel();
+  model.script(
+    [{ thinking: 'Count first.', signature: 'sig-cmd' }, { tool: 'run_command', args: { command: 'seq 1 3' } }],
+    [{ text: 'All done.' }],
+  );
+  const ui = await boot(model, { thinking: { adaptive: true } });
+  await ask(ui, 'count to three');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('All done.'));
+  await settle(10);
+  expect(ui.backend.lastFrame).toMatch(/▸ thought/);
+  expect(ui.backend.lastFrame).not.toMatch(/▸ thinking/);
+  ui.app.unmount();
+});
+
 test('each round keeps its own thinking block, in the order it happened', async () => {
   const model = new ScriptedModel();
   model.script(
