@@ -66,6 +66,15 @@ const scopeOf = (deps: TToolsDeps, ctx: unknown): TScope => {
   return path === '' ? GLOBAL_SCOPE : `project:${path}`;
 };
 
+// The scope a template tool is asked for: `project` (the default — where the call was
+// made) or `global` (everywhere). Anything else is not a scope, and the refusal names
+// the two a person may type.
+const scopeChoiceOf = (raw: unknown): 'project' | 'global' | null => {
+  if (raw === undefined || raw === null) return 'project';
+  return raw === 'project' || raw === 'global' ? raw : null;
+};
+const notAScope = (raw: unknown): string => `«${typeof raw === 'string' ? raw : ''}» is not a scope — use project or global`;
+
 // One recipe as a listing reads it: its name, its title when it has one, its age, and
 // the scope it came from.
 const templateLine = (template: TTemplateLine, now: number): string => {
@@ -160,23 +169,29 @@ export function buildGroup(deps: TToolsDeps) {
 
   // A save keeps the tree and the title the canvas has now, never the values the
   // person typed: a recipe is a shape, and the canvas drawn from it carries the data.
+  // `scope: 'global'` keeps it for every project; the default is this call's project.
   const save = (args: Record<string, unknown>, ctx: unknown): string => {
     const id = canvasOf(args.canvas);
     if (!id) return 'not saved: name the canvas — canvas is its id';
+    const choice = scopeChoiceOf(args.scope);
+    if (choice === null) return notAScope(args.scope);
     const canvas = deps.store.canvases.get(id);
     if (canvas === undefined) return missingCanvas(id);
     const name = typeof args.template === 'string' ? args.template.trim() : '';
     if (name === '') return 'not saved: name the recipe — template is a slug like pipeline';
     if (deps.cache === undefined) return CACHE_OFF;
-    const saved = saveTemplate(deps.cache, { scope: scopeOf(deps, ctx), name, title: canvas.title, tree: canvas.tree, now: deps.now() });
+    const scope = choice === 'global' ? GLOBAL_SCOPE : scopeOf(deps, ctx);
+    const saved = saveTemplate(deps.cache, { scope, name, title: canvas.title, tree: canvas.tree, now: deps.now() });
     return saved.ok ? `saved «${saved.key}»` : saved.error;
   };
 
   // The recipes this project has and the global ones, one line each: what a draw can
-  // name, and how old it is.
-  const templates = (ctx: unknown): string => {
+  // name, and how old it is. `scope: 'global'` narrows the list to the global ones.
+  const templates = (args: Record<string, unknown>, ctx: unknown): string => {
+    const choice = scopeChoiceOf(args.scope);
+    if (choice === null) return notAScope(args.scope);
     if (deps.cache === undefined) return CACHE_OFF;
-    const lines = listTemplates(deps.cache, scopeOf(deps, ctx));
+    const lines = listTemplates(deps.cache, choice === 'global' ? GLOBAL_SCOPE : scopeOf(deps, ctx));
     if (lines.length === 0) return 'no templates yet — canvas_save keeps a drawn canvas as one';
     const now = deps.now();
     return lines.map((line) => templateLine(line, now)).join('\n');
@@ -208,12 +223,13 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_save',
-          description: 'Keep a drawn canvas as a recipe — its tree and its title, never the values the person typed — so canvas_draw can draw it again, in this session or a later one. canvas — the canvas to keep; template — the recipe\'s name (lower-case letters, digits and . _ -). Saving an existing name replaces it. Display only.',
+          description: 'Keep a drawn canvas as a recipe — its tree and its title, never the values the person typed — so canvas_draw can draw it again, in this session or a later one. canvas — the canvas to keep; template — the recipe\'s name (lower-case letters, digits and . _ -); scope — \'project\' (the default) or \'global\'. Saving an existing name replaces it. Display only.',
           parameters: {
             type: 'object',
             properties: {
               canvas: { type: 'string', description: 'The canvas id — canvas_list names them.' },
               template: { type: 'string', description: 'The recipe name — a slug like pipeline.' },
+              scope: { type: 'string', enum: ['project', 'global'], description: '\'project\' (the default) keeps it for this project; \'global\' for every project.' },
             },
             required: ['canvas', 'template'],
           },
@@ -223,8 +239,13 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_templates',
-          description: 'The saved recipes — one line each: name, title, age, and whether it is this project\'s or global. canvas_draw with `template` draws one; a project recipe shadows a global one of the same name.',
-          parameters: { type: 'object', properties: {} },
+          description: 'The saved recipes — one line each: name, title, age, and whether it is this project\'s or global. canvas_draw with `template` draws one; a project recipe shadows a global one of the same name. scope — \'project\' (the default) or \'global\'.',
+          parameters: {
+            type: 'object',
+            properties: {
+              scope: { type: 'string', enum: ['project', 'global'], description: '\'project\' (the default) lists this project\'s recipes and the global ones it does not shadow; \'global\' lists only the global ones.' },
+            },
+          },
         },
       },
       {
@@ -275,7 +296,7 @@ export function buildGroup(deps: TToolsDeps) {
     exec: async (name: string, args: Record<string, unknown>, ctx: unknown): Promise<string> => {
       if (name === 'canvas_draw') return draw(args, ctx);
       if (name === 'canvas_save') return save(args, ctx);
-      if (name === 'canvas_templates') return templates(ctx);
+      if (name === 'canvas_templates') return templates(args, ctx);
       if (name === 'canvas_list') return list();
       if (name === 'canvas_delete') return remove(args);
       if (name === 'canvas_focus') return focus(args, ctx);

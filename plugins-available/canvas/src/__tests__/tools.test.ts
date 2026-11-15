@@ -157,6 +157,48 @@ test('a tree sent beside a template is drawn, and the template supplies the titl
   expect(store.canvases.get('ci')!.title).toBe('Pipelines');
 });
 
+test('canvas_save with scope global keeps a recipe every project reads as global', async () => {
+  const here = deps({ project: () => '/w/a' });
+  await here.group.exec('canvas_draw', { canvas: 'ci', title: 'Pipelines', tree: ['Box', {}, ['Text', {}, 'shared']] }, {});
+  expect(await here.group.exec('canvas_save', { canvas: 'ci', template: 'pipeline', scope: 'global' }, {})).toContain('global/pipeline');
+  // Another project draws it and reads where it came from: global, not its own.
+  const there = deps({ project: () => '/w/b', cache: here.cache });
+  expect(await there.group.exec('canvas_draw', { canvas: 'ci2', template: 'pipeline' }, {})).toContain('«ci2»');
+  const listed = await there.group.exec('canvas_templates', {}, {});
+  expect(listed).toContain('pipeline');
+  expect(listed).toContain('global');
+});
+
+test('an unknown scope is refused, naming the two it accepts', async () => {
+  const { group } = deps({ project: () => '/w/a' });
+  await group.exec('canvas_draw', { canvas: 'ci', tree: ['Box', {}, ['Text', {}, 'x']] }, {});
+  const saved = await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline', scope: 'everywhere' }, {});
+  expect(saved).toContain('project');
+  expect(saved).toContain('global');
+  const listed = await group.exec('canvas_templates', { scope: 'everywhere' }, {});
+  expect(listed).toContain('project');
+  expect(listed).toContain('global');
+});
+
+test('canvas_templates with scope global omits the project\'s own recipes', async () => {
+  const { group } = deps({ project: () => '/w/a' });
+  await group.exec('canvas_draw', { canvas: 'ci', title: 'Mine', tree: ['Box', {}, ['Text', {}, 'x']] }, {});
+  await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, {});
+  await group.exec('canvas_save', { canvas: 'ci', template: 'shared', scope: 'global' }, {});
+  const both = await group.exec('canvas_templates', {}, {});
+  expect(both).toContain('«pipeline»');
+  expect(both).toContain('«shared»');
+  const globals = await group.exec('canvas_templates', { scope: 'global' }, {});
+  expect(globals).toContain('«shared»');
+  expect(globals).not.toContain('«pipeline»');
+});
+
+test('the group text names recipes — the model learns the reuse path from it', () => {
+  const { group } = deps();
+  expect(group.description).toContain('canvas_save');
+  expect(group.description).toContain('template');
+});
+
 test('a draw while the surface is down says one line; a draw while it is up says nothing', async () => {
   const { group, store, notes } = deps();
   await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});
