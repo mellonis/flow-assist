@@ -7,7 +7,8 @@
 //   - estimated: characters / 4, drawn with a `~`. Crude (code and Cyrillic are denser
 //     than English prose) but it moves the right way, and the breakdown by part is
 //     always an estimate — a provider reports one number, not where it came from.
-// The window is `ai.contextWindow`; nobody can ask a model for it over this API.
+// The window is the conversation's model's (`ai.models.<id>.contextWindow`, else
+// `ai.contextWindow`); nobody can ask a model for it over this API.
 // An image is counted by its pixels, as providers bill it (`imageTokens`), never by
 // the text of its saved form — and never by base64, which the history does not hold.
 //

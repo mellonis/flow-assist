@@ -67,7 +67,7 @@ export function retryNote(problem: string): string {
 }
 
 // ── Automatic compaction (`ai.autoCompact`) ──
-// Before a request that would pass `threshold` of `ai.contextWindow`, the conversation
+// Before a request that would pass `threshold` of the window in use, the conversation
 // is compacted first. On unless `enabled` is false; the threshold is held to 0.5–0.95
 // — lower compacts all the time, higher leaves no room for the answer.
 export interface AutoCompact { enabled: boolean; threshold: number }

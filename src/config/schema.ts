@@ -74,8 +74,10 @@ export const hostConfigSchema = z.object({
     // `budgetTokens` (older ones; at least 1024). Unset: the model's own default.
     maxTokens: z.number().int().positive().optional(),
     thinking: z.object({ adaptive: z.boolean().optional(), budgetTokens: z.number().int().min(1024).optional() }).optional(),
-    // The model's context window in tokens — the API cannot be asked for it. The
-    // chat's `ctx N%` and `/context` measure against it (default 200000).
+    // The window of a model the catalogue does not name, in tokens — the API cannot be
+    // asked for it. `models.<id>.contextWindow` is a named model's; the chat's `ctx N%`
+    // and `/context` measure against whichever the conversation's model resolves to
+    // (200000 otherwise).
     contextWindow: z.number().int().positive().optional(),
     language: z.string().optional(),
     assistantLanguage: z.string().optional(),
@@ -104,8 +106,9 @@ export const hostConfigSchema = z.object({
     // Bulky content — an attached image, a `!command`'s output, a tool result over
     // `minChars` (4096) — goes to the model in full in its own turn and as a stub it can
     // `recall` afterwards (src/assistant/recall.ts). Stubs are applied in batches: when
-    // the context passes `threshold` (0.5 of `ai.contextWindow`) or every `everyTurns`
-    // turns (10; 0 — the threshold alone). `enabled: false` sends everything in full.
+    // the context passes `threshold` (0.5 of the window the conversation measures
+    // against) or every `everyTurns` turns (10; 0 — the threshold alone). `enabled:
+    // false` sends everything in full.
     recall: z.object({ enabled: z.boolean(), threshold: z.number().positive().max(1), minChars: z.number().int().positive(), everyTurns: z.number().int().min(0) }).partial().optional(),
     // A request that fails for a reason that passes (a 429, a 5xx, an overloaded or
     // unreachable provider) is made again before anything of its answer was shown
@@ -122,7 +125,7 @@ export const hostConfigSchema = z.object({
     // The round cap of a background task, in place of `maxRounds` (12; 0 — no cap, the
     // token budget alone bounds it).
     taskRounds: z.number().int().min(0).optional(),
-    // Before a request that would pass `threshold` (0.8) of `contextWindow`, the chat
+    // Before a request that would pass `threshold` (0.8) of the window in use, the chat
     // compacts the conversation into a handoff first — the /compact path, its row marked
     // `auto` — at a request boundary, never between a call and its result
     // (src/assistant/compaction.ts). `enabled: false` leaves it to /compact alone.

@@ -2452,7 +2452,7 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
     cacheLine ? h(Text, { dim: true, wrap: 'truncate' }, cacheLine) : null,
     recallLine ? h(Text, { dim: true, wrap: 'truncate' }, recallLine) : null,
-    h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
+    h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: the model's · ${CAP.esc} / ${CAP.enter} close`));
 }
 
 // The question's free-text row: its prompt, indented under the options, and the width
