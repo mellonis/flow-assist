@@ -1,7 +1,8 @@
 // Canvas plugin builder — the `canvas` tool group, the screen its navigation tools
-// open, and what the model reads back: one context item per canvas, then the selected
-// canvas's outline. The surface itself (keycaps, keys, components) is the later task;
-// `keycaps` returns `[]` so the host never mounts one yet (docs/plugins.md, "Screens").
+// open, what the model reads back (one context item per canvas, then the selected
+// canvas's outline), and the surface: `keycaps` mounts it only while the person opened
+// the side and a canvas is drawn, `components.view` draws it, `components.panel` (always
+// mounted) holds the key that opens and closes the side (docs/plugins.md, "Screens").
 //
 // `Make` mirrors the host's `make(name, shape)` (src/loader/plugin.ts): it fills the
 // name, the plugin's config slice and its keys into the shape the builder returns.
@@ -11,6 +12,7 @@
 import { createStore, outline, registryItems, selectCanvas, selectedCanvas } from './store.ts';
 import { buildGroup, SHOW_SCREEN, missingCanvas } from './tools.ts';
 import { TOKEN_COLOR } from './render.ts';
+import { canvasKeycaps, canvasPanel, canvasView, type TSurfaceApi } from './view.ts';
 import type { TStore } from './store.ts';
 
 type Make = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
@@ -72,7 +74,15 @@ export default function buildCanvasPlugin({ config, make, z }: { config?: unknow
     // `config.plugins.canvas.colors`, and the surface hands the resolved map to the
     // renderer's ctx.
     colors: TOKEN_COLOR,
-    keycaps: () => [],
+    // The action the person's side opens on: its cap is drawn in the footer hints, and
+    // `components.panel` answers the key it is bound to now — never a letter written
+    // here, since the person may remap it (`config.keys.canvas`).
+    keys: { canvas: 'C' },
+    keycaps: (api: unknown) => canvasKeycaps(api as { host: { keyCap(action: string): string } }, store),
+    components: {
+      view: (api: unknown) => canvasView(api as TSurfaceApi, store),
+      panel: (api: unknown) => canvasPanel(api as TSurfaceApi, store),
+    },
     tools: [group],
     screens: {
       [SHOW_SCREEN]: {

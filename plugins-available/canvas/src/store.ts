@@ -143,8 +143,9 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 // The age as the model reads it — seconds, minutes, hours or days, floored, so it
-// only grows; under a second it is `now`.
-const formatAge = (ms: number): string => {
+// only grows; under a second it is `now`. The surface's header reads it too, so the
+// two never disagree about how old a canvas is.
+export const formatAge = (ms: number): string => {
   if (ms < SECOND_MS) return 'now';
   if (ms < MINUTE_MS) return `${Math.floor(ms / SECOND_MS)}s`;
   if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}m`;
