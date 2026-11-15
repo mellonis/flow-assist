@@ -30,7 +30,7 @@ export const LIMITS: { nodes: number; depth: number; children: number; text: num
 export const TONE_TOKENS = ['ok', 'warn', 'error', 'accent', 'dim', 'muted', 'default'];
 
 type PropKind = 'string' | 'number' | 'boolean' | 'array' | 'object';
-type ChildKind = 'text' | 'nodes' | 'both';
+type ChildKind = 'text' | 'nodes' | 'none';
 
 interface TypeRule {
   props: Record<string, PropKind>;
@@ -46,10 +46,10 @@ interface ItemField {
 }
 
 // The whitelist, in the order the vocabulary text names it. A type's `children`
-// kind is the kind its children may be; a type whose data lives in its props
-// (Table, the composites, the interactive types) takes no children of its own, and
-// the brief's three-way kind has no "none", so those take node children and the
-// renderer draws them from the props alone.
+// kind is the kind its children may be — a string ('text'), nodes ('nodes'), or
+// none at all ('none') for a type whose data lives in its props: the renderer
+// draws it from the props alone, so a child would be validated and then silently
+// dropped, and it is refused instead.
 const ALLOWED: Record<string, TypeRule> = {
   Box: {
     props: { flexDirection: 'string', gap: 'number', padding: 'number', paddingX: 'number', paddingY: 'number', width: 'number', height: 'number', flexGrow: 'number', border: 'boolean', overflow: 'string', alignItems: 'string', justifyContent: 'string' },
@@ -61,39 +61,39 @@ const ALLOWED: Record<string, TypeRule> = {
     required: [],
     children: 'text',
   },
-  Markdown: { props: {}, required: [], children: 'text' },
+  Markdown: { props: { text: 'string' }, required: ['text'], children: 'none' },
   Table: {
     props: { columns: 'array', rows: 'array', border: 'boolean', selectedIndex: 'number' },
     required: ['columns', 'rows'],
-    children: 'nodes',
+    children: 'none',
   },
   ScrollBox: {
     props: { height: 'number', flexGrow: 'number' },
     required: [],
     children: 'nodes',
   },
-  Link: { props: { url: 'string' }, required: ['url'], children: 'text' },
+  Link: { props: { url: 'string' }, required: ['url'], children: 'none' },
   progress: {
     props: { label: 'string', value: 'number', tone: 'string' },
     required: ['label', 'value'],
-    children: 'nodes',
+    children: 'none',
   },
-  badge: { props: { text: 'string', tone: 'string' }, required: ['text', 'tone'], children: 'nodes' },
-  rows: { props: { items: 'array' }, required: ['items'], children: 'nodes' },
-  tasks: { props: { items: 'array' }, required: ['items'], children: 'nodes' },
-  rule: { props: { label: 'string' }, required: [], children: 'nodes' },
+  badge: { props: { text: 'string', tone: 'string' }, required: ['text', 'tone'], children: 'none' },
+  rows: { props: { items: 'array' }, required: ['items'], children: 'none' },
+  tasks: { props: { items: 'array' }, required: ['items'], children: 'none' },
+  rule: { props: { label: 'string' }, required: [], children: 'none' },
   input: {
     props: { bind: 'string', label: 'string', placeholder: 'string', value: 'string', width: 'number' },
     required: ['bind'],
-    children: 'nodes',
+    children: 'none',
   },
-  check: { props: { bind: 'string', label: 'string', value: 'boolean' }, required: ['bind', 'label'], children: 'nodes' },
+  check: { props: { bind: 'string', label: 'string', value: 'boolean' }, required: ['bind', 'label'], children: 'none' },
   select: {
     props: { bind: 'string', label: 'string', options: 'array', value: 'string' },
     required: ['bind', 'options'],
-    children: 'nodes',
+    children: 'none',
   },
-  button: { props: { label: 'string', action: 'string', tone: 'string' }, required: ['label', 'action'], children: 'nodes' },
+  button: { props: { label: 'string', action: 'string', tone: 'string' }, required: ['label', 'action'], children: 'none' },
 };
 
 const TYPES = Object.keys(ALLOWED);
@@ -102,7 +102,7 @@ const TASK_STATES = ['done', 'running', 'queued', 'failed'];
 const KIND_NAME: Record<PropKind, string> = { string: 'a string', number: 'a number', boolean: 'a boolean', array: 'an array', object: 'an object' };
 // A string the canvas prints as text, capped by LIMITS.text; every other string prop
 // is a value (a typed field, a label, an action), capped by LIMITS.value.
-const TEXT_PROPS = new Set(['badge.text']);
+const TEXT_PROPS = new Set(['badge.text', 'Markdown.text']);
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -160,15 +160,22 @@ export function checkTree(tree: unknown): TChecked {
   const checkArrayProp = (type: string, key: string, value: unknown) => {
     if (type === 'Table' && key === 'columns') {
       checkItemArray('Table.columns', value, "Table's columns must be { key, label, width? }", [
-        { name: 'key', kind: 'string' },
-        { name: 'label', kind: 'string' },
+        { name: 'key', kind: 'string', cap: LIMITS.value },
+        { name: 'label', kind: 'string', cap: LIMITS.text },
         { name: 'width', kind: 'number', optional: true },
       ]);
     } else if (type === 'Table' && key === 'rows') {
       if (!Array.isArray(value)) return;
       if (value.length > LIMITS.children) problem(`Table has ${value.length} rows — the limit is ${LIMITS.children}`);
-      for (const r of value) {
+      for (let ri = 0; ri < value.length; ri++) {
+        const r = value[ri];
         if (!Array.isArray(r) || !r.every((c) => typeof c === 'string')) { problem("Table's rows must be arrays of strings"); return; }
+        for (let ci = 0; ci < r.length; ci++) {
+          const cell = r[ci];
+          if (typeof cell === 'string' && cell.length > LIMITS.text) {
+            problem(`Table's rows[${ri}][${ci}] is ${cell.length} chars — the limit is ${LIMITS.text}`);
+          }
+        }
       }
     } else if (type === 'rows' && key === 'items') {
       checkItemArray("rows' items", value, "rows' items must be { label, value, tone? }", [
@@ -221,12 +228,13 @@ export function checkTree(tree: unknown): TChecked {
   };
 
   const checkChildren = (type: string, rule: TypeRule, children: unknown[], depth: number) => {
-    if (children.length > LIMITS.children) problem(`${type} has ${children.length} children — the limit is ${LIMITS.children}`);
-    // Markdown is one string, not a list of them.
-    if (type === 'Markdown') {
-      const texts = children.filter((c) => typeof c === 'string');
-      if (texts.length > 1) problem(`Markdown takes one string child, not ${texts.length}`);
+    // A type whose data lives in its props is drawn from the props alone: a child
+    // would be validated and then silently dropped, so it is refused.
+    if (rule.children === 'none') {
+      if (children.length > 0) problem(`${type} takes no children — its content is in its props`);
+      return;
     }
+    if (children.length > LIMITS.children) problem(`${type} has ${children.length} children — the limit is ${LIMITS.children}`);
     for (const c of children) {
       if (typeof c === 'string') {
         if (rule.children === 'nodes') { problem(`${type} takes node children — wrap the text in a Text`); continue; }
@@ -286,10 +294,10 @@ export function checkTree(tree: unknown): TChecked {
 export const VOCABULARY = `canvas components — a tree is [type, props?, ...children]; a child is a node or a string:
 Box: flexDirection, gap, padding, paddingX, paddingY, width, height, flexGrow, border, overflow, alignItems, justifyContent — takes node children
 Text: color (a palette token), bold, dim, wrap, truncate — takes a string child
-Markdown: takes one string child
+Markdown: text — one string, the markdown to draw
 Table: columns ({key, label, width?}), rows (arrays of strings, ≤ 100), border, selectedIndex
 ScrollBox: height, flexGrow — takes node children
-Link: url — takes a string child
+Link: url — drawn as one line
 progress: label, value (0–100), tone
 badge: text, tone
 rows: items ({label, value, tone?})

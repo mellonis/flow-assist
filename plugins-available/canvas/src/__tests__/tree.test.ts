@@ -57,3 +57,48 @@ test('the vocabulary text names every type', () => {
     expect(VOCABULARY).toContain(t);
   }
 });
+
+test('a type drawn from its props alone refuses children it would never draw', () => {
+  const s = checkTree(['progress', { label: 'p', value: 1 }, 'x']);
+  expect(s.ok).toBe(false);
+  if (!s.ok) {
+    expect(s.error).toContain('progress');
+    expect(s.error).toContain('no children');
+  }
+  const n = checkTree(['button', { label: 'go', action: 'go' }, ['Text', {}, 'x']]);
+  expect(n.ok).toBe(false);
+  if (!n.ok) {
+    expect(n.error).toContain('button');
+    expect(n.error).toContain('no children');
+  }
+});
+
+test('Markdown carries its text in a prop, not children', () => {
+  expect(checkTree(['Markdown', { text: '# hi' }]).ok).toBe(true);
+  const r = checkTree(['Markdown', {}, '# hi']);
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('Markdown');
+    expect(r.error).toContain('no children');
+  }
+});
+
+test('Table cells and column labels stay under the text cap', () => {
+  const cell = checkTree(['Table', { columns: [{ key: 'a', label: 'A' }], rows: [['x'.repeat(LIMITS.text + 1), 'b']] }]);
+  expect(cell.ok).toBe(false);
+  if (!cell.ok) expect(cell.error).toContain(`chars — the limit is ${LIMITS.text}`);
+  const col = checkTree(['Table', { columns: [{ key: 'a', label: 'L'.repeat(LIMITS.text + 1) }], rows: [['x']] }]);
+  expect(col.ok).toBe(false);
+  if (!col.ok) expect(col.error).toContain(`chars — the limit is ${LIMITS.text}`);
+});
+
+test('the node cap bites: 401 nodes refuse, 400 pass', () => {
+  // 100 inner Boxes of three Texts each: 1 + 100 + 300 = 401 nodes, depth 3,
+  // 100 children on the root — only the node cap is broken.
+  const dense = (inner: number[]) => ['Box', {}, ...inner.map((n: number) => ['Box', {}, ...Array.from({ length: n }, () => ['Text', {}, 'x'])])];
+  const over = checkTree(dense(Array.from({ length: 100 }, () => 3)));
+  expect(over.ok).toBe(false);
+  if (!over.ok) expect(over.error).toContain(`the limit is ${LIMITS.nodes}`);
+  // The same shape with one fewer Text: exactly 400 nodes.
+  expect(checkTree(dense([2, ...Array.from({ length: 99 }, () => 3)])).ok).toBe(true);
+});
