@@ -58,6 +58,21 @@ test('saving an existing name at the cap replaces it and does not count twice', 
   expect(listed[0]).toEqual({ name: 't0', title: 'Renamed', savedAt: 2, where: 'global' });
 });
 
+test('a project recipe the index names but cannot read is refused, never replaced by global', () => {
+  const cache = fakeCache();
+  saveTemplate(cache, { scope: 'global', name: 'pipeline', title: 'Global', tree, now: 1 });
+  saveTemplate(cache, { scope: 'project:/w/a', name: 'pipeline', title: 'Mine', tree, now: 2 });
+  // A hand-edited cache, or one written by a shape this build no longer reads: the index
+  // still names the project's recipe, the entry itself is not a recipe.
+  cache.map.set(`${TEMPLATES_NS}/project:/w/a/pipeline`, { title: 'Mine' });
+  const r = loadTemplate(cache, { scope: 'project:/w/a', name: 'pipeline' });
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('«pipeline» is unreadable');
+    expect(r.error).toContain('save it again');
+  }
+});
+
 test('listing merges the project and the global recipes and says where each came from', () => {
   const cache = fakeCache();
   saveTemplate(cache, { scope: 'global', name: 'servers', title: 'Servers', tree, now: 1 });

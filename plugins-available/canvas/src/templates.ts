@@ -94,13 +94,23 @@ const readRecipe = (cache: TCache, key: string, name: string): TTemplate | null 
   return { name, title: raw.title, tree: raw.tree as Node, savedAt: raw.savedAt };
 };
 
+// Whether a scope's index names a recipe. An index entry whose value does not read back
+// as a recipe is a disagreement, not a miss: refusing it is what keeps a project's
+// recipe from being silently replaced by a global one of the same name.
+const isNamed = (cache: TCache, scope: TScope, name: string): boolean =>
+  readIndex(cache, scope).some((entry) => entry.name === name);
+
+const unreadable = (name: string): string => `template «${name}» is unreadable — save it again under the same name and it replaces the broken one`;
+
 export function loadTemplate(cache: TCache, input: { scope: TScope; name: string }): { ok: true; template: TTemplate; key: string } | { ok: false; error: string } {
   if (!cache.enabled()) return { ok: false, error: CACHE_OFF };
   const name = slug(input.name);
   if (name === null) return { ok: false, error: notAName(input.name) };
   const projectKey = `${input.scope}/${name}`;
   const own = input.scope === GLOBAL_SCOPE ? null : readRecipe(cache, projectKey, name);
+  if (own === null && input.scope !== GLOBAL_SCOPE && isNamed(cache, input.scope, name)) return { ok: false, error: unreadable(name) };
   const shared = own === null ? readRecipe(cache, `${GLOBAL_SCOPE}/${name}`, name) : null;
+  if (own === null && shared === null && isNamed(cache, GLOBAL_SCOPE, name)) return { ok: false, error: unreadable(name) };
   const found = own ?? shared;
   if (found === null) return { ok: false, error: `no template «${name}» — draw a tree instead` };
   const key = own !== null ? projectKey : `${GLOBAL_SCOPE}/${name}`;

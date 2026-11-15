@@ -1,11 +1,14 @@
-// The `canvas` tool group: draw, list, delete, focus, open — and the screen the two
-// navigation tools open. A self-contained factory over its deps (the registry, the
-// clock, the host's redraw, its toast and its screen opener), so the group is testable
-// without an app and imports nothing from the host.
+// The `canvas` tool group: draw, save, templates, list, delete, focus, open — and the
+// screen the two navigation tools open. A self-contained factory over its deps (the
+// registry, the clock, the host's cache, its redraw, its toast and its screen opener),
+// so the group is testable without an app and imports nothing from the host.
 //
-// Every tool here is a READ: a canvas changes only what the person sees, never the
-// world, and a y/n on each redraw would stall live updates and block every background
-// agent (the design's "canvas_draw is a read, not a write"). None carries `write`.
+// Every tool here is a READ: `canvas_save` writes only into the plugin's own store —
+// the host's cache, the app's scratchpad, as `memory` is — so it is reversible (the
+// person can clear the cache) and changes nothing outside the app, which is why it asks
+// no y/n; a canvas changes only what the person sees, never the world, and a y/n on
+// each redraw would stall live updates and block every background agent (the design's
+// "canvas_draw is a read, not a write"). None carries `write`.
 //
 // The group's `description` is the vocabulary the model composes trees against: the
 // types, their props, the caps, the palette, one example. Tool descriptions stay short
@@ -190,7 +193,9 @@ export function buildGroup(deps: TToolsDeps) {
   const templates = (args: Record<string, unknown>, ctx: unknown): string => {
     const choice = scopeChoiceOf(args.scope);
     if (choice === null) return notAScope(args.scope);
-    if (deps.cache === undefined) return CACHE_OFF;
+    // The app always hands a cache (a proxy over the host); a disabled one is the real
+    // "off", and the store answers an empty list for it — so ask the switch here.
+    if (deps.cache === undefined || !deps.cache.enabled()) return CACHE_OFF;
     const lines = listTemplates(deps.cache, choice === 'global' ? GLOBAL_SCOPE : scopeOf(deps, ctx));
     if (lines.length === 0) return 'no templates yet — canvas_save keeps a drawn canvas as one';
     const now = deps.now();

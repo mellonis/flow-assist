@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { buildGroup } from '../tools.ts';
 import { createStore } from '../store.ts';
+import { TEMPLATES_NS } from '../templates.ts';
 
 // The cache as the host's own behaves: `get` answers undefined for what it does not
 // hold, a set without a ttl keeps the entry, and only `enabled` can turn it off.
@@ -191,6 +192,56 @@ test('canvas_templates with scope global omits the project\'s own recipes', asyn
   const globals = await group.exec('canvas_templates', { scope: 'global' }, {});
   expect(globals).toContain('«shared»');
   expect(globals).not.toContain('«pipeline»');
+});
+
+test('with the cache disabled — the only "off" the app has — every template tool says so', async () => {
+  const { group, store } = deps({ cache: fakeCache(false) });
+  await group.exec('canvas_draw', { canvas: 'ci', tree: ['Box', {}, ['Text', {}, 'x']] }, {});
+  const off = 'the cache is off (config.cache.enabled) — nothing can be saved';
+  expect(await group.exec('canvas_templates', {}, {})).toBe(off);
+  expect(await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, {})).toBe(off);
+  // A draw that names a recipe is refused all the same, and draws nothing.
+  expect(await group.exec('canvas_draw', { canvas: 'ci2', template: 'pipeline' }, {})).toContain(off);
+  expect(store.canvases.has('ci2')).toBe(false);
+});
+
+test('the project comes from the call\'s ctx — the path the app itself uses', async () => {
+  const { group } = deps();
+  await group.exec('canvas_draw', { canvas: 'ci', title: 'Pipelines', tree: ['Box', {}, ['Text', {}, 'x']] }, {});
+  const saved = await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, { workspaceProject: () => '/w/a' });
+  expect(saved).toContain('project:/w/a/pipeline');
+});
+
+test('a call with no project identity saves to global', async () => {
+  const { group } = deps();
+  await group.exec('canvas_draw', { canvas: 'ci', tree: ['Box', {}, ['Text', {}, 'x']] }, {});
+  expect(await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, { workspaceProject: () => null })).toContain('global/pipeline');
+});
+
+test('the project is read per call — a cd mid-session moves the scope', async () => {
+  const { group, store } = deps();
+  let project = '/w/a';
+  const ctx = { workspaceProject: () => project };
+  await group.exec('canvas_draw', { canvas: 'a', title: 'A', tree: ['Box', {}, ['Text', {}, 'x']] }, ctx);
+  expect(await group.exec('canvas_save', { canvas: 'a', template: 'pipeline' }, ctx)).toContain('project:/w/a/pipeline');
+  project = '/w/b';
+  // The same group and the same ctx object: the draw reads the new project and finds nothing there.
+  expect(await group.exec('canvas_draw', { canvas: 'c2', template: 'pipeline' }, ctx)).toContain('no template');
+  expect(store.canvases.has('c2')).toBe(false);
+  expect(await group.exec('canvas_save', { canvas: 'a', template: 'second' }, ctx)).toContain('project:/w/b/second');
+});
+
+test('a project recipe the index names but cannot read is refused — the global one never stands in', async () => {
+  const { group, cache, store } = deps({ project: () => '/w/a' });
+  await group.exec('canvas_draw', { canvas: 'ci', title: 'Mine', tree: ['Box', {}, ['Text', {}, 'mine']] }, {});
+  await group.exec('canvas_draw', { canvas: 'g', title: 'Global', tree: ['Box', {}, ['Text', {}, 'global']] }, {});
+  await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, {});
+  await group.exec('canvas_save', { canvas: 'g', template: 'pipeline', scope: 'global' }, {});
+  // A hand-edited cache: the index still names the project's recipe, the entry lost its shape.
+  cache.map.set(`${TEMPLATES_NS}/project:/w/a/pipeline`, { title: 'Mine' });
+  const out = await group.exec('canvas_draw', { canvas: 'ci2', template: 'pipeline' }, {});
+  expect(out).toContain('unreadable');
+  expect(store.canvases.has('ci2')).toBe(false);
 });
 
 test('the group text names recipes — the model learns the reuse path from it', () => {
