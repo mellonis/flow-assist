@@ -233,7 +233,7 @@ test("a crash draws the stop with the last lines the plugin wrote to stderr", as
 // never left behind.
 test('a host that exits during a pending handshake leaves no plugin process behind', async () => {
   const pidfile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-pid-')), 'pid');
-  const host = Bun.spawn(['bun', path.join(FAKE_DIR, 'late-exit-host.ts'), pidfile], { stdout: 'pipe', stderr: 'pipe' });
+  const host = Bun.spawn(['bun', path.join(FAKE_DIR, 'late-exit-host.ts'), pidfile], { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
   const code = await host.exited;
   expect(code).toBe(0);
   const pid = Number(fs.readFileSync(pidfile, 'utf8'));

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import type { Conversation } from '../assistant/conversation.ts';
-import type { ChildSpec } from '../assistant/conversation-types.ts';
+import type { ChildSpec, PendingConfirm } from '../assistant/conversation-types.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
@@ -53,7 +53,7 @@ test('a subagent the person starts parks a write, the session offers it with the
   const o = rig.conv.offered()!;
   expect(o.owner).toBe(child);
   expect(o.path).toEqual(['maker']);
-  expect(o.request.name).toBe('run_command');
+  expect((o.request as PendingConfirm).name).toBe('run_command');
   expect(rig.conv.subtreeWaiting).toBe(true);
   expect(made(rig, 'a.txt')).toBe(false);
   o.owner.answerConfirm(true);
@@ -351,7 +351,7 @@ test('the subagent tool with write: true starts a task that may ask: its request
   await rig.until(() => rig.conv.offered() !== null);
   const o = rig.conv.offered()!;
   expect(o.path).toEqual(['tk']);
-  expect(o.request.name).toBe('run_command');
+  expect((o.request as PendingConfirm).name).toBe('run_command');
   expect(made(rig, 't.txt')).toBe(false);
   o.owner.answerConfirm(true);
   await over(rig);

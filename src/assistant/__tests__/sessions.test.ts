@@ -141,7 +141,7 @@ test('under bun test with no dir named, nothing goes to disk; a named dir is use
 test('a view saved while it ran is read back as failed, and an old console view as a record', () => {
   const live = { role: 'view', content: '', views: [{ kind: 'console', data: { command: 'x' }, phase: 'live', startedAt: 5 }] };
   const old = { role: 'view', content: '', views: [{ kind: 'console', command: 'y', text: 't', exitCode: 0, ms: 1, cwd: '~' }] };
-  const [a, b] = normalizeViews([live, old]) as { views: { phase: string }[] }[];
+  const [a, b] = normalizeViews([live, old]) as { views: Record<string, unknown>[] }[];
   expect(a!.views[0]!.phase).toBe('failed');
   expect(b!.views[0]).toEqual({ kind: 'console', data: { command: 'y', text: 't', exitCode: 0, ms: 1, cwd: '~' }, phase: 'done', startedAt: 0 });
   expect(normalizeViews([{ role: 'user', content: 'hi' }])).toEqual([{ role: 'user', content: 'hi' }]);

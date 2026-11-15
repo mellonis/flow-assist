@@ -17,7 +17,7 @@ test('the package ships its build and the sources its bun condition names, witho
 
 test('the package builds on its own: tsc finds the bun types', () => {
   const tsc = path.resolve(dir, '../../node_modules/.bin/tsc');
-  const r = Bun.spawnSync([tsc, '-p', 'tsconfig.json', '--noEmit'], { cwd: dir });
+  const r = Bun.spawnSync([tsc, '-p', 'tsconfig.json', '--noEmit'], { cwd: dir, env: { ...process.env } });
   expect(r.stdout.toString() + r.stderr.toString()).toBe('');
   expect(r.exitCode).toBe(0);
 });

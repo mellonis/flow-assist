@@ -9,6 +9,7 @@ import { bumpViewRevision } from '../../assistant/views.js';
 import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
 import type { SessionRow } from '../../assistant/sessions.js';
+import type { ChatMsg } from '../../assistant/conversation-types.js';
 
 // The trail condenses a run of one tool ending one way into a count — except a call
 // that returned images, whose marks are what the person looks for.
@@ -89,7 +90,7 @@ test("a command block's gutter marker is dim while it runs, ok on exit 0, the er
   });
   const markerStyle = async (msg: unknown, now?: number) => {
     const backend = new TestBackend(80, 24);
-    const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [msg], ...(now === undefined ? {} : { now }) }), backend);
+    const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [msg as ChatMsg], ...(now === undefined ? {} : { now }) }), backend);
     const row = backend.lastFrame.split('\n').find((r) => r.includes('echo hi'))!;
     const style = backend.lastBuffer!.get(row.indexOf('echo hi') - 2, backend.lastFrame.split('\n').indexOf(row)).style;
     handle.unmount();
@@ -127,7 +128,7 @@ const shellMsg = (interactive: boolean) => ({
 const consoleFrame = async (interactive: boolean, open: boolean) => {
   const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [shellMsg(interactive)], folds: { open, except: new Set<string>() } }), backend);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [shellMsg(interactive) as ChatMsg], folds: { open, except: new Set<string>() } }), backend);
   const frame = backend.lastFrame;
   handle.unmount();
   return frame;
@@ -405,7 +406,7 @@ test('the log is as tall as what it holds, says when, and makes a failure stand 
   const cell = (text: string, offset = 0) => {
     const all = frame.split('\n');
     const y = all.findIndex((r) => r.includes(text));
-    return backend.lastBuffer.get(all[y]!.indexOf(text) + offset, y).style as { fg?: string; dim?: boolean };
+    return backend.lastBuffer!.get(all[y]!.indexOf(text) + offset, y).style as { fg?: string; dim?: boolean };
   };
   expect(cell('⚠ glab failed').fg).toBe('red');
   expect(cell('10:00:02').dim).toBe(true); // the stamp is quiet
@@ -439,7 +440,7 @@ const COMMANDS = [
 
 test('help entries: one per word a person types, never "undefined"', () => {
   const entries = helpEntries(COMMANDS);
-  expect(entries.map((e) => e.usage)).toEqual(['ask [text]  (chat)', COMMANDS[3]!.usage, 'quit  (q)']);
+  expect(entries.map((e) => e.usage)).toEqual(['ask [text]  (chat)', COMMANDS[3]!.usage ?? '', 'quit  (q)']);
   for (const e of entries) expect(e.description).not.toMatch(/undefined/);
 });
 
@@ -489,7 +490,7 @@ function columnOf(backend: TestBackend, y: number, width: number, needle: string
   let text = '';
   const cols: number[] = [];
   for (let x = 0; x < width; x++) {
-    const ch = backend.lastBuffer.get(x, y).char;
+    const ch = backend.lastBuffer!.get(x, y).char;
     if (ch === '') continue; // the second cell of a wide cluster
     cols.push(x);
     text += ch;

@@ -82,8 +82,8 @@ export interface PluginRepoOptions {
 }
 
 // The repository surface consumed by the runtime and the `host` tool group. The
-// consumer (`host-group.ts`) declares these as optional `(...args) => Promise<unknown>`;
-// method syntax keeps this assignable under bivariance.
+// consumer (`host-group.ts`) takes a `Partial<PluginRepo>`; method syntax keeps this
+// assignable under bivariance.
 export interface PluginRepo {
   list(): Promise<RepoEntry[]>;
   install(name: string): Promise<InstallResult>;

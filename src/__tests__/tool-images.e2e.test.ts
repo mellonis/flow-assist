@@ -84,7 +84,7 @@ test('OpenAI wire: the text goes in the tool message and the images follow in a 
     { type: 'image_url', image_url: { url: url(A) } },
     { type: 'image_url', image_url: { url: url(B) } },
   ] });
-  expect(after).toBe(r1.messages.at(-1)); // nothing after it: no screen tail with no plugin context
+  expect(after).toBe(r1.messages.at(-1)!); // nothing after it: no screen tail with no plugin context
   // The chat: the answer, and under the opened trail one row per image — never the image.
   expect(ui.backend.lastFrame).toContain('Two shots.');
   expect(ui.backend.lastFrame).not.toContain('▣');

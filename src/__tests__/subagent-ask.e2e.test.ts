@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { listTree } from './helpers/session-files';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -29,7 +29,7 @@ function dirs() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-subask-')));
   return { root, sessions: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-subask-s-')) };
 }
-const touch = (root: string, name: string) => [{ tool: 'run_command', args: { command: `touch ${path.join(root, name)}` } }];
+const touch = (root: string, name: string): Turn => [{ tool: 'run_command', args: { command: `touch ${path.join(root, name)}` } }];
 
 // A booted chat; one scripted child for each mark, each asking for one write and then
 // saying what came of it.
@@ -41,7 +41,7 @@ async function boot(marks: string[], opts: { cols?: number; rows?: number; mode?
   const children = marks.map((mark) => {
     const child = model.when((req) => firstUser(req).includes(mark));
     const file = `${mark}.txt`;
-    child.script(...(opts.hold ? [[{ hold: true }, ...touch(d.root, file)]] : [touch(d.root, file)]), [{ text: `${mark} settled` }]);
+    child.script(...((opts.hold ? [[{ hold: true }, ...touch(d.root, file)]] : [touch(d.root, file)]) as Turn[]), [{ text: `${mark} settled` }]);
     return { child, file: path.join(d.root, file) };
   });
   const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, opts.guest as never, { sessions: { dir: d.sessions }, shell: { roots: [d.root], ...(opts.autoRun ? { autoRun: true } : {}) }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: opts.toastMs ?? 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });

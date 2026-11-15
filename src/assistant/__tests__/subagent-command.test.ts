@@ -128,7 +128,7 @@ test('a first word starting with @ names an agent: @ alone lists them, @name car
 });
 
 test('the agent listing: each agent with parameters and source, shadowed marked, errors as path:line, the unread project said', () => {
-  const agent = (id: string, over = {}) => ({ id, name: id.split('/').pop()!, description: `does ${id}`, params: [], tools: null, auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h', ...over });
+  const agent = (id: string, over = {}) => ({ id, name: id.split('/').pop()!, description: `does ${id}`, params: [], tools: null, skills: [], auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h', ...over });
   const text = agentListing({
     agents: [agent('plain'), agent('tk/job', { params: [{ name: 'ticket', optional: false }, { name: 'branch', optional: true }], source: { kind: 'plugin', plugin: 'tk' } })],
     shadowed: [agent('dup')],
@@ -147,7 +147,7 @@ test('the agent listing: each agent with parameters and source, shadowed marked,
 });
 
 test('the listing and the completion mark each agent: recorded, unrecorded or changed since recorded', () => {
-  const agent = (id: string) => ({ id, name: id, description: `does ${id}`, params: [], tools: null, auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h' });
+  const agent = (id: string) => ({ id, name: id, description: `does ${id}`, params: [], tools: null, skills: [], auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h' });
   const found = { agents: [agent('ok'), agent('new'), agent('edited')], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/p' };
   const standing = (a: { id: string }) => (a.id === 'ok' ? 'recorded' : a.id === 'new' ? 'unrecorded' : 'changed') as 'recorded' | 'unrecorded' | 'changed';
   const text = agentListing(found, standing);

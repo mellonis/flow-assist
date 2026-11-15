@@ -14,14 +14,7 @@ import { trustCommand } from './trust.js';
 // The plugin-repository shape (`createPluginRepo`'s). Methods are optional
 // here because the repo may be partially constructed in tests/the runtime; the
 // exec dispatches handle a missing method gracefully.
-export interface PluginRepo {
-  list?: (...args: unknown[]) => Promise<unknown>;
-  install?: (...args: unknown[]) => Promise<unknown>;
-  remove?: (...args: unknown[]) => Promise<unknown>;
-  update?: (...args: unknown[]) => Promise<unknown>;
-  enabledPlugins?: (...args: unknown[]) => Promise<unknown>;
-  untrust?: (...args: unknown[]) => Promise<unknown>;
-}
+export type PluginRepo = Partial<import('./repo.js').PluginRepo>;
 
 // Extracts the `name` field from a parsed tool-call args object. The `host:plugins_*`
 // tools declare `name` as a required string, but `args` arrives as a decoded object

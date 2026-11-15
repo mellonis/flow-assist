@@ -14,7 +14,7 @@ const HOST = path.join(import.meta.dir, 'helpers', 'signal-exit-host.ts');
 test('SIGTERM with a background task running: exit 0, the task\'s task-end line by exit, no lock left', async () => {
   const readyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-signal-ready-'));
   const ready = path.join(readyDir, 'ready');
-  const host = Bun.spawn(['bun', HOST, ready], { stdout: 'pipe', stderr: 'pipe' });
+  const host = Bun.spawn(['bun', HOST, ready], { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
   try {
     // A loaded machine can take seconds to start bun and boot the app.
     for (let i = 0; i < 3000 && !fs.existsSync(ready) && host.exitCode === null; i++) await new Promise((r) => setTimeout(r, 10));

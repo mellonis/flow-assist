@@ -5,7 +5,8 @@ import type { TreeNode } from '../conversation-types.js';
 const node = (key: string, over: Partial<TreeNode> = {}): TreeNode => ({
   key, label: key, kind: 'subagent', depth: 1, status: 'working', latest: '', startedAt: 0, until: null, below: 0, ...over,
 });
-const conv = (label: string, parent: ReturnType<typeof conv> | null): { label: string; parent: any } => ({ label, parent });
+type WatchNode = Parameters<typeof watchPath>[0];
+const conv = (label: string, parent: WatchNode | null): WatchNode => ({ label, parent }) as WatchNode;
 
 test('watchPath lists the labels from the session\'s child down to the node, the session itself left out', () => {
   const session = conv('', null);

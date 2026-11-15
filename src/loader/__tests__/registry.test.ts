@@ -9,7 +9,7 @@ test('makeFactory injects name, config slice and keys', () => {
   const p = make('tracker', { keys: { open: 'enter' } });
   expect(p.name).toBe('tracker');
   expect(p.config).toEqual({ language: 'en' });
-  expect(p.keys).toEqual({ open: 'enter' });
+  expect(p.keys as unknown).toEqual({ open: 'enter' });
 });
 
 test('buildCommandRegistry merges plugin commands over base and namespaces', () => {
@@ -43,7 +43,7 @@ test('partitionInput splits observe vs consume, sorted by priority', () => {
     { get: () => ({ mode: 'observe', priority: () => 1000, handler: () => {} }) },
   ];
   const { observers, consumers } = partitionInput(reg, {});
-  expect(observers.map(o => o.priority?.())).toEqual([1000]);
+  expect(observers.map(o => o.priority?.({}))).toEqual([1000]);
   expect(consumers.length).toBe(1);
 });
 
@@ -124,7 +124,7 @@ test('buildConfigSchema keeps plugins optional and passthrough (no required-key 
   // An undeclared plugin-namespace key is preserved (passthrough), not stripped.
   const parsed = schema.safeParse({ plugins: { unknownPlugin: { a: 1 } } });
   expect(parsed.success).toBe(true);
-  expect((parsed.data.plugins as Record<string, unknown>).unknownPlugin).toEqual({ a: 1 });
+  expect((parsed.data!.plugins as Record<string, unknown>).unknownPlugin).toEqual({ a: 1 });
 });
 
 test('chatUser comes from config.user only, and guesses no name out of a login', () => {

@@ -8,7 +8,7 @@ import type { FoundAgent } from '../agent-find.ts';
 afterEach(() => { fs.rmSync(agentTrustPath(), { force: true }); });
 
 const agent = (name: string, description: string, kind: 'project' | 'plugin' = 'plugin'): FoundAgent => ({
-  id: name, name, description, params: [], tools: null, auto: 'ask', body: 'b', path: path.join('/x', `${name}.md`),
+  id: name, name, description, params: [], tools: null, skills: [], auto: 'ask', body: 'b', path: path.join('/x', `${name}.md`),
   source: kind === 'plugin' ? { kind: 'plugin', plugin: 'p' } : { kind: 'project' }, hash: 'h',
 });
 

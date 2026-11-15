@@ -12,7 +12,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -34,27 +34,27 @@ const results = (req: { messages: { role: string; content?: unknown }[] } | unde
   (req?.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content).replace(/^OK: /, ''));
 
 type Kind = 'yn' | 'ask' | 'idle';
-interface Kid { mark: string; kind: Kind; turn?: unknown[] }
+interface Kid { mark: string; kind: Kind; turn?: Turn }
 // A subagent: held at its first step, then the request of its kind, then a closing text.
-const scriptOf = (kid: Kid, root: string) => {
+const scriptOf = (kid: Kid, root: string): Turn[] => {
   const request = kid.kind === 'yn'
     ? { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } }
     : kid.kind === 'ask' ? { tool: 'ask_parent', args: { question: `Q-${kid.mark}?` } } : { text: `${kid.mark} idle` };
-  return [kid.turn ?? [{ hold: true }, request], [{ text: `${kid.mark} settled` }]];
+  return [kid.turn ?? [{ hold: true as const }, request], [{ text: `${kid.mark} settled` }]];
 };
 const labelOf = (mark: string) => `${mark.toLowerCase()}-go`;
 
-async function boot(kids: Kid[], opts: { main?: any[][]; root?: string; extra?: Record<string, unknown>; boot?: Record<string, unknown> } = {}) {
+async function boot(kids: Kid[], opts: { main?: Turn[]; root?: string; extra?: Record<string, unknown>; boot?: Record<string, unknown> } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = opts.root ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-reqkeys-')));
   const model = new ScriptedModel();
   const children = kids.map((kid) => {
     const child = model.when((req) => firstUser(req).includes(kid.mark));
-    child.script(...scriptOf(kid, root) as never);
+    child.script(...scriptOf(kid, root));
     return child;
   });
-  if (opts.main) model.script(...opts.main as never);
+  if (opts.main) model.script(...opts.main);
   const ui = await bootApp(model, 140, 40, undefined, { sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-reqkeys-s-')) }, shell: { roots: [root], timeoutMs: 20000 }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false }, ...opts.extra }, { toastMs: 10_000, ...opts.boot });
   await ui.press('F');
   return { ui, model, children, root, kids, file: (mark: string) => path.join(root, `${mark}.txt`) };
@@ -78,7 +78,7 @@ const released = async (rig: Rig, i: number) => {
 // ─── the holders of the keys ─────────────────────────────────────────────────────────
 // Each opens over a running (held) subagent, before its request is made, and is closed
 // by the keys it takes to get back to the conversation.
-interface Holder { name: string; open: (rig: Rig) => Promise<void>; close: (rig: Rig) => Promise<void>; kids: (k: Kid) => Kid[]; main?: any[][] }
+interface Holder { name: string; open: (rig: Rig) => Promise<void>; close: (rig: Rig) => Promise<void>; kids: (k: Kid) => Kid[]; main?: Turn[] }
 const escapes = (n: number) => async (rig: Rig) => { for (let i = 0; i < n; i++) await rig.ui.press('escape'); };
 const SEQ = [[{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Counted.' }]];
 const holders: Holder[] = [
@@ -250,7 +250,7 @@ test('a docked plugin panel over a subagent\'s question: the panel keeps the key
 }, 60_000);
 
 // ─── the session's own request arrives while a subagent's question is drawn ──────────
-const OWN_ASK = [[{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: OWN_Q, options: [{ label: 'A' }, { label: 'B' }] }] } }], [{ text: 'picked' }]];
+const OWN_ASK = [[{ hold: true as const }, { tool: 'ask_user', args: { questions: [{ question: OWN_Q, options: [{ label: 'A' }, { label: 'B' }] }] } }], [{ text: 'picked' }]];
 
 async function ownOverDrawnQuestion() {
   const rig = await boot([{ mark: 'OVER', kind: 'ask' }], { main: OWN_ASK });
@@ -294,7 +294,7 @@ test('the session\'s question arriving over a drawn subagent question wins; a ke
 
 test('the session\'s y/n arriving over a drawn subagent question is armed too; the typed answer is kept', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-reqkeys-own-')));
-  const main = [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${path.join(root, 'own.txt')}` } }], [{ text: 'done' }]];
+  const main = [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(root, 'own.txt')}` } }], [{ text: 'done' }]];
   const rig = await boot([{ mark: 'OVERYN', kind: 'ask' }], { main, root });
   await ask(rig.ui, 'go');
   await settleUntil(() => rig.model.held);
@@ -496,7 +496,7 @@ for (const first of ['yn', 'ask'] as const) {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-reqkeys-both-')));
     const yn = { tool: 'run_command', args: { command: `touch ${path.join(root, `${mark}.txt`)}` } };
     const q = { tool: 'ask_parent', args: { question: `Q-${mark}?` } };
-    const kid: Kid = { mark, kind: first, turn: [{ hold: true }, ...(first === 'yn' ? [yn, q] : [q, yn])] };
+    const kid: Kid = { mark, kind: first, turn: [{ hold: true as const }, ...(first === 'yn' ? [yn, q] : [q, yn])] };
     const rig = await boot([kid], { root });
     await spawn(rig, 0);
     await released(rig, 0);
@@ -566,7 +566,7 @@ for (const holder of holdersOfOwn) {
     test(`the session's own ${kind === 'yn' ? 'y/n' : 'question'} arriving over ${holder.name}: drawn and answered ${holder.armed ? 'after the pause' : 'by the first key'}`, async () => {
       const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-reqkeys-own-')));
       const own = path.join(root, 'own.txt');
-      const main = kind === 'yn' ? [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'done' }]] : OWN_ASK;
+      const main = kind === 'yn' ? [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'done' }]] : OWN_ASK;
       const rig = await boot(holder.armed ? [{ mark: 'ROW', kind: 'idle' }] : [], { main, root });
       if (holder.armed) await spawn(rig, 0);
       await ask(rig.ui, 'go');

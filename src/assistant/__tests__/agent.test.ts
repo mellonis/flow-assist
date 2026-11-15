@@ -4,7 +4,7 @@ import path from 'node:path';
 import { chatLanguage } from '../agent';
 import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, agentChat, apiHistory, maxRoundsOf, maxTurnTokensOf, openAiMessages, transcriptSoFar } from '../agent';
 import { toAnthropicMessages } from '../anthropic';
-import { sha256, type ImageRef } from '../images';
+import { sha256, type ContentPart, type ImageRef } from '../images';
 import { hostStateDir } from '../../config/load';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
@@ -31,10 +31,10 @@ test('agentChat runs a tool round and falls back to final content', async () => 
     calls.push('round');
     if (calls.length === 1) {
       opts.onDelta?.('thinking');
-      return { content: 'thinking', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] };
+      return { reasoning: '', content: 'thinking', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] };
     }
     opts.onDelta?.('done');
-    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'done', finishReason: 'stop', toolCalls: [] };
   };
 
   const res = await agentChat([{ role: 'user', content: 'hi' }], {
@@ -65,10 +65,10 @@ test('agentChat confirms a write-flagged tool and skips confirmation for a read-
   const confirmed: { name: string }[] = [];
   let n = 0;
   const fakeRound = async (messages: any[], opts: any) => {
-    if (n++ === 0) { opts.onDelta?.('a'); return { content: 'a', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 't:save', arguments: '{}' }] }; }
-    if (n === 2) { opts.onDelta?.('b'); return { content: 'b', finishReason: 'tool_calls', toolCalls: [{ id: '2', name: 't:read', arguments: '{}' }] }; }
+    if (n++ === 0) { opts.onDelta?.('a'); return { reasoning: '', content: 'a', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 't:save', arguments: '{}' }] }; }
+    if (n === 2) { opts.onDelta?.('b'); return { reasoning: '', content: 'b', finishReason: 'tool_calls', toolCalls: [{ id: '2', name: 't:read', arguments: '{}' }] }; }
     opts.onDelta?.('done');
-    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'done', finishReason: 'stop', toolCalls: [] };
   };
 
   const res = await agentChat([{ role: 'user', content: 'hi' }], {
@@ -215,9 +215,9 @@ test('a turn hands back its full transcript, so the next turn replays the tool c
   let n = 0;
   const turnOne = async (_m: any[], opts: any) => {
     n++;
-    if (n === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_1', name: 'memory', arguments: '{"action":"list"}' }] };
+    if (n === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_1', name: 'memory', arguments: '{"action":"list"}' }] };
     opts.onDelta?.('listed');
-    return { content: 'listed', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'listed', finishReason: 'stop', toolCalls: [] };
   };
   const first = await agentChat([{ role: 'user', content: 'list memory' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: turnOne });
 
@@ -241,7 +241,7 @@ test('a turn hands back its full transcript, so the next turn replays the tool c
 
   // Turn two sees turn one's call and result verbatim.
   let seen: any[] = [];
-  const turnTwo = async (messages: any[], opts: any) => { seen = messages; opts.onDelta?.('ok'); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; };
+  const turnTwo = async (messages: any[], opts: any) => { seen = messages; opts.onDelta?.('ok'); return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] }; };
   await agentChat([...history, { role: 'user', content: 'again' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: turnTwo });
   expect(seen.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1')).toBe(true);
   expect(seen.some((m) => m.role === 'assistant' && m.tool_calls?.[0]?.id === 'call_1')).toBe(true);
@@ -272,9 +272,9 @@ test('a qualified tool name travels to the provider in a form it accepts, and co
   const chatRound = async (_m: any[], opts: any) => {
     round++;
     sent = opts.tools;
-    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__get_thing', arguments: '{"id":7}' }] };
+    if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__get_thing', arguments: '{"id":7}' }] };
     opts.onDelta?.('ok');
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const res = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound });
 
@@ -384,9 +384,9 @@ async function runOneToolTurn(run: (args: unknown, ctx: any) => unknown, extra: 
   let round = 0;
   const chatRound = async (_m: any[], opts: any) => {
     round++;
-    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+    if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
     opts.onDelta?.('ok');
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   return agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, ...extra } as any);
 }
@@ -419,8 +419,8 @@ test('two calls in one turn never collide, even when the provider\'s own ids do'
   let round = 0;
   const chatRound = async () => {
     round++;
-    if (round <= 2) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_0', name: 'demo__show', arguments: '{}' }] };
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    if (round <= 2) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_0', name: 'demo__show', arguments: '{}' }] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const ids: string[] = [];
   await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, onToolLive: (rec: any) => ids.push(rec.callId) } as any);
@@ -487,10 +487,10 @@ test('a tool call with truncated (invalid) JSON arguments is refused, not run, a
   let nextRoundMessages: any[] = [];
   const chatRound = async (messages: any[], opts: any) => {
     round++;
-    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{"a": "x' }] };
+    if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{"a": "x' }] };
     nextRoundMessages = messages;
     opts.onDelta?.('ok');
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const res = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound });
 
@@ -533,9 +533,9 @@ async function runOneToolTurnWithArgs(rawArguments: string, run: (args: unknown,
   let round = 0;
   const chatRound = async (_m: any[], opts: any) => {
     round++;
-    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: rawArguments }] };
+    if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: rawArguments }] };
     opts.onDelta?.('ok');
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   return agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound } as any);
 }
@@ -578,13 +578,13 @@ test('an image attached by a tool reaches the next round as parts on its result,
   const rounds: any[][] = [];
   const chatRound = async (m: any[]) => {
     rounds.push(m);
-    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__other', arguments: '{}' }] };
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    if (rounds.length === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__other', arguments: '{}' }] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const r = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, requestTail: () => 'SCREEN' } as any);
   const second = rounds[1]!;
   expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user']);
-  const parts = [{ type: 'text', text: 'OK: here it is' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }];
+  const parts: ContentPart[] = [{ type: 'text', text: 'OK: here it is' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }];
   expect(second[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: parts });
   expect(second[3]).toEqual({ role: 'tool', tool_call_id: 'c2', content: 'OK: noon' });
   // The screen tail stays the request's last message.
@@ -629,8 +629,8 @@ test('a tool returning { text, images } gets its images stored and sent as parts
     rounds.push(m);
     // The def reaches the provider without the host's own fields.
     for (const t of opts.tools) expect(Object.keys(t).sort()).toEqual(['function', 'type']);
-    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__sneaky', arguments: '{}' }] };
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    if (rounds.length === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__sneaky', arguments: '{}' }] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const r = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, toolCtx: { pushLog: (l: string) => logged.push(l) } } as any);
   const second = rounds[1]!;
@@ -659,8 +659,8 @@ test('systemPrompt is read before every round and replaces the leading system me
   const chatRound = async (m: any[], o: Record<string, unknown>) => {
     rounds.push(m);
     expect(o.systemPrompt).toBeUndefined(); // never spread into the round's options
-    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__move', arguments: '{}' }] };
-    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+    if (rounds.length === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__move', arguments: '{}' }] };
+    return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] };
   };
   const input = [{ role: 'system', content: 'SYS one' }, { role: 'user', content: 'go' }];
   const r = await agentChat(input as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, systemPrompt: () => sys } as any);
@@ -670,10 +670,10 @@ test('systemPrompt is read before every round and replaces the leading system me
   expect(r.transcript.some((m) => m.role === 'system')).toBe(false);
   // No system message yet: one is put first; an empty answer adds none.
   rounds.length = 0; sys = 'SYS three';
-  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => sys } as any);
+  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => sys } as any);
   expect(rounds[0]![0]).toEqual({ role: 'system', content: 'SYS three' });
   rounds.length = 0;
-  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => '' } as any);
+  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => '' } as any);
   expect(rounds[0]!.map((m) => m.role)).toEqual(['user']);
 });
 
@@ -691,9 +691,9 @@ test('agentChat tells a tool whether the person said yes to this very call', asy
   const run = async (confirmWrite?: () => boolean) => {
     let n = 0;
     const fakeRound = async (_m: any[], opts: any) => {
-      if (n++ === 0) { opts.onDelta?.('a'); return { content: 'a', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 't:save', arguments: '{}' }, { id: '2', name: 't:read', arguments: '{}' }] }; }
+      if (n++ === 0) { opts.onDelta?.('a'); return { reasoning: '', content: 'a', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 't:save', arguments: '{}' }, { id: '2', name: 't:read', arguments: '{}' }] }; }
       opts.onDelta?.('done');
-      return { content: 'done', finishReason: 'stop', toolCalls: [] };
+      return { reasoning: '', content: 'done', finishReason: 'stop', toolCalls: [] };
     };
     await agentChat([{ role: 'user', content: 'hi' }], {
       baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
@@ -728,7 +728,7 @@ test('agentChat with no confirmWrite declines every write and runs the reads', a
     for (const m of messages) if (m.role === 'tool') sent.push(m.content);
     if (n++ === 0) {
       opts.onDelta?.('a');
-      return { content: 'a', finishReason: 'tool_calls', toolCalls: [
+      return { reasoning: '', content: 'a', finishReason: 'tool_calls', toolCalls: [
         { id: '1', name: 't:save', arguments: '{}' },
         { id: '2', name: 't:pick', arguments: '{"mode":"set"}' },
         { id: '3', name: 't:pick', arguments: '{"mode":"get"}' },
@@ -736,7 +736,7 @@ test('agentChat with no confirmWrite declines every write and runs the reads', a
       ] };
     }
     opts.onDelta?.('done');
-    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'done', finishReason: 'stop', toolCalls: [] };
   };
   const started: string[] = [];
   const ended: { name: string; outcome: string }[] = [];
@@ -771,10 +771,10 @@ test('beforeRequest runs at every request boundary, after a round\'s results, an
     sent.push(messages);
     if (sent.length === 1) {
       opts.onDelta?.('looking');
-      return { content: 'looking', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }], usage: { promptTokens: 100, completionTokens: 10 } };
+      return { reasoning: '', content: 'looking', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }], usage: { promptTokens: 100, completionTokens: 10 } };
     }
     opts.onDelta?.('done');
-    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+    return { reasoning: '', content: 'done', finishReason: 'stop', toolCalls: [] };
   };
   const seen: { round: number; roles: string[]; measured?: number }[] = [];
   const res = await agentChat([{ role: 'system', content: 'S' }, { role: 'user', content: 'Q' }], {
@@ -801,9 +801,9 @@ test('an answer holding a tool call written as text gets one corrective round, a
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const sent: any[][] = [];
   const replies = [
-    { content: DSML('search_in_files'), toolCalls: [] },
-    { content: '', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] },
-    { content: 'Nothing remembered.', toolCalls: [] },
+    { content: DSML('search_in_files'), reasoning: '', toolCalls: [] },
+    { content: '', reasoning: '', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] },
+    { content: 'Nothing remembered.', reasoning: '', toolCalls: [] },
   ];
   const chatRound = async (messages: any[], opts: any) => {
     sent.push(messages);
@@ -835,7 +835,7 @@ test('an answer holding a tool call written as text gets one corrective round, a
 test('a second call written as text in a row ends the turn with the note', async () => {
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   let n = 0;
-  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(DSML('memory')); return { content: DSML('memory'), toolCalls: [], finishReason: 'stop' }; };
+  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(DSML('memory')); return { reasoning: '', content: DSML('memory'), toolCalls: [], finishReason: 'stop' }; };
   const notes: string[] = [];
   const res = await agentChat([{ role: 'user', content: 'q' }], {
     baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
@@ -851,7 +851,7 @@ test('a second call written as text in a row ends the turn with the note', async
 
 test('the round cap is 150 by default, and a capped turn says its last step', async () => {
   let n = 0;
-  const chatRound = async () => { n++; return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{"n":1}' }] }; };
+  const chatRound = async () => { n++; return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{"n":1}' }] }; };
   const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound });
   expect(n).toBe(MAX_ROUNDS_DEFAULT);
   expect(MAX_ROUNDS_DEFAULT).toBe(150);
@@ -878,8 +878,8 @@ test('maxRounds 0 is no round cap: a turn runs past 150 rounds', async () => {
     n++;
     if (n > 160) opts.onDelta?.('finally');
     return n <= 160
-      ? { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }] }
-      : { content: 'finally', finishReason: 'stop', toolCalls: [] };
+      ? { content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }] }
+      : { content: 'finally', reasoning: '', finishReason: 'stop', toolCalls: [] };
   };
   const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxRounds: 0, maxTurnTokens: 0 });
   expect(n).toBe(161);
@@ -892,7 +892,7 @@ test('maxTurnTokens ends the turn once reached — the request that crosses it i
   const chatRound = async () => {
     n++;
     // 400 fresh + 100 answer = 500 a round; the cached 300 are not counted.
-    return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 700, cachedTokens: 300, completionTokens: 100 } };
+    return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 700, cachedTokens: 300, completionTokens: 100 } };
   };
   const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxTurnTokens: 1200 });
   expect(n).toBe(3); // 500, 1000, 1500 — past 1200 after the third
@@ -907,8 +907,8 @@ test('beforeRequest may append messages after a round\'s results; they join the 
   const chatRound = async (messages: any[]) => {
     sent.push(messages);
     return sent.length === 1
-      ? { content: '', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }
-      : { content: 'ok', finishReason: 'stop', toolCalls: [] };
+      ? { content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }
+      : { content: 'ok', reasoning: '', finishReason: 'stop', toolCalls: [] };
   };
   const res = await agentChat([{ role: 'user', content: 'Q' }], {
     baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
@@ -922,7 +922,7 @@ test('beforeRequest may append messages after a round\'s results; they join the 
 test('an answer that shows the tags as code is an answer, with no corrective round', async () => {
   let n = 0;
   const text = 'Use `<tool_call>` for that, e.g.\n```\n<invoke name="x">\n```';
-  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(text); return { content: text, toolCalls: [], finishReason: 'stop' }; };
+  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(text); return { reasoning: '', content: text, toolCalls: [], finishReason: 'stop' }; };
   const res = await agentChat([{ role: 'user', content: 'q' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound });
   expect(n).toBe(1);
   expect(res.content).toBe(text);
@@ -936,7 +936,7 @@ test('after a corrective round the next boundary measures from that round\'s usa
     n++;
     const content = n === 1 ? DSML('memory') : 'done';
     opts.onDelta?.(content);
-    return { content, toolCalls: [], finishReason: 'stop', usage: { promptTokens: 10_050, completionTokens: 50 } };
+    return { content, reasoning: '', toolCalls: [], finishReason: 'stop', usage: { promptTokens: 10_050, completionTokens: 50 } };
   };
   const seen: (number | undefined)[] = [];
   await agentChat([{ role: 'system', content: big }, { role: 'user', content: 'q' }], {
@@ -951,9 +951,9 @@ test('a provider that reports no cache figure is counted by the growth of its pr
   let n = 0;
   const chatRound = async (_m: any[], opts: any) => {
     n++;
-    if (n > 30) { opts.onDelta?.('done'); return { content: 'done', toolCalls: [], finishReason: 'stop', usage: { promptTokens: 101_000, completionTokens: 10 } }; }
+    if (n > 30) { opts.onDelta?.('done'); return { reasoning: '', content: 'done', toolCalls: [], finishReason: 'stop', usage: { promptTokens: 101_000, completionTokens: 10 } }; }
     // A 100k prompt that grows by 30 tokens a round, and no cachedTokens at all.
-    return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 100_000 + n * 30, completionTokens: 10 } };
+    return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 100_000 + n * 30, completionTokens: 10 } };
   };
   const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxTurnTokens: 200_000 });
   // Counted in full, 30 rounds of 100k would pass 200k at the second; by growth they do not.
@@ -967,8 +967,8 @@ test('markup written beside a real tool call is stripped: never the step, never 
   let n = 0;
   const chatRound = async (_m: any[], opts: any) => {
     n++;
-    if (n === 1) { const c = DSML('memory'); opts.onDelta?.(c); return { content: c, finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }; }
-    opts.onDelta?.('ok'); return { content: 'ok', toolCalls: [], finishReason: 'stop' };
+    if (n === 1) { const c = DSML('memory'); opts.onDelta?.(c); return { reasoning: '', content: c, finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }; }
+    opts.onDelta?.('ok'); return { reasoning: '', content: 'ok', toolCalls: [], finishReason: 'stop' };
   };
   const commits: string[] = [];
   const res = await agentChat([{ role: 'user', content: 'q' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: (t) => { commits.push(t); }, chatRound });
@@ -1015,10 +1015,10 @@ test('the plan reminder goes only to a result of work that ran, never to a faile
   const fakeRound = async () => {
     n++;
     // Round 1: nothing runs (a failure, a declined write) — no reminder yet.
-    if (n === 1) return { content: '', toolCalls: [{ id: 'c1', name: 't:fail', arguments: '{}' }, { id: 'c2', name: 't:save', arguments: '{}' }] };
+    if (n === 1) return { reasoning: '', content: '', toolCalls: [{ id: 'c1', name: 't:fail', arguments: '{}' }, { id: 'c2', name: 't:save', arguments: '{}' }] };
     // Round 2: a read runs, then a failure — the reminder rides on the read.
-    if (n === 2) return { content: '', toolCalls: [{ id: 'c3', name: 't:read', arguments: '{}' }, { id: 'c4', name: 't:fail', arguments: '{}' }] };
-    return { content: 'done', toolCalls: [] };
+    if (n === 2) return { reasoning: '', content: '', toolCalls: [{ id: 'c3', name: 't:read', arguments: '{}' }, { id: 'c4', name: 't:fail', arguments: '{}' }] };
+    return { reasoning: '', content: 'done', toolCalls: [] };
   };
   const res = await agentChat([{ role: 'user', content: 'hi' }], {
     baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
@@ -1050,13 +1050,13 @@ test('a known secret leaves a turn nowhere: not the result sent, the run, its ra
     let round = 0;
     const chatRound = async (messages: any[], opts: any) => {
       round++;
-      if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+      if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
       seen.push(messages);
       const answer = `The token is ${token}.`;
       opts.onReasoning?.(answer.slice(0, 20));
       opts.onReasoning?.(answer.slice(20));
       for (let i = 0; i < answer.length; i += 5) opts.onDelta?.(answer.slice(i, i + 5));
-      return { content: answer, finishReason: 'stop', toolCalls: [] };
+      return { reasoning: '', content: answer, finishReason: 'stop', toolCalls: [] };
     };
     let live = '';
     let reasoning = '';
@@ -1089,7 +1089,7 @@ test('a held tail is flushed at a round\'s end, a stop and an error — whole, a
     let live = '';
     const cut = await agentChat([{ role: 'user', content: 'go' }], {
       baseUrl: 'http://x', model: 'm', token: 't', onLive: (d: string) => { live += d; }, onLiveCommit: () => {},
-      chatRound: async (_m: any[], opts: any) => { opts.onDelta?.(`It is ${token.slice(0, -1)}`); return { content: '', finishReason: 'stop', toolCalls: [] }; },
+      chatRound: async (_m: any[], opts: any) => { opts.onDelta?.(`It is ${token.slice(0, -1)}`); return { reasoning: '', content: '', finishReason: 'stop', toolCalls: [] }; },
     } as any);
     expect(live).toBe('It is ‹secret WIKI_TOKEN›');
     expect(cut.content).toBe('It is ‹secret WIKI_TOKEN›');
@@ -1112,7 +1112,7 @@ test('the system prompt is sent without a known secret — the chat\'s per-round
   try {
     assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
     const sent: string[] = [];
-    const chatRound = async (messages: any[]) => { sent.push(JSON.stringify(messages)); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; };
+    const chatRound = async (messages: any[]) => { sent.push(JSON.stringify(messages)); return { reasoning: '', content: 'ok', finishReason: 'stop', toolCalls: [] }; };
     await agentChat([{ role: 'system', content: `AGENTS.md says the token is ${token}` }, { role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound } as any);
     await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, systemPrompt: () => `memory: ${token}` } as any);
     for (const s of sent) { expect(s).not.toContain(token); expect(s).toContain('‹secret WIKI_TOKEN›'); }

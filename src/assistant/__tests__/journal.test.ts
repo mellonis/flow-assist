@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, outputJournal, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
+import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, outputJournal, journalLine, readJournal, rowOf, viewText, type JournalEvent } from '../journal.ts';
 import { renderConsole } from '../console-view.ts';
 import {
   JOURNAL_DAYS, KEEP_MESSAGES, SESSION_VERSION, acquireLock, loadSession, deleteSession, journalPath, makeLockToken, newSessionId, pruneSessions, removeSession,
