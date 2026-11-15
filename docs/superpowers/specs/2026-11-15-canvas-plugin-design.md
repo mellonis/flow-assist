@@ -455,3 +455,33 @@ conversation identity the host does not expose today; a host-side renderer for t
 same tree shape would let any plugin's `viewRenderers` draw rich blocks without a
 canvas; a canvas could offer a "run this without asking the model" path if the host
 ever exposes tool invocation to plugins.
+
+## Implementation note — Task 8, the surface (2026-11-15)
+
+What Task 8 built, and the two decisions the design left open:
+
+- **Layout.** Header `canvas · «title» · owner · drawn 2m ago` (dim, cut to width with
+  `fit`; the age is `store.formatAge`, shared with the model's registry line), a tab
+  strip only while more than one canvas is drawn (selected tab in `[ brackets ]`, and
+  past the width `‹n of m› [ tab ]` so the selected tab is never cut away), then a
+  `ScrollBox` of `surface.height - 3` wrapping one `toElement` call. Rows carry stable
+  React keys so the strip appearing or going never remounts a field being typed into.
+- **Keys and priorities.** `components.panel` (always mounted) toggles `personOpened`
+  on `keys.canvas` at priority 10; the surface proper claims at 50 (`tab`/`⇧tab` cycle
+  the focus keys, `return`/`space` press the focused button, `[`/`]` move between
+  canvases with no control focused, `x` x arms then deletes, `escape` leaves a control
+  before it closes the side). Below an open modal or the `:` line (0), below the chat
+  while it holds the keys (100) — and a focused flowtty field takes its printables in
+  flowtty's own pass, before any of this runs.
+- **The press, and a host fix it needed.** `pressMessage` plus the button's action
+  sentence (`\naction: …`, verbatim — the design said the press must carry it and left
+  how open) goes through `services.postToChat`, and `store.pressed` records the canvas
+  so the footer says `press queued` until the redraw the answer brings clears it.
+  `postToChat` was reachable only on its own services view (a per-plugin
+  `Object.create(services)` view shadows nothing but finds nothing the assistant wrote
+  onto its own view); the App now binds `postToChat` on the shared services over the
+  chat store's `post`, so every plugin's press reaches the session whose work it is —
+  framed as a plugin item, one follow-up turn, never the person's words.
+- **Order the tests had to take.** `canvas_open` refuses a canvas nobody drew yet, so
+  the brief's open-then-draw scripts can never mount the surface; every script draws
+  first, then opens.
