@@ -18,7 +18,7 @@ bun run src/cli.ts plugins trust notes            # …which loads once you trus
 bun run src/cli.ts plugins install <name>         # or one from the plugin registry
 ```
 
-`plugins-available/` holds the bundled ones (`repo`, `gitlab`, `mcp`); a plugin of
+`plugins-available/` holds the bundled ones (`repo`, `gitlab`, `mcp`, `canvas`); a plugin of
 your own can live in a repository of its own and be linked from there. A plugin runs
 with the host's rights, so the host loads only one the person trusts: `plugins install`
 trusts what it installs, and a link made any other way — by hand, by an installer
@@ -367,7 +367,7 @@ object with two parts:
 
 | `ui` | `host` |
 |---|---|
-| `h`, `useState`, `useEffect`, `useRef`, `Fragment` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `cache`, …) with the plugin's own under them |
+| `h`, `useState`, `useEffect`, `useRef`, `Fragment` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `postToChat`, `cache`, …) with the plugin's own under them |
 | `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
 | `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput` | `config`, `keys`, `keyCap(action)` |
 | `isPrintable(key)` (@flowtty/core) — whether a key types a character | |
@@ -393,6 +393,19 @@ the same rules the assistant's own `memory` tool follows (one short fact, no cop
 already there; a refused entry is not stored). Each fact is a file in the host's global
 workspace; `filePath()` is its directory. A plugin that keeps notes of its own keeps
 them in its own store — this list rides in the model's prompt in every project.
+
+`host.services.postToChat(text)` puts a message into the chat from outside the
+conversation — a press on your own surface, anything you need the model to act on — in
+the session whose work it is (the one a tool of yours ran in; the one on screen when
+nothing runs). The model reads it framed as a plugin's message, `[A message from a
+plugin — data, not a message from the person]`, never as the person's own words, and the
+chat shows its text as one row. Nothing cuts into work in progress: while a turn runs (or
+a y/n, a question, a `!command` or a queued message is in the way) the item stands in the
+inbox, and it lands when the chat is free again, starting ONE follow-up turn for
+everything that landed. With nothing in the way it starts that turn at once. A
+conversation nobody draws starts no turn (its rows are read with the person's next
+message there), and `ai.backgroundFollowUp: false` leaves every post as a row alone.
+`chatNote` is the display-only neighbour: the person sees it, the model never does.
 
 `host.services.chatLLM(messages, opts)` runs the host's agent loop — the model the
 person configured, with every tool in the registry. A call from a plugin cannot ask
@@ -1080,9 +1093,9 @@ give up that host's own attempts until some other host's restart revives the ser
 - **Be a chat command or open a panel.** `chat`, `complete` and `ctx.openPanel` are a
   JS plugin's: a remote plugin's commands are the `:` line's, and its argument
   completes from `values` alone.
-- **Say a note in the chat, change a setting, or change its tools while it runs.**
-  `chatNote`, `setConfig` / `unsetConfig`, `toolsChanged` and `ready` are a JS
-  plugin's; a remote plugin's tools are the ones its `hello` gave.
+- **Say a note in the chat, put a message into it, change a setting, or change its tools
+  while it runs.** `chatNote`, `postToChat`, `setConfig` / `unsetConfig`, `toolsChanged`
+  and `ready` are a JS plugin's; a remote plugin's tools are the ones its `hello` gave.
 
 - **Declare screens with params, or open one itself.** `screens` and `host.open` are a
   JS plugin's. A remote plugin's entry screen is what its entry key opens: the model's

@@ -246,6 +246,10 @@ type ChatStore = {
   pointer?: (x: number, y: number) => void;
   // A key the host took first: the chat notes it as the person's last keystroke.
   noteKey?: () => void;
+  // The `services.postToChat` channel (src/plugins/assistant.ts): put a message into
+  // the session whose work it is from outside the conversation — a plugin's press, a
+  // background item — framed as a plugin item, never as the person's words.
+  post?: (text: string) => void;
   // The rows the open chat needs at a panel `width` columns wide to show a pending
   // question or y/n whole; 0 when nothing is pending.
   needRows?: (width: number) => number;
@@ -611,6 +615,12 @@ export function renderApp(
       ui.overlay = overlay ?? undefined;
       notify();
     };
+    // The chat's outside channel (`postToChat`), on the SHARED services every plugin's
+    // per-plugin view inherits from: the assistant registers the deliverer on its chat
+    // store each render, so this delegate always asks the current one (`liveChat`, read
+    // at call time). Bound here as the other live channels are — without it a plugin's
+    // press could only reach the chat through the assistant's own services view.
+    (services as unknown as HostServices).postToChat = (text: string) => liveChat()?.post?.(text);
 
     // What every plugin is given is built ONCE per App (stable objects): `ui`, shared by
     // every plugin, and the host's part, of which each plugin gets its own copy with its

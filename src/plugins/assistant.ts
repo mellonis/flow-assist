@@ -2385,7 +2385,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the session whose work it is, on screen or left (`workHome`); said from nowhere
           // (its own poller, a key), or for a session already put away, to the one on screen.
           const postHome = (): Conversation => { const home = workHome(); return home && !home.closed ? home : convRef.current!; };
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, noteKey: () => askGuard.current.note(), note: (text: string) => postHome().pluginNote(text), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, noteKey: () => askGuard.current.note(), note: (text: string) => postHome().pluginNote(text), post: (text: string) => postHome().deliver(pluginItem(text)), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
             // What holds back a screen a plugin or the model opens (src/runtime/screens.ts),
             // read from the refs at the moment it is asked.
             // The draft counts while the chat has the keys: folded away, or with the keys on
@@ -2394,7 +2394,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A host-reachable channel to put a message into the chat from OUTSIDE (a
           // plugin's, `Conversation.deliver`), into the session `postHome` names.
           // Registered per render (idempotent); an older copy a detached timer holds
-          // asks `postHome` as this one does.
+          // asks `postHome` as this one does. This one writes the assistant's OWN
+          // services view — every OTHER plugin's view would not see the assignment;
+          // what makes the channel host-reachable is the shared binding the App gives
+          // `services.postToChat` (src/runtime/app.tsx), which asks this store's `post`.
           (host.services as Record<string, any>).postToChat = (text: string) => postHome().deliver(pluginItem(text));
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also

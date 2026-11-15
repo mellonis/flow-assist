@@ -3,9 +3,10 @@
 A standalone, **domain-agnostic** TUI/CLI assistant host. It has no notion of
 "issue", "board", or "sprint" in its core, and none of any company's systems. Functionality is delivered as
 **plugins** that register surfaces, commands, keybindings, LLM tool groups, and
-config schema. The bundled `gitlab` and `repo` are tool-group-only plugins; a
-plugin with surfaces (views, modals, keys) lives in its own repository and is
-dropped into `plugins-available/`, which ignores everything not bundled.
+config schema. The bundled plugins are `gitlab`, `repo` and `mcp` (tool groups only) and
+`canvas` (a surface a model composes out of components). A plugin with a *domain* surface
+of its own (a tracker's board, a company's views and modals) lives in its own repository
+and is dropped into `plugins-available/`, which ignores everything not bundled.
 
 ## Language rule
 
@@ -114,6 +115,7 @@ flow-assist/
 ├── packages/
 │   └── remote/                # @flow-assist/remote — the protocol's types, codec, runPlugin, its shared server
 ├── plugins-available/
+│   ├── canvas/                # canvas_draw and the surface a model composes
 │   ├── gitlab/                # glab_api tool group (no UI)
 │   ├── mcp/                   # tools of MCP servers, over HTTP or stdio (no UI)
 │   └── repo/                  # list_dir/read_file/search/git_* tool group (no UI)
@@ -5250,7 +5252,7 @@ writes by default keeps both:
   lives in `package.json` and `src/version.ts` (a test keeps them equal); each release
   gets a `CHANGELOG.md` entry and a `vX.Y.Z` tag. A release is what is handed out —
   a build of the host that someone installs — so bump the version before building one.
-  A bundled plugin (`plugins-available/gitlab`, `mcp`, `repo`) ships from this repo
+  A bundled plugin (`plugins-available/gitlab`, `mcp`, `repo`, `canvas`) ships from this repo
   with the same release, so it carries the host's own version too — bump its
   `manifest.json` and `package.json` alongside the host's (a test keeps every
   bundled plugin equal to `hostVersion()`, naming the one that drifts). A
