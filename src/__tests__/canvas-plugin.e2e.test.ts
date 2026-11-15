@@ -176,6 +176,9 @@ test('the : line owns every key while it is open — the surface\'s keys wait fo
 // The terminal decides the room: the same surface, drawn again at each size, with no
 // remount and no state lost. The renderer cuts with `fit` at the width it is handed, so
 // the long line below is the ruler — whole at 78 cells, cut at 60, whole again after.
+// The tree is 13 rows plus a gap between each: 25 body rows at 120×32 (a surface of 26),
+// where the body once got `height - 3` = 23 — the button, the last row, was clipped.
+// Now it gets `height - 1` = 25, and the button is what a wide terminal shows.
 test('the surface is laid out again when the terminal is resized', async () => {
   const long = 'a pipeline line long enough that a narrow terminal has to cut it — ENDMARK';
   const model = new ScriptedModel();
@@ -183,9 +186,16 @@ test('the surface is laid out again when the terminal is resized', async () => {
     [{ tool: 'canvas_draw', args: { canvas: 'ci', title: 'Pipelines', owner: 'reviewer', tree: ['Box', { flexDirection: 'column', gap: 1 },
       ['progress', { label: 'jobs passed', value: 75, tone: 'warn' }],
       ['Text', { truncate: true }, long],
+      ['Text', {}, 'row one'],
       ['Text', {}, 'row two'],
       ['Text', {}, 'row three'],
       ['Text', {}, 'row four'],
+      ['Text', {}, 'row five'],
+      ['Text', {}, 'row six'],
+      ['Text', {}, 'row seven'],
+      ['Text', {}, 'row eight'],
+      ['Text', {}, 'row nine'],
+      ['Text', {}, 'row ten'],
       ['button', { label: 'check again', action: 'check again' }]] } },
      { tool: 'canvas_open', args: { canvas: 'ci' } }],
     [{ text: 'Here it is.' }],
@@ -195,7 +205,8 @@ test('the surface is laid out again when the terminal is resized', async () => {
   await turn(ui, 'draw my pipeline');
   await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines'));
   // 120 columns: the chat is docked beside the canvas, the surface has 78 cells, and the
-  // whole line, the bar and the button are on screen.
+  // whole line, the bar and the last body row — the one the old `height - 3` clipped —
+  // are on screen.
   expect(ui.backend.lastFrame).toContain(long);
   expect(ui.backend.lastFrame).toContain('75%');
   expect(ui.backend.lastFrame).toContain('check again');

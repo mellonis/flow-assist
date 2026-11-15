@@ -281,11 +281,16 @@ export function canvasView(api: TSurfaceApi, store: TStore): () => unknown {
     } satisfies TRenderCtx);
     // Keys on the rows: the tab strip appears and disappears as canvases come and go,
     // and a row without a key would drag the body's controls through a remount — the
-    // caret of a field being typed into included.
+    // caret of a field being typed into included. The body takes the rows left after the
+    // rows actually painted — the header, and the tab strip only while it is drawn: the
+    // old fixed `height - 3` sized the body for the strip's row even when no strip was
+    // there, so a one-canvas surface left two rows of its box blank at the bottom.
+    const withTabs = store.canvases.size > 1;
+    const bodyHeight = Math.max(1, height - (withTabs ? 2 : 1));
     return ui.h(ui.Box, { width, height, flexDirection: 'column' },
       ui.h(ui.Text, { key: 'canvas-header', dim: true }, fit(header, width, ui.stringWidth)),
-      ...(store.canvases.size > 1 ? [ui.h(ui.Text, { key: 'canvas-tabs', dim: true }, tabLine(store, width, ui.stringWidth))] : []),
-      ui.h(ui.ScrollBox, { key: 'canvas-body', height: Math.max(1, height - 3), isActive: hasKeyboard }, body),
+      ...(withTabs ? [ui.h(ui.Text, { key: 'canvas-tabs', dim: true }, tabLine(store, width, ui.stringWidth))] : []),
+      ui.h(ui.ScrollBox, { key: 'canvas-body', height: bodyHeight, isActive: hasKeyboard }, body),
     );
   };
 }
