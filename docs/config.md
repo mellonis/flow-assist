@@ -32,7 +32,8 @@ assistant may set or save".
   `ai.baseUrl` then defaults to `https://api.anthropic.com/v1`; a base URL of your own
   (a proxy) includes the `/v1` too — requests go to `<ai.baseUrl>/messages`. The
   tools, the system prompt and the turn so far are cached between requests, the
-  context meter counts the cached part, and the model's thinking shows in the chat's thinking fold (`^o`).
+  context meter counts the cached part, and the model's thinking shows in the chat as one
+  `▸ thought` fold per round, where the model thought it (`^o` opens them all).
   `ai.maxTokens` caps one answer (8192 by default; that API requires a cap, and
   thinking counts against it). `config set ai.thinking '{"adaptive":true}'` asks the
   model to think as much as it sees fit and shows a summary of it; a fixed

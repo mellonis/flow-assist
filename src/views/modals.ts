@@ -20,7 +20,7 @@ import { VERBS } from '../assistant/verbs.js';
 import type { TreeRow } from '../assistant/agent-tree.js';
 import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
-import { answerText, readParts, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
+import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
@@ -599,6 +599,7 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   const open = [
     isOpen(o.folds, foldId(at, 'thinking')) ? 1 : 0,
     isOpen(o.folds, foldId(at, 'summary')) ? 1 : 0,
+    ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'reasoning', n)) ? 1 : 0)),
     ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'steps', n)) ? 1 : 0)),
     ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'tools', n)) ? 1 : 0)),
     ...blocks.map((n) => (isClicked(o.folds, foldId(at, 'calls', n)) ? 1 : 0)),
@@ -773,10 +774,15 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // answer. Nothing a round drew ever moves: a step dims where it stands, or folds
       // into the row of its run, and the answer is only ever added to.
       const row = (line: Line, extra: Partial<ChatRow> = {}): ChatRow => ({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, ...extra });
+      const live = shownText(String(m.live ?? ''));
+      // A round known to carry a tool call is a step already, streaming or not: it
+      // joins its run where it stands rather than waiting for the round to end.
+      const liveStep = m.liveQuiet === true && !!live;
+      const parts = [...readParts(m.parts), ...(liveStep ? [{ kind: 'text' as const, text: live }] : [])];
       const reasoning = String(m.reasoning ?? '').trim();
-      if (reasoning) {
-        // Its own block: folded to a header in `step` (a click or the key opens it),
-        // and always open in `open`, where nothing folds.
+      // A message whose reasoning comes only as one field draws it here, above the
+      // turn's parts; one with reasoning parts draws each thought where it happened.
+      if (reasoning && !parts.some((p) => p.kind === 'reasoning')) {
         const id = foldId(at, 'thinking');
         const foldable = notes !== 'open';
         const opened = !foldable || isOpen(folds, id);
@@ -784,11 +790,6 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         if (opened) for (const line of mdLines(reasoning, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
         rows.push({ gap: true });
       }
-      const live = shownText(String(m.live ?? ''));
-      // A round known to carry a tool call is a step already, streaming or not: it
-      // joins its run where it stands rather than waiting for the round to end.
-      const liveStep = m.liveQuiet === true && !!live;
-      const parts = [...readParts(m.parts), ...(liveStep ? [{ kind: 'text' as const, text: live }] : [])];
       // Calls: one quiet line (`▸ 2 tools: read_file ×2`) that opens to the trail, a
       // line per call. A command a block already shows is not among them — its block
       // is (the chat leaves it out).
@@ -812,6 +813,21 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       };
       const segs = turnSegments(parts);
       for (const [si, seg] of segs.entries()) {
+        if (seg.kind === 'reasoning') {
+          // Each thought is its own block where the model wrote it: folded in `step`,
+          // open in `open`. It is `thinking` until the turn moves on, then `thought`;
+          // a leading bold title becomes the header's name.
+          const id = foldId(at, 'reasoning', seg.n);
+          const foldable = notes !== 'open';
+          const opened = !foldable || isOpen(folds, id);
+          const done = m.duration != null || !!m.live || si < segs.length - 1;
+          const summary = reasoningSummary(seg.text);
+          const label = `${done ? 'thought' : 'thinking'}${summary.title ? `: ${summary.title}` : ''}`;
+          rows.push({ role, reasonHeader: true, open: opened, label, ...(foldable ? { fold: id, foldLine: true } : {}) });
+          if (opened) for (const line of mdLines(summary.body, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
+          rows.push({ gap: true });
+          continue;
+        }
         if (seg.kind === 'change') {
           // What a write changed: always open (not foldable) — it is the part of the
           // turn the person most needs to see. The hunks are laid out as markdown, so
@@ -1009,7 +1025,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
   // own outer box, never a wrapper, so a drag's marks on it mean what they did.
   const drawRow = (row: ChatRow, key: string, lit: boolean, hp: HoverProps): ReactNode => {
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
-      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
       // A group's head is a one-row line like a folded run — chrome, cut to one row —
       // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
       // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
@@ -1458,7 +1474,10 @@ export function pagerTitle(rows: readonly ChatRow[], id: string): string {
     const n = rows[0]?.runs?.length ?? 0;
     return `${n} tool call${n === 1 ? '' : 's'}`;
   }
-  return kind === 'thinking' ? 'thinking' : kind === 'summary' ? 'summary' : 'steps';
+  // A thought names itself: the header's own label (`thought`, `thinking`, or the
+  // title it carries), so the pager reads as the row that opened it.
+  if (kind === 'thinking' || kind === 'reasoning') return String(rows[0]?.label ?? '').trim() || 'thinking';
+  return kind === 'summary' ? 'summary' : 'steps';
 }
 
 // ─── Chat modal (pure render) ──────────────────────────────────────────────────

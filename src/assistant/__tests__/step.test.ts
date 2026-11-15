@@ -3,6 +3,8 @@
 import { expect, test } from 'bun:test';
 import {
   addCalls,
+  addReasoning,
+  reasoningSummary,
   answerText,
   callRun,
   runMarks,
@@ -210,4 +212,43 @@ test('the trail\'s tone is red for a failure nobody recovered from, yellow for o
   expect(trailTone([r('a', 'error'), r('a', 'declined')])).toBe('error');
   // Writes alone are not failures.
   expect(trailTone([r('w', 'applied')])).toBe('ok');
+});
+
+// ─── Reasoning as it happened ─────────────────────────────────────────────────
+const reasoning = (t: string): TurnPart => ({ kind: 'reasoning', text: t });
+
+test('reasoning is a part in time order, not one block before everything', () => {
+  const segs = turnSegments([reasoning('First thought.'), calls('read'), reasoning('Second thought.'), text('Next: answer')]);
+  expect(segs.map((s) => s.kind)).toEqual(['reasoning', 'tools', 'reasoning', 'run']);
+  expect(segs[0]).toMatchObject({ kind: 'reasoning', n: 0, text: 'First thought.' });
+  expect(segs[2]).toMatchObject({ kind: 'reasoning', n: 1, text: 'Second thought.' });
+  // A thought between a step and its calls ends the step's run: the calls are not
+  // the step's own any more.
+  expect(segs[1]).toMatchObject({ kind: 'tools', n: 0 });
+});
+
+test('empty reasoning draws nothing and breaks no run', () => {
+  expect(turnSegments([reasoning(''), reasoning('   '), text('One.'), calls('read')]).map((s) => s.kind)).toEqual(['run']);
+});
+
+test('a session keeps reasoning parts with the rest of the turn', () => {
+  expect(readParts([{ kind: 'reasoning', text: 'The date first.' }, { kind: 'text', text: 'Next: check.' }])).toEqual([
+    { kind: 'reasoning', text: 'The date first.' },
+    { kind: 'text', text: 'Next: check.' },
+  ]);
+  expect(readParts([{ kind: 'reasoning' }, { kind: 'reasoning', text: 7 }])).toEqual([]);
+});
+
+test('reasoning deltas gather into one part until something else happens', () => {
+  const one = addReasoning([], 'First');
+  expect(addReasoning(one, ' thought.')).toEqual([{ kind: 'reasoning', text: 'First thought.' }]);
+  const afterTool = addReasoning(addCalls(one, [{ name: 'read', outcome: 'ok' }]), 'Second.');
+  expect(afterTool.map((p) => p.kind)).toEqual(['reasoning', 'tools', 'reasoning']);
+});
+
+test('a leading bold title is disclosure metadata, not body', () => {
+  expect(reasoningSummary('**Checking the clock**\n\nThe date first.')).toEqual({ title: 'Checking the clock', body: 'The date first.' });
+  expect(reasoningSummary('**Checking the clock**')).toEqual({ title: 'Checking the clock', body: '' });
+  expect(reasoningSummary('**Important:** keep this.')).toEqual({ title: null, body: '**Important:** keep this.' });
+  expect(reasoningSummary('Plain reasoning.')).toEqual({ title: null, body: 'Plain reasoning.' });
 });

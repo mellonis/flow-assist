@@ -31,7 +31,7 @@ const consoleOf = (m: GroupMsg): ViewRecord | null => {
 const drawsPart = (p: unknown) => {
   const part = p as TurnPart | null;
   if (!part || typeof part !== 'object') return false;
-  if (part.kind === 'change' || part.kind === 'tools') return true;
+  if (part.kind === 'change' || part.kind === 'tools' || part.kind === 'reasoning') return true;
   const text = String((part as { text?: unknown }).text ?? '');
   return part.kind === 'text' && !!shownText(text) && !isPlanOnly(text);
 };

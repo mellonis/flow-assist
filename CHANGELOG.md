@@ -5,6 +5,20 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A server's thinking is shown however it spells the field.** An OpenAI-compatible
+  server streams a model's reasoning as `delta.reasoning_content` (vLLM, SGLang) or as
+  `delta.reasoning` (DeepSeek, OpenRouter and others); the chat now reads both, so a
+  `▸ thought` block appears where it used to be dropped silently.
+
+- **Each thought in the chat is drawn where the model thought it.** Reasoning arrives
+  round by round, and a turn now keeps every round's thinking as an ordered part of the
+  turn instead of one block at its top: two rounds that thought are two `▸ thought`
+  headers with the tool call between them, in the order it happened. A thought's header
+  is `thinking` while the turn still runs and `thought` once it moves on, a leading
+  bold `**Title**` line becomes the header's name, and the pager a tall thought opens
+  in is titled by that same header. A session saved before this change keeps drawing its
+  one reasoning block as it always did.
+
 - **Completion opens a list.** In the chat's field and in the `:` line, two or more candidates
   open a list over the line by themselves: each row is the name and what it is (a command's
   description, a config key's value (masked at a secret-looking key) and meaning, an agent's

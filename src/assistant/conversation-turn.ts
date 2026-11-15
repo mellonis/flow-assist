@@ -14,7 +14,7 @@ import { retryClock, retryLabel, type RetryInfo } from './llm-retry.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
-import { addCalls, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
+import { addCalls, addReasoning, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
 import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
@@ -565,8 +565,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
-          if (last?.role === 'assistant') next[next.length - 1] = { ...last, reasoning: (last.reasoning || '') + delta };
-          else next.push({ role: 'assistant', content: '', reasoning: delta });
+          if (last?.role === 'assistant') next[next.length - 1] = { ...last, reasoning: (last.reasoning || '') + delta, parts: addReasoning(last.parts ?? [], delta) };
+          else next.push({ role: 'assistant', content: '', reasoning: delta, parts: addReasoning([], delta) });
           return next;
         });
       },

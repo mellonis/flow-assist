@@ -306,7 +306,7 @@ test('a y/n arriving while the pager is up closes it and is answered; while it w
   ui.app.unmount();
 });
 
-test('a long reasoning opens in the pager titled thinking, reads to its end, and Esc gives the conversation back', async () => {
+test('a long reasoning opens in the pager titled by its own header, reads to its end, and Esc gives the conversation back', async () => {
   const model = new ScriptedModel();
   const thought = Array.from({ length: 60 }, (_, i) => `thought ${i + 1}`).join('\n\n');
   model.script([{ thinking: thought, signature: 'sig' }, { text: 'Thought it through.' }]);
@@ -318,11 +318,11 @@ test('a long reasoning opens in the pager titled thinking, reads to its end, and
   await settle(8);
   const before = ui.backend.lastFrame;
   const window = corner(before);
-  await click(ui, rowOf(ui, '▸ thinking'));
+  await click(ui, rowOf(ui, '▸ thought'));
   expect(pagerUp(ui)).toBe(true);
   // In the chat's own window, where the conversation was, titled by the block.
   expect(corner(ui.backend.lastFrame)).toEqual(window);
-  expect(ui.backend.lastFrame.split('\n')[window.row]).toContain('Flow Assist · thinking');
+  expect(ui.backend.lastFrame.split('\n')[window.row]).toContain('Flow Assist · thought');
   expect(ui.backend.lastFrame).toContain('thought 1');
   expect(ui.backend.lastFrame).not.toContain('thought 60');
   for (let i = 0; i < 20; i++) await ui.press('pagedown');
