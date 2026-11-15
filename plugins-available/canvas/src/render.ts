@@ -157,6 +157,11 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
   // A control takes the focus only while the canvas holds the keys: a canvas drawn
   // beside the chat never pulls the caret away from the prompt.
   const focused = (key: string): boolean => ctx.hasKeyboard && ctx.focusKey === key;
+  // The row a labelled control draws: flowtty's TextInput and Select take no label of
+  // their own, so one is drawn as a dim caption in the palette's dim token, then the
+  // control itself.
+  const withLabel = (label: string, control: unknown): unknown =>
+    ui.h(ui.Box, { flexDirection: 'row', gap: 1 }, ui.h(ui.Text, { dim: true, color: paint('dim') }, label), control);
   // Buttons are numbered in draw order, the order `focus.ts` counts them in, so a button
   // knows its own focus key and can mark itself. `draw` descends through the children in
   // tree order, and a validated tree nests them only in a Box or a ScrollBox.
@@ -259,14 +264,8 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
           onChange: (next: string) => ctx.onValue(bind, next),
           isFocused: focused(bind),
         });
-        // A label draws as a dim caption before the field: flowtty's TextInput has none
-        // of its own, and the vocabulary promises one. Its colour goes through the
-        // palette, so a person's theme reaches it too.
         const label = str(props.label);
-        if (label === '') return field;
-        return ui.h(ui.Box, { flexDirection: 'row', gap: 1 },
-          ui.h(ui.Text, { dim: true, color: paint('dim') }, label),
-          field);
+        return label === '' ? field : withLabel(label, field);
       }
       case 'check': {
         const bind = str(props.bind);
@@ -285,12 +284,14 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
         const chosen = typeof live === 'string' ? live : selectValue(props, items);
         // An empty choice is flowtty's "nothing chosen", which draws the placeholder
         // rather than an empty field.
-        return ui.h(ui.Select, {
+        const field = ui.h(ui.Select, {
           items,
           value: chosen === '' ? undefined : chosen,
           onChange: (next: string) => ctx.onValue(bind, next),
           isFocused: focused(bind),
         });
+        const label = str(props.label);
+        return label === '' ? field : withLabel(label, field);
       }
       // A button draws as bold text in its tone, inverse while it holds the focus — the
       // marker this repo already draws for a pressable Text. A click presses through the
