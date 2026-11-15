@@ -1,10 +1,13 @@
 // The conversation as an external watcher reads it (contract v1): one JSON value per
 // session, a root row for the chat itself and one row per live descendant, so a menu-bar
-// watcher can see which agents need the person. Pure — a caller holds the stamps map and
-// the clock, writes the file and offers it to the watcher.
+// watcher can see which agents need the person. `buildStateFile` is pure — a caller holds
+// the stamps map and the clock — and `startStateFiles` mirrors the snapshots of the live
+// sessions into their session directory, writing a file only when it changed.
 //
 // Every string goes through `redactSecrets`: a title, a label, the tool a node runs and a
 // command's line reach a file outside the host, and none of them may carry a token.
+import fs from 'node:fs';
+import path from 'node:path';
 import type { TreeNode } from './conversation-types.js';
 import { redactSecrets } from './secrets.js';
 
@@ -129,4 +132,93 @@ export function buildStateFile(input: StateFileInput, stamps: StateStamps, now: 
     status: input.status,
     tree: [root, ...input.nodes.map((n) => nodeOf(n, stamps, now))],
   };
+}
+
+// ---- the write loop: each live session's snapshot, mirrored beside its session file ----
+
+const STATE_SUFFIX = '.state.json';
+
+// The file one session's snapshot lives in, beside its `<id>.json`.
+const statePath = (dir: string, id: string): string => path.join(dir, `${id}${STATE_SUFFIX}`);
+
+// What a watcher reads as "this session changed": the whole snapshot but the moment it
+// was written, which is the tick's own clock reading and so differs on every tick.
+const detectionString = (snapshot: StateFileV1): string => JSON.stringify({ ...snapshot, writtenAt: '' });
+
+// Best-effort: a state file is a mirror, and a session taken away leaves nothing to
+// mirror. A failed unlink is not the host's to report.
+export function removeStateFile(dir: string, id: string): void {
+  try {
+    fs.unlinkSync(statePath(dir, id));
+  } catch {
+    // Not there, or not ours to remove.
+  }
+}
+
+// Mirrors every live session's snapshot into `dir` once a tick, writing a session's file
+// only when its snapshot changed and removing the file of one that left `sources()`.
+// A mirror never breaks the host: a write that fails is swallowed, and the next tick
+// tries again. `dir: null` — sessions kept in memory — writes nothing at all.
+export function startStateFiles(opts: {
+  dir: string | null;
+  sources: () => StateFileInput[];
+  intervalMs?: number;
+  now?: () => number;
+}): { stop(): void; flushNow(): void } {
+  const { dir, sources } = opts;
+  const now = opts.now ?? Date.now;
+  // Per session: the time each node's status began, and the change-detection string of
+  // the snapshot last written. Both live as long as the writer, so a status is timed
+  // from its start across ticks, a snapshot that did not change costs no write, and a
+  // session that drops out and comes back keeps the times its statuses began.
+  const stamps = new Map<string, StateStamps>();
+  const last = new Map<string, string>();
+
+  // A temp file in the same directory, then a rename over the target: a reader never
+  // sees half a snapshot, and a temp left by a crash carries this process's pid.
+  const write = (base: string, id: string, text: string): void => {
+    const target = statePath(base, id);
+    const tmp = `${target}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, `${text}\n`, { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  };
+
+  const tick = (): void => {
+    if (!dir) return;
+    const seen = new Set<string>();
+    for (const input of sources()) {
+      seen.add(input.id);
+      try {
+        const forSession = stamps.get(input.id) ?? new Map<string, { status: StateNode['status']; at: number }>();
+        stamps.set(input.id, forSession);
+        const snapshot = buildStateFile(input, forSession, now());
+        const detect = detectionString(snapshot);
+        if (last.get(input.id) === detect) continue;
+        write(dir, input.id, JSON.stringify(snapshot));
+        last.set(input.id, detect);
+      } catch {
+        // One session's file failing — a full disk, a directory gone — says nothing
+        // about the others, and must not stop them.
+      }
+    }
+    for (const id of [...last.keys()]) {
+      if (seen.has(id)) continue;
+      removeStateFile(dir, id);
+      last.delete(id);
+    }
+  };
+
+  // One tick, synchronous: a test drives the writer without waiting for the interval.
+  const flushNow = (): void => {
+    try {
+      tick();
+    } catch {
+      // A mirror is never the host's record: nothing here reaches a redraw or a turn.
+    }
+  };
+
+  const timer = setInterval(flushNow, opts.intervalMs ?? 1000);
+  (timer as { unref?: () => void }).unref?.();
+
+  return { stop: () => clearInterval(timer), flushNow };
 }
