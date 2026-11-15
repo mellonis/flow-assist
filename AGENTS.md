@@ -1693,7 +1693,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   rather than jump once at the answer. The split between parts is always an estimate,
   scaled to the total.
   The window is the one the conversation's model has — `ai.models.<id>.contextWindow`,
-  else `ai.contextWindow`, else 200 000 (see (models)) — the API cannot be asked for it.
+  else `ai.contextWindow`, else 200000 (see (models)) — the API cannot be asked for it.
   `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
   shrinks what the MODEL sees (the conversation's `api` → a summary in the system context) and leaves
   the screen alone — the display list keeps the conversation and gains a `note` marking
@@ -3227,14 +3227,20 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
 - **A conversation runs ONE model (models)** — its own (a child's, resolved from a role at
-  its start), else `ai.model`, else the provider's default (`effectiveModel()`), and every
-  request carries it (`withModel`). A child without a role of its own inherits its parent's
-  model, materialised at the start (`child.model = spec.model ?? this.effectiveModel()`),
-  so a task a subagent starts runs what that subagent runs; a session file records no
-  model. The window is that model's: `Conversation.contextWindow()` —
-  `ai.models.<id>.contextWindow` → `ai.contextWindow` → 200 000 — is the ONE reader of the
+  its start), else `ai.model`, else the provider's default (`effectiveModel()`), and the
+  requests its turn makes carry it (`withModel(llmOpts(ai), c.model)`, at the turn and at
+  `foldIntoHandoff`); a run a tool starts through `ctx.chatLLM` keeps `ai.model`, passing
+  its own options to `services.chatLLM`, which merges them last. A child without a role of
+  its own inherits its parent's model, materialised at the start
+  (`child.model = spec.model ?? this.effectiveModel()`), so a task a subagent starts runs
+  what that subagent runs; a session file records no model. The window is that model's:
+  `Conversation.contextWindow()` —
+  `ai.models.<id>.contextWindow` → `ai.contextWindow` → 200000 — is the ONE reader of the
   window, so the meter, the automatic compaction's threshold and the recall threshold all
-  measure against it. A role nothing defines is not a refusal: one note, `role "<key>" is
+  measure against it. An id whose own text holds a dot (`big-model.v2`) cannot be a key
+  path: every config key is a dot path, so `ai.models.<id>.contextWindow` reads as two
+  keys and is refused — the catalogue is set whole (`config set ai.models '{…}'`) or in
+  `config.json`. A role nothing defines is not a refusal: one note, `role "<key>" is
   not defined (ai.roles) — using the conversation's model`, and the work starts on the
   conversation's model — a model id given where a role belongs is exactly that case.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,

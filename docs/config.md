@@ -89,6 +89,11 @@ flow-assist config set ai.models.big-model '{"contextWindow":512000}'
   otherwise). The window is what the context meter (`ctx N%`), the automatic compaction
   and the recall measure against: the window of the model the work runs, so a subagent on
   `deep` counts against its 512 000, not the chat's 200 000.
+- **A model id with a dot** cannot be a key path — every config key is a dot path, so
+  `config set ai.models.big-model.v2.contextWindow 512000` reads `big-model` and `v2` as
+  two keys and is refused (`unknown key`). Set the whole catalogue in one call instead:
+  `flow-assist config set ai.models '{"big-model.v2":{"contextWindow":512000}}'`, or write
+  it in `config.json`.
 
 Each conversation runs one model: what its role resolved to when it started (a subagent
 or task with no role runs the model of the conversation that started it), else `ai.model`,

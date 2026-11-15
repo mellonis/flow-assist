@@ -491,7 +491,8 @@ a note says so at the start. A subagent or task the agent starts has the same gr
 is yours to carry between machines, and the model ids are each machine's own.
 `config set ai.roles.fast small-model` says what a role runs on here (docs/config.md,
 "Models and roles"). Without a `model:` line — and for a subagent or task that names no
-role — the work runs the model of the conversation that started it, the chat's own.
+role — the work runs the model of the conversation that started it: the chat's, or for a
+task a subagent starts, that subagent's.
 
 A role your machine does not define is not an error: the work runs on that same model and
 one note says so (`role "deep" is not defined (ai.roles) — using the conversation's
@@ -755,8 +756,9 @@ Bulky things — an image, a `!command`'s output, a large tool result — are se
 model in full in the turn they arrive in, and later as a one-line stub naming an id
 (`[! brew update — exit 0 · 24s · 120 lines — recall("out:7d41e0aa")]`) that the
 assistant reads again with its `recall` tool when it needs the content; the screen and
-the session keep everything. Stubbing happens in batches, once the context passes half
-the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), so the
+the session keep everything. Stubbing happens in batches, once the context passes
+`ai.recall.threshold` of the window the conversation measures against — half by default —
+or every ten turns (`ai.recall.everyTurns`), so the
 provider's prompt cache is missed rarely; `/context` says how many items are stubbed.
 `config set ai.recall.enabled false` sends everything in full every time.
 
