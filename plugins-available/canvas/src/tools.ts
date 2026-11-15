@@ -95,13 +95,18 @@ export function buildGroup(deps: TToolsDeps) {
     return opened?.text ?? `Not opened: this host cannot open a screen — canvas «${id}» is still drawn`;
   };
 
-  // Selecting before the ask is deliberate: a refused open (background work opens
-  // nothing) still moves the person's tabs when they next look.
-  const focus = async (args: Record<string, unknown>): Promise<string> => {
+  // Only a session's focus moves the person's tabs: the host refuses a background open
+  // anyway (screens.ts), and a subagent must not re-tab a screen it cannot show. A
+  // session selects before it asks, so the canvas it asked for is the one selected even
+  // when the open waits for the turn's end.
+  const focus = async (args: Record<string, unknown>, ctx: unknown): Promise<string> => {
     const id = canvasOf(args.canvas);
     if (!id) return 'no canvas named — canvas is the id canvas_list names';
-    if (!selectCanvas(deps.store, id)) return missingCanvas(id);
-    deps.notify();
+    if (!deps.store.canvases.has(id)) return missingCanvas(id);
+    if (selectsScreen(ctx)) {
+      selectCanvas(deps.store, id);
+      deps.notify();
+    }
     return show(id);
   };
 
@@ -120,7 +125,7 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_draw',
-          description: 'Draw a canvas, or replace it whole: the person sees it. canvas — its id (a short word like ci); title, owner — optional labels; tree — [type, props?, ...children] (the group text has the vocabulary and an example). Display only: nothing outside the app changes. A tree that breaks the vocabulary is refused and the canvas is left as it was.',
+          description: 'Draw a canvas, or replace it whole: the person sees it. canvas — its id (a short word like ci); title, owner — optional labels; tree — [type, props?, ...children] (the group text has the vocabulary and an example). A bind\'s value the person typed survives a redraw while you send the same `value`; send a different `value` to prefill or reset it. Display only: nothing outside the app changes. A tree that breaks the vocabulary is refused and the canvas is left as it was.',
           parameters: {
             type: 'object',
             properties: {
@@ -157,7 +162,7 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_focus',
-          description: 'Select a canvas and ask the host to show the person\'s side on it. canvas — its id. The host may refuse (background work opens nothing): the answer says why and the canvas stays drawn and selected.',
+          description: 'Select a canvas and ask the host to show the person\'s side on it. canvas — its id. Only a session\'s call moves the selection: background work opens nothing, and the answer says why.',
           parameters: {
             type: 'object',
             properties: { canvas: { type: 'string', description: 'The canvas id — canvas_list names them.' } },
@@ -182,7 +187,7 @@ export function buildGroup(deps: TToolsDeps) {
       if (name === 'canvas_draw') return draw(args, ctx);
       if (name === 'canvas_list') return list();
       if (name === 'canvas_delete') return remove(args);
-      if (name === 'canvas_focus') return focus(args);
+      if (name === 'canvas_focus') return focus(args, ctx);
       if (name === 'canvas_open') return open(args);
       throw new Error(`Unknown tool: ${name}`);
     },

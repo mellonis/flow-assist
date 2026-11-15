@@ -95,13 +95,16 @@ export function drawCanvas(store: TStore, input: { id: string; title?: string; o
 
 // Deleting the selected canvas selects the first remaining one in insertion
 // (first-draw) order, so the surface keeps showing a canvas; with none left the
-// selection is null. A pending press is cleared only when it was the deleted
-// canvas's — another canvas's press keeps waiting.
+// selection is null and the person's side goes down — a side with no canvas has
+// nothing to show, and leaving it up would let the next draw mount it unasked. A
+// pending press is cleared only when it was the deleted canvas's — another canvas's
+// press keeps waiting.
 export function deleteCanvas(store: TStore, id: string): boolean {
   const had = store.canvases.delete(id);
   if (!had) return false;
   if (store.pressed === id) store.pressed = null;
   if (store.selectedId === id) store.selectedId = store.canvases.keys().next().value ?? null;
+  if (store.canvases.size === 0) store.personOpened = false;
   return true;
 }
 

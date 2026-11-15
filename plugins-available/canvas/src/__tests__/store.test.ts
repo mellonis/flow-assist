@@ -36,6 +36,17 @@ test('delete removes one; deleting the last clears the selection', () => {
   expect(selectedCanvas(store)).toBeUndefined();
 });
 
+test('deleting the last canvas takes the person\'s side down; deleting one of two leaves it up', () => {
+  const store = createStore();
+  drawCanvas(store, { id: 'a', tree, stats });
+  drawCanvas(store, { id: 'b', tree, stats });
+  store.personOpened = true;
+  expect(deleteCanvas(store, 'a')).toBe(true);
+  expect(store.personOpened).toBe(true);
+  expect(deleteCanvas(store, 'b')).toBe(true);
+  expect(store.personOpened).toBe(false);
+});
+
 test('two canvases coexist and select moves between them', () => {
   const store = createStore();
   drawCanvas(store, { id: 'a', tree, stats });

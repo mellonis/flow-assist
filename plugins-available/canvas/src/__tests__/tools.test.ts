@@ -43,6 +43,16 @@ test('canvas_delete removes and says so; the last one unmounts', async () => {
   expect(await group.exec('canvas_delete', { canvas: 'a' }, {})).toContain('no canvas');
 });
 
+test('after the last canvas is deleted, a draw says one line again', async () => {
+  const { group, store, notes } = deps();
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});
+  store.personOpened = true;
+  await group.exec('canvas_delete', { canvas: 'a' }, {});
+  expect(store.personOpened).toBe(false);
+  await group.exec('canvas_draw', { canvas: 'b', tree: ['Text', {}, 'y'] }, {});
+  expect(notes).toEqual(['canvas «a» updated', 'canvas «b» updated']);
+});
+
 test('canvas_focus asks the host to open the screen; a refusal is passed on verbatim', async () => {
   const refusal = { ok: false, text: 'Not opened: screens are not opened from background work.' };
   const { group, notes } = deps({ open: async () => refusal });
@@ -50,6 +60,27 @@ test('canvas_focus asks the host to open the screen; a refusal is passed on verb
   const out = await group.exec('canvas_focus', { canvas: 'a' }, {});
   expect(out).toContain('Not opened');
   expect(notes).toHaveLength(1);   // the toast the draw made, and nothing from the refusal
+});
+
+test('canvas_focus from background work passes the refusal and leaves the person\'s tabs alone', async () => {
+  const refusal = { ok: false, text: 'Not opened: screens are not opened from background work.' };
+  const { group, store } = deps({ open: async () => refusal });
+  const session = { askUser: async () => ({ answers: [], cancelled: true }) };
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, session);
+  await group.exec('canvas_draw', { canvas: 'b', tree: ['Text', {}, 'y'] }, session);
+  expect(store.selectedId).toBe('b');
+  expect(await group.exec('canvas_focus', { canvas: 'a' }, {})).toBe(refusal.text);
+  expect(store.selectedId).toBe('b');
+});
+
+test('canvas_focus from a session selects first, and a refusal is still passed on verbatim', async () => {
+  const refusal = { ok: false, text: 'Not opened: the person is typing.' };
+  const { group, store } = deps({ open: async () => refusal });
+  const session = { askUser: async () => ({ answers: [], cancelled: true }) };
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, session);
+  await group.exec('canvas_draw', { canvas: 'b', tree: ['Text', {}, 'y'] }, session);
+  expect(await group.exec('canvas_focus', { canvas: 'a' }, session)).toBe(refusal.text);
+  expect(store.selectedId).toBe('a');
 });
 
 test('canvas_open asks the host for the same screen; a canvas nobody drew opens nothing', async () => {
