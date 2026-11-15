@@ -89,10 +89,16 @@ export function drawCanvas(store: TStore, input: { id: string; title?: string; o
   return canvas;
 }
 
+// Deleting the selected canvas selects the first remaining one in insertion
+// (first-draw) order, so the surface keeps showing a canvas; with none left the
+// selection is null. A pending press is cleared only when it was the deleted
+// canvas's — another canvas's press keeps waiting.
 export function deleteCanvas(store: TStore, id: string): boolean {
   const had = store.canvases.delete(id);
-  if (had && store.selectedId === id) store.selectedId = null;
-  return had;
+  if (!had) return false;
+  if (store.pressed === id) store.pressed = null;
+  if (store.selectedId === id) store.selectedId = store.canvases.keys().next().value ?? null;
+  return true;
 }
 
 export function selectCanvas(store: TStore, id: string): boolean {
@@ -139,11 +145,18 @@ const formatAge = (ms: number): string => {
   return `${Math.floor(ms / DAY_MS)}d`;
 };
 
+const REGISTRY_MAX_ITEMS = 10;
+
 // One chat-context item per canvas, in draw order: id, title, owner, age, node
-// count, and whether the plugin's side is up.
+// count, and whether the plugin's side is up. The list stays within ten items —
+// the design's cap, the host's context budget being shared with every other
+// plugin — so over the cap it keeps the first nine and ends in one `… N more`
+// marker, the host's own truncation shape, naming the canvases it did not list.
 export function registryItems(store: TStore, now: () => number): Array<{ label: string; text: string }> {
+  const canvases = [...store.canvases.values()];
+  const shown = canvases.length > REGISTRY_MAX_ITEMS ? REGISTRY_MAX_ITEMS - 1 : canvases.length;
   const items: Array<{ label: string; text: string }> = [];
-  for (const c of store.canvases.values()) {
+  for (const c of canvases.slice(0, shown)) {
     const parts: string[] = [`«${c.id}»`];
     if (c.title !== '') parts.push(c.title);
     if (c.owner !== '') parts.push(c.owner);
@@ -152,6 +165,7 @@ export function registryItems(store: TStore, now: () => number): Array<{ label: 
     parts.push(store.personOpened ? 'side up' : 'side down');
     items.push({ label: `Canvas: «${c.id}»`, text: parts.join(' · ') });
   }
+  if (canvases.length > REGISTRY_MAX_ITEMS) items.push({ label: 'Canvas', text: `… ${canvases.length - shown} more` });
   return items;
 }
 

@@ -62,6 +62,36 @@ test('registry items are one short line per canvas, with age and side-up', () =>
   expect(items[0]!.text).toContain('reviewer');
 });
 
+test('deleting the selected canvas selects a remaining one, and a pending press is cleared only for the deleted canvas', () => {
+  const store = createStore();
+  drawCanvas(store, { id: 'a', tree, stats });
+  drawCanvas(store, { id: 'b', tree, stats });
+  store.pressed = 'b';
+  expect(deleteCanvas(store, 'b')).toBe(true);
+  expect(selectedCanvas(store)?.id).toBe('a');
+  expect(store.pressed).toBeNull();
+  store.pressed = 'a';
+  expect(deleteCanvas(store, 'missing')).toBe(false);
+  expect(store.pressed).toBe('a');
+  expect(deleteCanvas(store, 'a')).toBe(true);
+  expect(store.selectedId).toBeNull();
+  expect(store.pressed).toBeNull();
+});
+
+test('the registry list stays within ten items, one marker naming the rest', () => {
+  const store = createStore(() => 1000);
+  for (let id = 0; id < 10; id++) drawCanvas(store, { id: `c${id}`, tree, stats });
+  const ten = registryItems(store, () => 1000);
+  expect(ten).toHaveLength(10);
+  expect(ten[9]!.text).toContain('«c9»');
+  drawCanvas(store, { id: 'c10', tree, stats });
+  const eleven = registryItems(store, () => 1000);
+  expect(eleven).toHaveLength(10);
+  expect(eleven[0]!.text).toContain('«c0»');
+  expect(eleven[8]!.text).toContain('«c8»');
+  expect(eleven[9]!.text).toBe('… 2 more');
+});
+
 test('the outline is depth-first, capped, and mentions the bindable fields', () => {
   const store = createStore();
   const c = drawCanvas(store, { id: 'ci', tree, stats });
