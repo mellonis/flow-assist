@@ -486,7 +486,7 @@ test('a history longer than the cap is cut at a whole turn: after a restart the 
   process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted';
   try {
     const dir = dirOf();
-    const ai = { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all' };
+    const ai = { provider: 'anthropic', model: 'default-model', toolLoading: 'all' };
     const many = (n: number) => Array.from({ length: n }, () => ({ tool: 'datetime', args: {} }));
     const model = new ScriptedModel();
     model.wire = 'anthropic';

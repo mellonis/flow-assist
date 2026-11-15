@@ -264,7 +264,7 @@ test('the cache line: Anthropic\'s cache_read/cache_creation, kept with the sess
     model.script([{ text: 'hi there' }]);
     const ui = await bootApp(model, 110, 30, undefined, {
       sessions: { dir },
-      ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: 100_000 },
+      ai: { provider: 'anthropic', model: 'default-model', toolLoading: 'all', contextWindow: 100_000 },
     });
     await ui.press('F');
     await ui.type('hi');

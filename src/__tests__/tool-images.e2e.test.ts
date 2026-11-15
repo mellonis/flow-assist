@@ -127,7 +127,7 @@ test('Anthropic wire: the images are image blocks inside the tool_result, which 
   const model = new ScriptedModel();
   model.wire = 'anthropic';
   model.script([{ tool: 'get_shots', args: {} }], [{ text: 'Seen.' }], [{ text: 'Still.' }]);
-  const ui = await boot(model, { provider: 'anthropic', model: 'claude-sonnet-5' });
+  const ui = await boot(model, { provider: 'anthropic', model: 'default-model' });
   type Block = Record<string, unknown> & { type: string };
   type Sent = { messages: { role: string; content: Block[] }[] };
   const sent = (i: number) => model.requests[i] as unknown as Sent;
