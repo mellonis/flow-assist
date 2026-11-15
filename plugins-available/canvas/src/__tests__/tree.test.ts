@@ -73,14 +73,12 @@ test('a type drawn from its props alone refuses children it would never draw', (
   }
 });
 
-test('Markdown carries its text in a prop, not children', () => {
-  expect(checkTree(['Markdown', { text: '# hi' }]).ok).toBe(true);
-  const r = checkTree(['Markdown', {}, '# hi']);
-  expect(r.ok).toBe(false);
-  if (!r.ok) {
-    expect(r.error).toContain('Markdown');
-    expect(r.error).toContain('no children');
-  }
+test('Markdown takes one string child, under the text cap', () => {
+  expect(checkTree(['Markdown', {}, '# hi']).ok).toBe(true);
+  const over = checkTree(['Markdown', {}, 'x'.repeat(LIMITS.text + 1)]);
+  expect(over.ok).toBe(false);
+  if (!over.ok) expect(over.error).toContain(`chars — the limit is ${LIMITS.text}`);
+  expect(checkTree(['Markdown', {}, 'a', 'b']).ok).toBe(false);
 });
 
 test('Table cells and column labels stay under the text cap', () => {

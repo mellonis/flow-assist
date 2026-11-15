@@ -61,7 +61,7 @@ const ALLOWED: Record<string, TypeRule> = {
     required: [],
     children: 'text',
   },
-  Markdown: { props: { text: 'string' }, required: ['text'], children: 'none' },
+  Markdown: { props: {}, required: [], children: 'text' },
   Table: {
     props: { columns: 'array', rows: 'array', border: 'boolean', selectedIndex: 'number' },
     required: ['columns', 'rows'],
@@ -102,7 +102,7 @@ const TASK_STATES = ['done', 'running', 'queued', 'failed'];
 const KIND_NAME: Record<PropKind, string> = { string: 'a string', number: 'a number', boolean: 'a boolean', array: 'an array', object: 'an object' };
 // A string the canvas prints as text, capped by LIMITS.text; every other string prop
 // is a value (a typed field, a label, an action), capped by LIMITS.value.
-const TEXT_PROPS = new Set(['badge.text', 'Markdown.text']);
+const TEXT_PROPS = new Set(['badge.text']);
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -235,6 +235,12 @@ export function checkTree(tree: unknown): TChecked {
       return;
     }
     if (children.length > LIMITS.children) problem(`${type} has ${children.length} children — the limit is ${LIMITS.children}`);
+    // Markdown is one string, not a list of them: flowtty's Markdown takes a single
+    // string child, so a second one would be dropped on the draw and is refused here.
+    if (type === 'Markdown') {
+      const texts = children.filter((c) => typeof c === 'string');
+      if (texts.length > 1) problem(`Markdown takes one string child, not ${texts.length}`);
+    }
     for (const c of children) {
       if (typeof c === 'string') {
         if (rule.children === 'nodes') { problem(`${type} takes node children — wrap the text in a Text`); continue; }
@@ -294,7 +300,7 @@ export function checkTree(tree: unknown): TChecked {
 export const VOCABULARY = `canvas components — a tree is [type, props?, ...children]; a child is a node or a string:
 Box: flexDirection, gap, padding, paddingX, paddingY, width, height, flexGrow, border, overflow, alignItems, justifyContent — takes node children
 Text: color (a palette token), bold, dim, wrap, truncate — takes a string child
-Markdown: text — one string, the markdown to draw
+Markdown: takes one string child
 Table: columns ({key, label, width?}), rows (arrays of strings, ≤ 100), border, selectedIndex
 ScrollBox: height, flexGrow — takes node children
 Link: url — drawn as one line

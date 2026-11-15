@@ -211,7 +211,7 @@ Whitelisted types:
 | `Table` | `columns` (`{ key, label, width? }`), `rows` (arrays of strings), `border`, `selectedIndex` | rows ≤ 100 |
 | `ScrollBox` | `height`, `flexGrow` | wraps the body when a canvas is tall |
 | `Link` | `url` | one line |
-| `Markdown` | — | children: one string, ≤ 4 000 chars |
+| `Markdown` | — | children: one string, ≤ 2 000 chars |
 
 Composites, implemented by the plugin on top of the primitives (this is the "pinch"):
 
