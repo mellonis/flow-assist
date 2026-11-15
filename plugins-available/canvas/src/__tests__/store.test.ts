@@ -56,6 +56,18 @@ test('a non-selecting draw keeps the selection, and the first canvas still takes
   expect(selectedCanvas(store)?.id).toBe('c');
 });
 
+test('a non-selecting draw leaves the person\'s pending press; a selecting draw clears it', () => {
+  const store = createStore();
+  drawCanvas(store, { id: 'a', tree, stats });
+  store.pressed = 'a';
+  drawCanvas(store, { id: 'b', tree, stats, select: false });
+  expect(store.pressed).toBe('a');
+  expect(store.selectedId).toBe('a');
+  drawCanvas(store, { id: 'b', tree, stats });
+  expect(store.pressed).toBeNull();
+  expect(store.selectedId).toBe('b');
+});
+
 test('the press message carries the label and every value', () => {
   const store = createStore();
   const c = drawCanvas(store, { id: 'ci', owner: 'reviewer', tree, stats });

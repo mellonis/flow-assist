@@ -64,9 +64,10 @@ const collectDeclared = (node: Node): Record<string, TValue> => {
 // Draw a canvas, or replace it whole. A redraw keeps a bind's live value while
 // the declared value is unchanged; a changed one takes effect (a deliberate
 // prefill or reset); a vanished bind drops its value. `select: false` — a draw that
-// may not take the person's screen, a background agent's — keeps the selection it
-// found; with nothing selected yet the drawn canvas still takes it, because a surface
-// with canvases never sits with none selected.
+// may not take the person's screen, a background agent's — leaves the person's
+// interaction state alone: the selection it found (unless nothing is selected yet,
+// because a surface with canvases never sits with none selected) and the pending
+// `pressed` confirm of a delete.
 export function drawCanvas(store: TStore, input: { id: string; title?: string; owner?: string; tree: Node; stats: TStats; select?: boolean }): TCanvas {
   const declared = collectDeclared(input.tree);
   const existing = store.canvases.get(input.id);
@@ -88,7 +89,7 @@ export function drawCanvas(store: TStore, input: { id: string; title?: string; o
   };
   store.canvases.set(input.id, canvas);
   if (input.select !== false || store.selectedId === null) store.selectedId = input.id;
-  store.pressed = null;
+  if (input.select !== false) store.pressed = null;
   return canvas;
 }
 
