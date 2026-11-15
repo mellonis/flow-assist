@@ -130,7 +130,7 @@ test('the thinking header and a folded run of steps are fold lines', async () =>
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('It is Tuesday.'));
   await settle(6);
-  for (const needle of ['▸ thinking', 'check the clock']) {
+  for (const needle of ['▸ thought', 'check the clock']) {
     const p = at(ui, needle);
     expect(style(ui, p).underline).toBeFalsy();
     await move(ui, p);

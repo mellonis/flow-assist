@@ -133,7 +133,7 @@ test('thinking lands in the thinking fold, and its block goes back unchanged —
   ]);
   // The reasoning is folded under the answer, and opens with the details key.
   expect(ui.backend.lastFrame).toContain('It is noon.');
-  expect(ui.backend.lastFrame).toMatch(/▸ thinking/);
+  expect(ui.backend.lastFrame).toMatch(/▸ (?:thinking|thought)/);
   expect(ui.backend.lastFrame).not.toContain('The clock tool will know.');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
@@ -146,6 +146,45 @@ test('thinking lands in the thinking fold, and its block goes back unchanged —
   expect(ui.backend.lastFrame).toContain('Bye.');
 });
 
+test('a thought still being written reads thinking, and becomes thought once the turn moves on', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ thinking: 'The date first.', signature: 'sig-live' }, { hold: true }, { tool: 'datetime', args: {} }],
+    [{ text: 'It is noon.' }],
+  );
+  const ui = await boot(model, { thinking: { adaptive: true } });
+  await ask(ui, 'what time is it?');
+  await settleUntil(() => model.held);
+  await settle(10);
+  expect(ui.backend.lastFrame).toMatch(/▸ thinking/);
+  expect(ui.backend.lastFrame).not.toMatch(/▸ thought/);
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('It is noon.'));
+  await settle(10);
+  expect(ui.backend.lastFrame).toMatch(/▸ thought/);
+  expect(ui.backend.lastFrame).not.toMatch(/▸ thinking/);
+  ui.app.unmount();
+});
+
+test('each round keeps its own thinking block, in the order it happened', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ thinking: 'First I need the clock.', signature: 'sig-1' }, { tool: 'datetime', args: {} }],
+    [{ thinking: 'Now I can answer.', signature: 'sig-2' }, { text: 'It is noon.' }],
+  );
+  const ui = await boot(model, { thinking: { adaptive: true } });
+  await ask(ui, 'what time is it?');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  expect((ui.backend.lastFrame.match(/▸ (?:thinking|thought)/g) ?? []).length).toBe(2);
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('First I need the clock.');
+  expect(frame).toContain('Now I can answer.');
+  expect(frame.indexOf('First I need the clock.')).toBeLessThan(frame.indexOf('Now I can answer.'));
+});
+
 test('thinking that is not shown still goes back within the turn, and draws no empty fold', async () => {
   const model = new ScriptedModel();
   model.script([{ thinking: '', signature: 'sig-hidden' }, { tool: 'datetime', args: {} }], [{ text: 'Noon.' }]);
@@ -155,7 +194,7 @@ test('thinking that is not shown still goes back within the turn, and draws no e
   await settle(10);
   expect(sent(model, 1).messages[1]!.content[0]).toEqual({ type: 'thinking', thinking: '', signature: 'sig-hidden' });
   expect(ui.backend.lastFrame).toContain('Noon.');
-  expect(ui.backend.lastFrame).not.toMatch(/▸ thinking/);
+  expect(ui.backend.lastFrame).not.toMatch(/▸ (?:thinking|thought)/);
 });
 
 test('a fixed thinking budget that does not fit under ai.maxTokens is lowered, and the log says so', async () => {

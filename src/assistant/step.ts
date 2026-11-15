@@ -59,12 +59,26 @@ export function notesSaid(mode: NotesMode): string {
   return 'notes: step — each run of steps folds to one dim line where it happened';
 }
 
+// A reasoning summary that starts with a bolded title block — "**Checking the
+// clock**\n\n<body>" — keeps that title as disclosure metadata, so the header can
+// name the thought while its markdown body streams separately.
+export function reasoningSummary(text: string): { title: string | null; body: string } {
+  const content = text.trim();
+  const match = content.match(/^\*\*([^*\n]+)\*\*(?:\r?\n\r?\n|$)/);
+  if (!match) return { title: null, body: content };
+  return { title: match[1]!.trim(), body: content.slice(match[0].length).trimEnd() };
+}
+
 // ─── The parts of a turn ──────────────────────────────────────────────────────
 // A step's text as the model wrote it (the `Next:` token included — it is taken out
 // where it is drawn), the calls a round made (consecutive calls with nothing drawn
 // between them share one part), or a change a write reported.
 export interface CallRun { name: string; args?: unknown; write?: boolean; outcome: string; detail?: string; images?: ImageMark[] }
-export type TurnPart = { kind: 'text'; text: string } | { kind: 'tools'; runs: CallRun[] } | { kind: 'change'; change: ChangeView };
+export type TurnPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tools'; runs: CallRun[] }
+  | { kind: 'change'; change: ChangeView };
 
 // A call as a part keeps it: what the trail draws, never more — not the tool's whole
 // result, and not its arguments as written (a write_file's `content`, an edit's
@@ -106,6 +120,15 @@ export function addCalls(parts: readonly TurnPart[], runs: readonly CallRun[]): 
   return [...parts, { kind: 'tools', runs: [...runs] }];
 }
 
+// Reasoning added to a turn's parts: into the last part when it is reasoning too,
+// so a round's deltas stay one block; a second round is a block of its own.
+export function addReasoning(parts: readonly TurnPart[], delta: string): TurnPart[] {
+  if (!delta) return [...parts];
+  const last = parts.at(-1);
+  if (last?.kind === 'reasoning') return [...parts.slice(0, -1), { kind: 'reasoning', text: last.text + delta }];
+  return [...parts, { kind: 'reasoning', text: delta }];
+}
+
 // A round that went on to call a tool has ended: its text becomes a step. A round
 // that wrote nothing leaves no step — but when the calls before it were a step's own,
 // it leaves an empty one, so its calls are not taken for that step's (`addCalls` would
@@ -127,6 +150,7 @@ export function readParts(raw: unknown): TurnPart[] {
     if (!p || typeof p !== 'object') continue;
     const r = p as Record<string, unknown>;
     if (r.kind === 'text' && typeof r.text === 'string') out.push({ kind: 'text', text: r.text });
+    else if (r.kind === 'reasoning' && typeof r.text === 'string') out.push({ kind: 'reasoning', text: r.text });
     else if (r.kind === 'tools' && Array.isArray(r.runs)) {
       const runs = r.runs.map(callRun).filter((c): c is CallRun => c !== null);
       if (runs.length) out.push({ kind: 'tools', runs });
@@ -222,6 +246,7 @@ export function isPlanOnly(text: string): boolean {
 export interface StepCalls { n: number; runs: CallRun[] }
 export type TurnSegment =
   | { kind: 'run'; n: number; steps: string[]; calls: (StepCalls | null)[] }
+  | { kind: 'reasoning'; n: number; text: string }
   | { kind: 'tools'; n: number; runs: CallRun[] }
   | { kind: 'change'; change: ChangeView };
 
@@ -229,9 +254,20 @@ export function turnSegments(parts: readonly TurnPart[]): TurnSegment[] {
   const out: TurnSegment[] = [];
   let runs = 0;
   let calls = 0;
+  let thoughts = 0;
   // Whether the part just before was a step that drew something — its calls are its own.
   let afterStep = false;
   for (const p of parts) {
+    if (p.kind === 'reasoning') {
+      // A thought draws where it happened and ends a step's run: the calls after it
+      // are the next round's, not the step's. An empty one draws nothing and changes
+      // nothing — a session may hold one.
+      const text = p.text.trim();
+      if (!text) continue;
+      out.push({ kind: 'reasoning', n: thoughts++, text });
+      afterStep = false;
+      continue;
+    }
     if (p.kind === 'change') { out.push({ kind: 'change', change: p.change }); afterStep = false; continue; }
     if (p.kind === 'tools') {
       const last = out.at(-1);

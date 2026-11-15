@@ -49,6 +49,10 @@ test('a block that did not exist yet follows the global state', () => {
   expect(isOpen(allFolded(), foldId(7, 'view', 2))).toBe(false);
 });
 
+test('each reasoning block of a message has its own id', () => {
+  expect(foldId(3, 'reasoning', 2)).toBe('3:reasoning:2');
+});
+
 test('the blocks of one message are told apart, and so are two messages', () => {
   const ids = [foldId(0, 'thinking'), foldId(0, 'steps'), foldId(0, 'steps', 1), foldId(0, 'tools'), foldId(0, 'calls'), foldId(0, 'view'), foldId(0, 'view', 1), foldId(1, 'steps')];
   // A run keeps its number as the turn grows: an id never names another run later.
@@ -64,7 +68,7 @@ test('the state a click makes is a new object — the chat never mutates what it
 });
 
 test('a block a click opens may go to the pager — a run of steps, a group head and a trail\'s earlier calls may not', () => {
-  for (const kind of ['view', 'tools', 'thinking', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
+  for (const kind of ['view', 'tools', 'thinking', 'reasoning', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
   expect(pageable(foldId(3, 'steps', 1))).toBe(false);
   expect(pageable(foldId(3, 'group'))).toBe(false);
   expect(pageable(foldId(3, 'calls', 1))).toBe(false);

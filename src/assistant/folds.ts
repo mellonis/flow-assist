@@ -74,7 +74,7 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // always opens where it is, however tall. A group's head opens into one-line blocks of
 // its own, and the earlier calls of a trail belong to a trail that already fitted, so
 // both always open where they are too.
-const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'summary']);
+const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'reasoning', 'summary']);
 export function pageable(id: string): boolean {
   return PAGEABLE.has(id.split(':')[1] ?? '');
 }
@@ -100,7 +100,7 @@ export function openInFull(state: FoldState, id: string): FoldState {
 // capped to its last lines, `group` the head consecutive commands fold under
 // (src/assistant/view-groups.ts), `summary` what /compact's note holds under its one
 // separator row.
-export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'group' | 'summary';
+export type FoldKind = 'thinking' | 'reasoning' | 'steps' | 'tools' | 'calls' | 'view' | 'group' | 'summary';
 
 // A block's id. It names the message by its place in the conversation rather than by
 // its object: the chat REPLACES a message whenever it changes (that is what makes the
@@ -110,7 +110,7 @@ export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'grou
 // would otherwise move every id by one. A kind a message can hold several of (`view`,
 // `steps`, `tools`, `calls`) adds which one; the count only grows as a turn goes on,
 // so it never moves.
-const NUMBERED: ReadonlySet<FoldKind> = new Set(['view', 'steps', 'tools', 'calls']);
+const NUMBERED: ReadonlySet<FoldKind> = new Set(['view', 'reasoning', 'steps', 'tools', 'calls']);
 export function foldId(index: number, kind: FoldKind, n = 0): string {
   return NUMBERED.has(kind) ? `${index}:${kind}:${n}` : `${index}:${kind}`;
 }

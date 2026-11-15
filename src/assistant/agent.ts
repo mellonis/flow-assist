@@ -374,8 +374,10 @@ function clip(s: unknown, n = 6000): string {
 }
 
 // One round `POST {baseUrl}/chat/completions`. SSE chunks: `choices[0].delta.content`
-// — incremental text (calls onDelta); `choices[0].delta.reasoning_content` — the
-// model's "thinking" stream (calls onReasoning, not shown in the reply);
+// — incremental text (calls onDelta); the model's "thinking" stream (calls
+// onReasoning, not shown in the reply) — under `delta.reasoning_content`, the name
+// vLLM and SGLang use, or `delta.reasoning`, the name DeepSeek, OpenRouter and other
+// OpenAI-compatible servers use; the two never travel together, so either is read;
 // `choices[0].delta.tool_calls[i]` — function fragments (id/name/arguments split
 // across chunks, accumulated by index); `finish_reason: 'tool_calls'` returns the
 // accumulated list.
@@ -572,12 +574,17 @@ async function openAiRound(
       if (ch?.finish_reason) finishReason = ch.finish_reason;
       const delta = ch?.delta as {
         reasoning_content?: string;
+        reasoning?: string;
         content?: string;
         tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
       };
-      if (delta?.reasoning_content) {
-        reasoning += delta.reasoning_content;
-        onReasoning(delta.reasoning_content);
+      // The thinking stream, under whichever name the server puts it (see the round's
+      // comment above). A server that sends both in one chunk would otherwise have
+      // its thought said twice, so one is taken.
+      const thought = delta?.reasoning_content ?? delta?.reasoning;
+      if (thought) {
+        reasoning += thought;
+        onReasoning(thought);
       }
       if (delta?.content) {
         content += delta.content;

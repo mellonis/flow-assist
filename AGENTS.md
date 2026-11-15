@@ -2793,7 +2793,10 @@ itself, which is the one-shot prompt's path and serves a plugin that passes less
 spreads `llmOpts(config.ai)` into its call, and the start-up gate (`configWarnings`) checks the same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
 and the token variable to `ANTHROPIC_API_KEY`. In `agent.ts` the provider is looked at in
 exactly two places, `roundFor` (the round `agentChat` runs; a caller's own `chatRound`, a
-test's stub, wins) and `compactConversation`. **What the host keeps never changes shape**:
+test's stub, wins) and `compactConversation`. On the OpenAI wire a round's thinking
+arrives under `delta.reasoning_content` (vLLM, SGLang) or `delta.reasoning` (DeepSeek,
+OpenRouter and other compatible servers); either reaches `onReasoning`, and a chunk
+carrying both is said once. **What the host keeps never changes shape**:
 the conversation's `api` and the session stay OpenAI-shaped, and `anthropicRequest` converts on the way
 out, every request — system messages into the top-level `system`, `tool_calls` into
 `tool_use` blocks (arguments parsed; `{}` for any that do not), each run of tool results
@@ -3815,7 +3818,9 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   - A group's open state is DERIVED: open when its own id says so, or when a member
     was clicked open before the group formed around it, so a group never folds away
     what the person opened.
-  - The kinds (`FoldKind`): `thinking` (a message's reasoning), `steps` (one run of
+  - The kinds (`FoldKind`): `thinking` (a message's aggregate reasoning, what a session
+    with no reasoning parts holds), `reasoning` (one thought, numbered — a message may
+    hold several), `steps` (one run of
     steps — a message may hold several, numbered), `tools` / `calls` (one stretch of
     calls and its trail's cap, numbered together), `view` (a command's block,
     numbered), `group` (a group's head), `summary` (what /compact's note folds under its
@@ -3878,7 +3883,7 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     session is no answer arriving) and only while that turn's message is the LAST
     one, so a background result landing under an answer never trips it.
   - **A block taller than the conversation opens in the pager**, not into the
-    conversation. When a click would OPEN a `view`, `tools`, `thinking` or `summary`
+    conversation. When a click would OPEN a `view`, `tools`, `thinking`, `reasoning` or `summary`
     block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
     the pager shows it: laid out with `openInFull` (open, a trail's earlier-calls cap
     lifted) and a view at `VIEW_CAPS.lines`, only the block's own message laid out
@@ -4013,8 +4018,17 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     last line that could still grow into one (`N`, `Nex`…) is held back until it says
     what it is. The answer is left as written: `Next: restart the server` there is
     advice to the person.
-  - **The reasoning is a block of its own** (`foldId(at, 'thinking')`): a `▸ thinking`
-    header in `step` that a click or `^o` opens, always open in `open`.
+  - **The reasoning is a block of its own, where the model thought it**
+    (`foldId(at, 'reasoning', n)`): a turn keeps each round's thinking as an ordered
+    `{ kind: 'reasoning' }` part (`addReasoning` in `step.ts`), so two rounds that
+    thought are two blocks with the tool call between them, not one block lifted to the
+    top of the turn. In `step` each folds to a header a click or `^o` opens; in `open`
+    they are always open. The header is `thinking` while the turn is still running and
+    `thought` once it has moved on; a leading `**Title**` paragraph becomes the header's
+    name (`reasoningSummary`), and the pager's title is that same header. A session saved
+    by a host that kept reasoning only as one field holds no reasoning parts: its
+    aggregate `reasoning` draws once, in a `foldId(at, 'thinking')` block, above the
+    turn's parts.
   - **Round bookkeeping lives outside the state updaters.** Whether the round being
     streamed carries a call is a field of the conversation (`roundTools`), set by `onRoundKind`, read by
     `onLive` when it FIRES and handed to its updater, reset by `onLiveCommit`. The
@@ -4154,7 +4168,7 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     answer's text, while an underline is a look nothing else in the chat uses on its
     own. Which rows: a chat row with `foldLine` (set where the rows are built — a folded
     block's one row, the `▸ N tools` trail head, a folded run of steps and a group's
-    head, the thinking header, a command block's first row and its `… N lines cut`
+    head, a thought's header, a command block's first row and its `… N lines cut`
     row, `… N earlier calls`, the `/compact` summary's row); the body of an open block
     closes it on a click but never changes under the pointer. A fold line with hover on
     is drawn by `FoldLine` (`views/modals.ts`), its own component with flowtty's
