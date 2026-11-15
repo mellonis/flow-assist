@@ -7,14 +7,17 @@
 // reads a broken value. A plugin's sources import nothing from the host: `TUi` is the
 // shape of the `ui` it is handed, and the tests draw with a recording `h`.
 //
-// The interactive types (`input`, `check`, `select`, `button`) draw a static
-// placeholder: one dim line naming the control and its bind. The surface task wires
-// the values, the focus and the presses; nothing here keeps state or takes a handler.
+// The interactive types (`input`, `check`, `select`, `button`) are live controls: a
+// field takes its value from the canvas's map and reports edits through `ctx.onValue`,
+// a button presses through `ctx.onPress`, and a control is focused only while the
+// canvas holds the keys and carries its focus key. The renderer still keeps no state
+// of its own — the surface owns the values and the focus.
 import { bar, fit, percentText, taskGlyph, toneToken, type TTaskState } from './parts.ts';
 import type { Node } from './tree.ts';
+import type { TValue } from './store.ts';
 
-export type TUi = { h: (type: unknown, props?: Record<string, unknown>, ...children: unknown[]) => unknown; Box: unknown; Text: unknown; Markdown: unknown; Table: unknown; ScrollBox: unknown; Link: unknown };
-export type TRenderCtx = { ui: TUi; width: number; stringWidth: (s: string) => number; focusKey: string | null; hasKeyboard: boolean; values: Record<string, string | boolean>; onValue: (bind: string, value: string | boolean) => void; onPress: (label: string, action: string) => void; colors?: Record<string, string> };
+export type TUi = { h: (type: unknown, props?: Record<string, unknown>, ...children: unknown[]) => unknown; Box: unknown; Text: unknown; Markdown: unknown; Table: unknown; ScrollBox: unknown; Link: unknown; TextInput: unknown; Checkbox: unknown; Select: unknown };
+export type TRenderCtx = { ui: TUi; width: number; stringWidth: (s: string) => number; focusKey: string | null; hasKeyboard: boolean; values: Record<string, TValue>; onValue: (bind: string, value: TValue) => void; onPress: (label: string, action: string) => void; colors?: Record<string, string> };
 
 // The plugin's palette: the vocabulary's tones as the named colours flowtty paints in
 // (its own `Color` is a named colour or a literal, so a token like `ok` would be
@@ -68,6 +71,20 @@ const readNode = (node: Node): { type: string; props: TProps; children: Array<No
 // The item arrays of `rows` and `tasks`: the validator caps them at 100 and refuses a
 // broken shape, so a non-object here is dropped rather than drawn as a blank line.
 const itemsOf = (props: TProps): TProps[] => (Array.isArray(props.items) ? props.items : []).filter(isPlainObject);
+
+// A select's options as flowtty's items: the vocabulary's `{ value, label }` is
+// already that shape, so the broken entries are dropped and the rest normalised.
+const selectItems = (props: TProps): Array<{ value: string; label: string }> => {
+  const options = Array.isArray(props.options) ? props.options : [];
+  return options.filter(isPlainObject).map((option) => ({ value: str(option.value), label: str(option.label) }));
+};
+
+// A select's declared value: the `value` prop, else the first option's — the same
+// choice `store` makes when it seeds the canvas's map.
+const selectValue = (props: TProps, items: Array<{ value: string }>): string => {
+  const named = str(props.value);
+  return named !== '' ? named : items[0]?.value ?? '';
+};
 
 // The Text props, sanitised: a colour is a palette token painted through `paint`, the
 // flags are booleans, and `wrap` is flowtty's word wrap. `truncate` is cut here with
@@ -123,17 +140,9 @@ const tableProps = (props: TProps): TProps => {
   return out;
 };
 
-// A control as one dim line until the surface wires it: the type, the bind its value
-// lives under, its label, and the value the tree declares (or the placeholder).
-const controlLine = (type: string, props: TProps): string => {
-  const bind = str(props.bind);
-  const label = str(props.label);
-  const named = bind === '' ? '' : ` «${bind}»`;
-  if (type === 'button') return `▸ button${label === '' ? '' : ` ${label}`}`;
-  if (type === 'check') return `▸ check${named} ${props.value === true ? '[x]' : '[ ]'} ${label}`.trimEnd();
-  const shown = str(props.value) !== '' ? str(props.value) : str(props.placeholder);
-  return `▸ ${type}${named}${label === '' ? '' : ` ${label}`}${shown === '' ? '' : `: ${shown}`}`;
-};
+// The width an input takes when the tree names none: enough for a branch name and
+// still narrow enough to sit beside a checkbox and a button in a row.
+const FIELD_WIDTH = 24;
 
 export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
   const { ui } = ctx;
@@ -143,6 +152,9 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
   const colors = ctx.colors ?? TOKEN_COLOR;
   const paint = (tone: unknown): string => colors[toneToken(tone)] ?? TOKEN_COLOR.default;
   const dimLine = (line: string): unknown => ui.h(ui.Text, { dim: true }, fit(line, ctx.width, ctx.stringWidth));
+  // A control takes the focus only while the canvas holds the keys: a canvas drawn
+  // beside the chat never pulls the caret away from the prompt.
+  const focused = (key: string): boolean => ctx.hasKeyboard && ctx.focusKey === key;
 
   const draw = (child: Node | string): unknown => {
     if (typeof child === 'string') return ui.h(ui.Text, {}, child);
@@ -224,12 +236,59 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
         const head = label === '' ? '' : `─ ${fit(label, Math.max(0, width - 4), ctx.stringWidth)} `;
         return ui.h(ui.Text, { dim: true }, `${head}${'─'.repeat(Math.max(0, width - ctx.stringWidth(head)))}`);
       }
-      // The interactive types: a placeholder line, no state and no handler.
-      case 'input':
-      case 'check':
-      case 'select':
-      case 'button':
-        return dimLine(controlLine(type, props));
+      // The interactive types: a live control. Its value is the canvas's, which
+      // `drawCanvas` seeds with every bind; the tree's declared value is the fallback
+      // for a tree drawn straight through `toElement` (a unit test), where the map may
+      // be empty. A control is focused only while the canvas holds the keys and
+      // carries this node's focus key — a canvas without the keyboard never steals a
+      // caret, and the same focus key the surface's Tab cycle hands out is what draws
+      // the focus (see `focus.ts`).
+      case 'input': {
+        const bind = str(props.bind);
+        const live = ctx.values[bind];
+        return ui.h(ui.TextInput, {
+          frame: 'field',
+          width: props.width ?? FIELD_WIDTH,
+          value: typeof live === 'string' ? live : str(props.value),
+          onChange: (next: string) => ctx.onValue(bind, next),
+          isFocused: focused(bind),
+        });
+      }
+      case 'check': {
+        const bind = str(props.bind);
+        const live = ctx.values[bind];
+        return ui.h(ui.Checkbox, {
+          checked: typeof live === 'boolean' ? live : props.value === true,
+          label: str(props.label),
+          onChange: (next: boolean) => ctx.onValue(bind, next),
+          isFocused: focused(bind),
+        });
+      }
+      case 'select': {
+        const bind = str(props.bind);
+        const live = ctx.values[bind];
+        const items = selectItems(props);
+        const chosen = typeof live === 'string' ? live : selectValue(props, items);
+        // An empty choice is flowtty's "nothing chosen", which draws the placeholder
+        // rather than an empty field.
+        return ui.h(ui.Select, {
+          items,
+          value: chosen === '' ? undefined : chosen,
+          onChange: (next: string) => ctx.onValue(bind, next),
+          isFocused: focused(bind),
+        });
+      }
+      // A button draws as bold text in its tone; a click presses it, the way the
+      // keyboard path calls the same handler with the focus key's action.
+      case 'button': {
+        const label = str(props.label);
+        return ui.h(ui.Text, {
+          bold: true,
+          color: paint(props.tone),
+          selectable: false,
+          onClick: () => ctx.onPress(label, str(props.action)),
+        }, label);
+      }
       default:
         return dimLine(`▸ ${type}`);
     }

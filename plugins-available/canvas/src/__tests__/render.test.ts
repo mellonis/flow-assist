@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { TOKEN_COLOR, toElement, type TRenderCtx } from '../render.ts';
-import { TONE_TOKENS } from '../tree.ts';
+import { checkTree, TONE_TOKENS } from '../tree.ts';
 
 type T = { type: string; props: Record<string, unknown>; children: unknown[] };
 const h = (type: unknown, props: Record<string, unknown> = {}, ...children: unknown[]): T => ({ type: String(type), props, children });
-const ui = { h, Box: 'Box', Text: 'Text', Markdown: 'Markdown', Table: 'Table', ScrollBox: 'ScrollBox', Link: 'Link' };
+const ui = { h, Box: 'Box', Text: 'Text', Markdown: 'Markdown', Table: 'Table', ScrollBox: 'ScrollBox', Link: 'Link', TextInput: 'TextInput', Checkbox: 'Checkbox', Select: 'Select' };
 const ctx = (over: Partial<TRenderCtx> = {}): TRenderCtx => ({ ui, width: 80, stringWidth: (s) => s.length, focusKey: null, hasKeyboard: true, values: {}, onValue: () => {}, onPress: () => {}, ...over });
 
 test('Text keeps its props and resolves the colour through the palette', () => {
@@ -118,20 +118,102 @@ test('containers recurse, and Markdown keeps its one string', () => {
   expect(md.children).toEqual(['# hi']);
 });
 
-test('an interactive control is a dim placeholder naming it and its bind', () => {
-  const input = toElement(['input', { bind: 'branch', label: 'branch', value: 'feature-x' }], ctx()) as T;
-  const check = toElement(['check', { bind: 'watch', label: 'watch it', value: true }], ctx()) as T;
-  const select = toElement(['select', { bind: 'env', options: [{ value: 'dev', label: 'dev' }], value: 'dev' }], ctx()) as T;
-  const button = toElement(['button', { label: 'check again', action: 'check the pipeline' }], ctx()) as T;
-  for (const el of [input, check, select, button]) {
-    expect(el.type).toBe('Text');
-    expect(el.props).toEqual({ dim: true });
-  }
-  expect(JSON.stringify(input)).toContain('branch');
-  expect(JSON.stringify(input)).toContain('feature-x');
-  expect(JSON.stringify(check)).toContain('watch');
-  expect(JSON.stringify(select)).toContain('env');
-  expect(JSON.stringify(button)).toContain('check again');
+test('a field is focusable only when the canvas has the keys', () => {
+  const focused = toElement(['input', { bind: 'branch', value: 'main' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: true })) as T;
+  expect(focused.props.isFocused).toBe(true);
+  const muted = toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'branch', values: { branch: 'main' }, hasKeyboard: false })) as T;
+  expect(muted.props.isFocused).toBe(false);
+  const other = toElement(['input', { bind: 'branch' }], ctx({ focusKey: 'watch', values: { branch: 'main' } })) as T;
+  expect(other.props.isFocused).toBe(false);
+});
+
+test('a field reports an edit with its bind', () => {
+  const seen: Array<[string, unknown]> = [];
+  const el = toElement(['input', { bind: 'branch' }], ctx({ values: { branch: 'main' }, onValue: (bind, v) => seen.push([bind, v]) })) as T;
+  (el.props.onChange as (v: string) => void)('feature-x');
+  expect(seen).toEqual([['branch', 'feature-x']]);
+});
+
+test('a field takes its value from the canvas, falling back to the declared one', () => {
+  const live = toElement(['input', { bind: 'branch', value: 'main' }], ctx({ values: { branch: 'typed' } })) as T;
+  expect(live.type).toBe('TextInput');
+  expect(live.props.value).toBe('typed');
+  expect(live.props.frame).toBe('field');
+  expect(live.props.width).toBe(24);
+  const declared = toElement(['input', { bind: 'branch', value: 'main' }], ctx()) as T;
+  expect(declared.props.value).toBe('main');
+  const blank = toElement(['input', { bind: 'branch' }], ctx()) as T;
+  expect(blank.props.value).toBe('');
+  const wide = toElement(['input', { bind: 'branch', width: 40 }], ctx()) as T;
+  expect(wide.props.width).toBe(40);
+});
+
+test('a check shows its state, carries its label and reports a boolean', () => {
+  const seen: Array<[string, unknown]> = [];
+  const el = toElement(['check', { bind: 'watch', label: 'watch it' }], ctx({ values: { watch: true }, focusKey: 'watch', onValue: (bind, v) => seen.push([bind, v]) })) as T;
+  expect(el.type).toBe('Checkbox');
+  expect(el.props.checked).toBe(true);
+  expect(el.props.label).toBe('watch it');
+  expect(el.props.isFocused).toBe(true);
+  (el.props.onChange as (next: boolean) => void)(false);
+  expect(seen).toEqual([['watch', false]]);
+  const declared = toElement(['check', { bind: 'watch', label: 'watch it', value: true }], ctx()) as T;
+  expect(declared.props.checked).toBe(true);
+  const unchecked = toElement(['check', { bind: 'watch', label: 'watch it' }], ctx()) as T;
+  expect(unchecked.props.checked).toBe(false);
+});
+
+test('a select passes its options through and reports the picked value', () => {
+  const seen: Array<[string, unknown]> = [];
+  const options = [{ value: 'dev', label: 'development' }, { value: 'prod', label: 'production' }];
+  const el = toElement(['select', { bind: 'env', options, value: 'dev' }], ctx({ values: { env: 'prod' }, focusKey: 'env', onValue: (bind, v) => seen.push([bind, v]) })) as T;
+  expect(el.type).toBe('Select');
+  expect(el.props.items).toEqual(options);
+  expect(el.props.value).toBe('prod');
+  expect(el.props.isFocused).toBe(true);
+  (el.props.onChange as (v: string) => void)('dev');
+  expect(seen).toEqual([['env', 'dev']]);
+});
+
+test('a select with nothing chosen takes its first option, an empty bind asks for the placeholder', () => {
+  const options = [{ value: 'dev', label: 'development' }];
+  const first = toElement(['select', { bind: 'env', options }], ctx()) as T;
+  expect(first.props.value).toBe('dev');
+  const none = toElement(['select', { bind: 'env', options }], ctx({ values: { env: '' } })) as T;
+  expect(none.props.value).toBeUndefined();
+  const unlisted = toElement(['select', { bind: 'env', options }], ctx({ values: { env: 'stage' } })) as T;
+  expect(unlisted.props.value).toBe('stage');
+});
+
+test('a button presses through onClick and reports its action', () => {
+  const seen: Array<[string, string]> = [];
+  const el = toElement(['button', { label: 'check again', action: 'check it' }], ctx({ onPress: (label, action) => seen.push([label, action]) })) as T;
+  (el.props.onClick as () => void)();
+  expect(seen).toEqual([['check again', 'check it']]);
+});
+
+test('a button is bold in its tone, never selectable, and needs no focus key to press', () => {
+  const el = toElement(['button', { label: 'go', action: 'a', tone: 'error' }], ctx({ hasKeyboard: false })) as T;
+  expect(el.type).toBe('Text');
+  expect(el.props).toEqual({ bold: true, color: 'red', selectable: false, onClick: el.props.onClick });
+  expect(typeof el.props.onClick).toBe('function');
+  expect(el.props.isFocused).toBeUndefined();
+  expect(el.children).toEqual(['go']);
+});
+
+test('a validated tree of every interactive type still draws', () => {
+  const checked = checkTree(['Box', { flexDirection: 'column' },
+    ['input', { bind: 'branch', label: 'branch', value: 'main' }],
+    ['check', { bind: 'watch', label: 'watch it', value: true }],
+    ['select', { bind: 'env', options: [{ value: 'dev', label: 'dev' }] }],
+    ['button', { label: 'go', action: 'check it' }]]);
+  expect(checked.ok).toBe(true);
+  const el = toElement(checked.ok ? checked.tree : ['Text', {}], ctx({ focusKey: 'branch', values: { branch: 'typed', watch: false, env: 'dev' } })) as T;
+  const drawn = JSON.stringify(el);
+  expect(drawn).toContain('TextInput');
+  expect(drawn).toContain('Checkbox');
+  expect(drawn).toContain('Select');
+  expect(drawn).toContain('"isFocused":true');
 });
 
 test('every palette token the vocabulary names has a colour', () => {
