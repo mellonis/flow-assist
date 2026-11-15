@@ -159,3 +159,33 @@ test('the : line owns every key while it is open — the surface\'s keys wait fo
   await settle();
   expect(ui.backend.lastFrame).toContain('press x again to delete');
 });
+
+// ── Saved layouts (Task 9) ───────────────────────────────────────────────────
+// A recipe is a shape, not a canvas: one turn draws a layout, keeps it, deletes the
+// canvas, and draws the recipe under another id. The cache behind it is the host's own
+// (in memory under `bun test`); reuse across restarts is the cache's behaviour, not this
+// plugin's, and the host's own tests cover it.
+test('a layout is saved as a recipe and drawn again from it — the frame shows the recipe\'s text', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'canvas_draw', args: { canvas: 'ci', title: 'Pipelines',
+      tree: ['Box', { flexDirection: 'column' }, ['Text', {}, 'the recipe text'], ['input', { bind: 'branch', value: 'main' }]] } },
+     { tool: 'canvas_save', args: { canvas: 'ci', template: 'pipeline' } },
+     { tool: 'canvas_delete', args: { canvas: 'ci' } },
+     { tool: 'canvas_draw', args: { canvas: 'ci2', template: 'pipeline' } },
+     { tool: 'canvas_open', args: { canvas: 'ci2' } }],
+    [{ text: 'Kept.' }],
+  );
+  const ui = await boot(model);
+  await turn(ui, 'keep this layout');
+  await settleUntil(ui, () => ui.backend.lastFrame.includes('the recipe text'));
+  // The recipe carried the title, and the surface is up on the canvas drawn from it.
+  expect(ui.backend.lastFrame).toContain('canvas · «Pipelines»');
+  // The save's answer names the recipe with its scope, so the model reads where it went.
+  const toolTexts = model.requests.flatMap((request) => (request.messages as Array<{ role: string; content?: unknown }>)
+    .filter((message) => message.role === 'tool')
+    .map(msgText));
+  const saved = toolTexts.filter((text) => text.includes('saved «'));
+  expect(saved).toHaveLength(1);
+  expect(saved[0]!).toContain('pipeline');
+});

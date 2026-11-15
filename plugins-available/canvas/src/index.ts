@@ -14,12 +14,13 @@ import { buildGroup, SHOW_SCREEN, missingCanvas } from './tools.ts';
 import { TOKEN_COLOR } from './render.ts';
 import { canvasKeycaps, canvasPanel, canvasView, type TSurfaceApi } from './view.ts';
 import type { TStore } from './store.ts';
+import type { TCache } from './templates.ts';
 
 type Make = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
 type THost = {
   store: Record<string, unknown>;
   notify: () => void;
-  services: { showMessage?: (text: string) => void };
+  services?: { showMessage?: (text: string) => void; cache?: TCache };
   open?: (screen: string, params?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 };
 type TApi = { host: THost };
@@ -32,12 +33,21 @@ export default function buildCanvasPlugin({ config, make, z }: { config?: unknow
   // What the group asks the host to do. `host` arrives in `setup`, later than the
   // shape, so the deps resolve it when they are called, never when they are built.
   let host: THost | undefined;
+  // The host's cache, read at call time: `host` arrives in `setup`, after the group is
+  // built, and a flush or a config change is the host's business the plugin never sees.
+  // Without a host — a shape test — it reads as the cache being off.
+  const cache: TCache = {
+    get: (ns, key) => host?.services?.cache?.get(ns, key),
+    set: (ns, key, value, ttl) => { host?.services?.cache?.set(ns, key, value, ttl); },
+    enabled: () => host?.services?.cache?.enabled() ?? false,
+  };
   const group = buildGroup({
     store,
     now,
     notify: () => host?.notify(),
-    note: (text) => host?.services.showMessage?.(text),
+    note: (text) => host?.services?.showMessage?.(text),
     open: (screen, params) => host?.open?.(screen, params),
+    cache,
   });
 
   // The screen the navigation tools open: it selects the canvas it was given and

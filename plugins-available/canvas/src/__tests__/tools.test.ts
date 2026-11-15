@@ -2,10 +2,23 @@ import { expect, test } from 'bun:test';
 import { buildGroup } from '../tools.ts';
 import { createStore } from '../store.ts';
 
+// The cache as the host's own behaves: `get` answers undefined for what it does not
+// hold, a set without a ttl keeps the entry, and only `enabled` can turn it off.
+const fakeCache = (enabled = true) => {
+  const map = new Map<string, unknown>();
+  return {
+    map,
+    get: (ns: string, key: string) => map.get(`${ns}/${key}`),
+    set: (ns: string, key: string, value: unknown) => { map.set(`${ns}/${key}`, value); },
+    enabled: () => enabled,
+  };
+};
+
 const deps = (over: Partial<Parameters<typeof buildGroup>[0]> = {}) => {
   const store = createStore(() => 5_000);
   const notes: string[] = [];
-  return { store, notes, group: buildGroup({ store, now: () => 5_000, notify: () => {}, note: (t) => notes.push(t), open: async () => ({ ok: true, text: 'opened' }), ...over }) };
+  const cache = fakeCache();
+  return { store, notes, cache, group: buildGroup({ store, now: () => 5_000, notify: () => {}, note: (t) => notes.push(t), open: async () => ({ ok: true, text: 'opened' }), cache, ...over }) };
 };
 
 test('canvas_draw validates, stores, and answers with counts and side state', async () => {
@@ -114,6 +127,34 @@ test('a background draw on a registry with nothing selected still selects what i
   const { group, store } = deps();
   await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});
   expect(store.selectedId).toBe('a');
+});
+
+test('canvas_save keeps the drawn layout; canvas_draw from that template draws it again', async () => {
+  const { group, store } = deps({ project: () => '/w/a' });
+  await group.exec('canvas_draw', { canvas: 'ci', title: 'Pipelines', tree: ['Box', {}, ['Text', {}, 'one']] }, {});
+  expect(await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, {})).toContain('project:/w/a/pipeline');
+  await group.exec('canvas_delete', { canvas: 'ci' }, {});
+  const out = await group.exec('canvas_draw', { canvas: 'ci2', template: 'pipeline' }, {});
+  expect(out).toContain('«ci2»');
+  expect(JSON.stringify(store.canvases.get('ci2')!.tree)).toContain('one');
+  expect(store.canvases.get('ci2')!.title).toBe('Pipelines');
+});
+
+test('a missing template is refused; the canvas is not created', async () => {
+  const { group, store } = deps();
+  const out = await group.exec('canvas_draw', { canvas: 'ci', template: 'nope' }, {});
+  expect(out).toContain('no template');
+  expect(store.canvases.size).toBe(0);
+});
+
+test('a tree sent beside a template is drawn, and the template supplies the title', async () => {
+  const { group, store } = deps({ project: () => '/w/a' });
+  await group.exec('canvas_draw', { canvas: 'ci', title: 'Pipelines', tree: ['Box', {}, ['Text', {}, 'old']] }, {});
+  await group.exec('canvas_save', { canvas: 'ci', template: 'pipeline' }, {});
+  const out = await group.exec('canvas_draw', { canvas: 'ci', template: 'pipeline', tree: ['Box', {}, ['Text', {}, 'today']] }, {});
+  expect(out).toContain('«ci»');
+  expect(JSON.stringify(store.canvases.get('ci')!.tree)).toContain('today');
+  expect(store.canvases.get('ci')!.title).toBe('Pipelines');
 });
 
 test('a draw while the surface is down says one line; a draw while it is up says nothing', async () => {
