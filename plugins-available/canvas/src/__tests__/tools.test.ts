@@ -250,6 +250,15 @@ test('the group text names recipes — the model learns the reuse path from it',
   expect(group.description).toContain('template');
 });
 
+test('the group text forbids credentials — a canvas is never a leak path', () => {
+  const { group } = deps();
+  // The design's one mitigation for its leak anti-goal: the model is told the person
+  // sees what it draws. Pinned so a later edit of the vocabulary cannot drop it quietly.
+  expect(group.description).toContain('never put a password, token or key in a canvas');
+  const drawTool = group.tools.find((tool) => tool.function.name === 'canvas_draw');
+  expect(drawTool?.function.description).toContain('Never put a password, token or key');
+});
+
 test('a draw while the surface is down says one line; a draw while it is up says nothing', async () => {
   const { group, store, notes } = deps();
   await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});

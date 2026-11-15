@@ -102,6 +102,7 @@ const tabLine = (store: TStore, width: number, stringWidth: (text: string) => nu
 // the one that opens the person's side and closes it again (`keys.canvas`, whose cap
 // `host.keyCap('canvas')` draws). It toggles whether the surface is up; the surface
 // itself appears only while there is a canvas to show.
+
 export function canvasPanel(api: TSurfaceApi, store: TStore): () => unknown {
   const { host } = api;
   return function CanvasPanel() {
@@ -113,6 +114,11 @@ export function canvasPanel(api: TSurfaceApi, store: TStore): () => unknown {
       handler: (key: TInputKey) => {
         const binding = host.keys?.canvas ?? [];
         if (!binding.includes(keyIdOf(key))) return false;
+        // With nothing drawn the key changes nothing (the README's promise): it is
+        // consumed so it does not fall through to another handler, but the flag stays
+        // down. Flipped over an empty registry it would leave `personOpened` stale —
+        // suppressing the next background draw's toast and mounting the surface unasked.
+        if (store.canvases.size === 0) return true;
         store.personOpened = !store.personOpened;
         host.notify();
         return true;

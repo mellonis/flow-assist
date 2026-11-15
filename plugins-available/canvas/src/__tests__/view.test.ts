@@ -1,10 +1,11 @@
 // The surface's contracts the e2e cannot pin: `canvasView` registers its input handler
 // on EVERY render — the no-canvas guard must not skip a hook, or two renders' hook
 // counts fall out of step (Rules of Hooks, reachable when a delete empties the registry
-// mid-life); the handler yields every key while the `:` line is open; and a press arms
-// the footer's `press queued` only when the host actually took the message.
+// mid-life); the handler yields every key while the `:` line is open; a press arms the
+// footer's `press queued` only when the host actually took the message; and the panel
+// key leaves `personOpened` alone while there is no canvas to show.
 import { expect, test } from 'bun:test';
-import { canvasView, type TSurfaceApi } from '../view.ts';
+import { canvasPanel, canvasView, type TSurfaceApi } from '../view.ts';
 import { checkTree } from '../tree.ts';
 import { deleteCanvas, drawCanvas, createStore, type TStore } from '../store.ts';
 
@@ -123,4 +124,48 @@ test('a press arms `pressed` and posts only when the host carries postToChat', (
   silent.press({ name: 'return' });
   expect(bare.pressed).toBeNull();
   expect(silent.notifies()).toBe(0);
+});
+
+// The panel's harness: `canvasPanel` registers one handler and holds nothing else, so
+// the host is all it needs. Same direct-call shape as the surface's.
+const panelOf = (store: TStore): { press: (key: TKey) => unknown; notifies: () => number } => {
+  const registered: TOpts[] = [];
+  let notifies = 0;
+  const host = {
+    useInputHandler: (opts: TOpts) => { registered.push(opts); },
+    notify: () => { notifies++; },
+    keys: { canvas: ['C'] },
+  };
+  const Panel = canvasPanel({ host } as unknown as TSurfaceApi, store);
+  Panel();
+  return {
+    press: (key: TKey) => registered[registered.length - 1]!.handler(key, {}),
+    notifies: () => notifies,
+  };
+};
+
+test('the panel key changes nothing over an empty registry', () => {
+  const store = createStore();
+  const panel = panelOf(store);
+  // Consumed, so it cannot fall through to another handler, but nothing is flipped: a
+  // `personOpened` left `true` over zero canvases would suppress the next background
+  // draw's toast and mount the surface the person did not ask for.
+  expect(panel.press({ name: 'C' })).toBe(true);
+  expect(store.personOpened).toBe(false);
+  expect(panel.notifies()).toBe(0);
+});
+
+test('the panel key toggles the person side once a canvas is drawn, and yields other keys', () => {
+  const store = createStore();
+  drawOne(store);
+  const panel = panelOf(store);
+  expect(panel.press({ name: 'C' })).toBe(true);
+  expect(store.personOpened).toBe(true);
+  expect(panel.notifies()).toBe(1);
+  expect(panel.press({ name: 'C' })).toBe(true);
+  expect(store.personOpened).toBe(false);
+  expect(panel.notifies()).toBe(2);
+  // Not the binding: yielded, never consumed.
+  expect(panel.press({ name: 'z' })).toBe(false);
+  expect(store.personOpened).toBe(false);
 });

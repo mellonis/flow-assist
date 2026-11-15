@@ -6,15 +6,21 @@
 import { expect, test } from 'bun:test';
 import { canonicalBinding, keyId } from '../playback/keys';
 import { canvasPanel, keyIdOf } from '../../plugins-available/canvas/src/view.ts';
-import { createStore, type TStore } from '../../plugins-available/canvas/src/store.ts';
+import { createStore, drawCanvas, type TStore } from '../../plugins-available/canvas/src/store.ts';
+import { checkTree } from '../../plugins-available/canvas/src/tree.ts';
 
 type TKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean };
 type TPanelOpts = { mode?: string; priority: (ui: unknown) => number; handler: (key: TKey, ui: unknown) => unknown };
 
 // The panel's component with its input handler captured: the host shape it reads is
-// just `useInputHandler`, `keys` and `notify`.
+// just `useInputHandler`, `keys` and `notify`. A canvas is drawn first — over an empty
+// registry the key is consumed and changes nothing (view.test pins that branch), so the
+// toggle is only observable while there is one to open.
 const panelOf = (binding: string[]): { press: (key: TKey) => unknown; store: TStore } => {
   const store = createStore();
+  const checked = checkTree(['Text', {}, 'x']);
+  if (!checked.ok) throw new Error(checked.error);
+  drawCanvas(store, { id: 'ci', tree: checked.tree, stats: checked.stats });
   let held: TPanelOpts['handler'] | null = null;
   const host = {
     useInputHandler: (opts: TPanelOpts) => { held = opts.handler; },

@@ -59,7 +59,10 @@ group's tools. The types: `Box`, `Text`, `Markdown`, `Table`, `ScrollBox`, `Link
 composites `progress`, `badge`, `rows`, `tasks`, `rule`, and the live controls `input`,
 `check`, `select`, `button`. A tree that names a type or a prop outside it, a literal
 colour or a broken shape is refused with one message naming what was wrong — up to three
-problems, then a count — and the canvas you are looking at is left as it was.
+problems, then a count — and the canvas you are looking at is left as it was. The same
+text tells the assistant what a canvas must never carry: a password, a token or a key —
+you would see it and it comes back in the assistant's screen context, so it names the
+secret instead (`the token from glab`).
 
 The caps, enforced before anything is drawn: 400 nodes, depth 8, 100 children per node,
 2000 characters of text, 200 characters per value, 40 live controls, 64 KB of tree. A

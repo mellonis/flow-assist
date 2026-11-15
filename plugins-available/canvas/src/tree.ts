@@ -341,6 +341,7 @@ select: bind, label?, options ({value, label}[]), value?
 button: label, action, tone?
 caps: ≤ 400 nodes · depth ≤ 8 · ≤ 100 children per node · ≤ 2000 chars of text · ≤ 200 chars per value · ≤ 40 interactive nodes · ≤ 64 KB serialized
 binds: one per control, non-empty, unique within the canvas, never starting with btn:
+secrets: never put a password, token or key in a canvas — the person sees it and it travels to the model's context; name it instead, «the token from glab»
 recipes: canvas_save keeps a drawn layout under a name; canvas_draw with template draws it again — canvas_templates lists them
 palette tokens: ok, warn, error, accent, dim, muted, default
 example — a GitLab pipeline:
