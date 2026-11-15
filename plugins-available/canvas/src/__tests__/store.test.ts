@@ -46,6 +46,16 @@ test('two canvases coexist and select moves between them', () => {
   expect(selectCanvas(store, 'nope')).toBe(false);
 });
 
+test('a non-selecting draw keeps the selection, and the first canvas still takes it', () => {
+  const store = createStore();
+  drawCanvas(store, { id: 'a', tree, stats, select: false });
+  expect(selectedCanvas(store)?.id).toBe('a');
+  drawCanvas(store, { id: 'b', tree, stats, select: false });
+  expect(selectedCanvas(store)?.id).toBe('a');
+  drawCanvas(store, { id: 'c', tree, stats });
+  expect(selectedCanvas(store)?.id).toBe('c');
+});
+
 test('the press message carries the label and every value', () => {
   const store = createStore();
   const c = drawCanvas(store, { id: 'ci', owner: 'reviewer', tree, stats });

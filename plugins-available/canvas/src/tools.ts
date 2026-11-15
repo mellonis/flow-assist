@@ -11,8 +11,8 @@
 // types, their props, the caps, the palette, one example. Tool descriptions stay short
 // and point at it.
 import { checkTree, VOCABULARY } from './tree.ts';
-import { deleteCanvas, drawCanvas, selectCanvas } from './store.ts';
-import type { TCanvas, TStore } from './store.ts';
+import { canvasLine, deleteCanvas, drawCanvas, selectCanvas } from './store.ts';
+import type { TStore } from './store.ts';
 
 export type TToolsDeps = {
   store: TStore;
@@ -27,36 +27,6 @@ export type TToolsDeps = {
 // draws it; the tools only ask.
 export const SHOW_SCREEN = 'show';
 
-const SECOND_MS = 1000;
-const MINUTE_MS = 60 * SECOND_MS;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
-
-// An age as the model reads it — the same units and floor as the context's items, so
-// the list and what the person sees never disagree about how old a canvas is.
-const age = (ms: number): string => {
-  if (ms < SECOND_MS) return 'now';
-  if (ms < MINUTE_MS) return `${Math.floor(ms / SECOND_MS)}s`;
-  if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}m`;
-  if (ms < DAY_MS) return `${Math.floor(ms / HOUR_MS)}h`;
-  return `${Math.floor(ms / DAY_MS)}d`;
-};
-
-const side = (store: TStore): string => store.personOpened ? 'side up' : 'side down';
-
-// A canvas as a list line: id, title, owner, age, node count and whether the person's
-// side is up — the shape the context's items use, for EVERY canvas. `registryItems`
-// caps at ten because the chat's context budget is shared with every other plugin; a
-// tool's answer is not that budget, and `canvas_list` is how a session finds a canvas
-// it did not draw.
-const canvasLine = (store: TStore, canvas: TCanvas, now: number): string => {
-  const parts: string[] = [`«${canvas.id}»`];
-  if (canvas.title !== '') parts.push(canvas.title);
-  if (canvas.owner !== '') parts.push(canvas.owner);
-  parts.push(`${age(now - canvas.updatedAt)} old`, `${canvas.stats.nodes} nodes`, side(store));
-  return parts.join(' · ');
-};
-
 // The canvas a call names: a non-empty string, trimmed. Anything else names nothing.
 const canvasOf = (raw: unknown): string => typeof raw === 'string' ? raw.trim() : '';
 
@@ -66,8 +36,16 @@ const labelOf = (raw: unknown): string | undefined => typeof raw === 'string' &&
 // A canvas nobody drew, said the same way by a tool and by the screen's own refusal.
 export const missingCanvas = (id: string): string => `no canvas «${id}» — canvas_list names the ones there are`;
 
+// Whether the call may take the person's screen. The host hands `askUser` to a session
+// only: a task, a subagent and a one-shot turn get none (the host's turn shapes,
+// src/assistant/conversation-turn.ts), so a ctx carrying it is a session's and a draw
+// from one is the person's own. Best effort by design — a caller with a bare ctx reads
+// as background work, and the only cost is that its draw keeps the selection.
+const selectsScreen = (ctx: unknown): boolean =>
+  typeof (ctx as { askUser?: unknown } | null | undefined)?.askUser === 'function';
+
 export function buildGroup(deps: TToolsDeps) {
-  const draw = (args: Record<string, unknown>): string => {
+  const draw = (args: Record<string, unknown>, ctx: unknown): string => {
     const id = canvasOf(args.canvas);
     if (!id) return 'not drawn: name the canvas — canvas is its id, a short word like ci';
     if (args.tree === undefined) return `not drawn: canvas «${id}» needs a tree — [type, props?, ...children]; the group text has the vocabulary and an example`;
@@ -83,11 +61,14 @@ export function buildGroup(deps: TToolsDeps) {
       ...(owner === undefined ? {} : { owner }),
       tree: checked.tree,
       stats: checked.stats,
+      // A background agent's draw must not yank the person off the canvas they read.
+      select: selectsScreen(ctx),
     });
     deps.notify();
     // The person may be in the chat or another session: one line says the canvas moved.
     if (!deps.store.personOpened) deps.note(`canvas «${id}» updated`);
-    return `drew canvas «${id}» (${canvas.stats.nodes} nodes) — ${side(deps.store)}`;
+    const where = deps.store.personOpened ? 'side up' : 'side down';
+    return `drew canvas «${id}» (${canvas.stats.nodes} nodes) — ${where}`;
   };
 
   const list = (): string => {
@@ -197,8 +178,8 @@ export function buildGroup(deps: TToolsDeps) {
         },
       },
     ],
-    exec: async (name: string, args: Record<string, unknown>, _ctx: unknown): Promise<string> => {
-      if (name === 'canvas_draw') return draw(args);
+    exec: async (name: string, args: Record<string, unknown>, ctx: unknown): Promise<string> => {
+      if (name === 'canvas_draw') return draw(args, ctx);
       if (name === 'canvas_list') return list();
       if (name === 'canvas_delete') return remove(args);
       if (name === 'canvas_focus') return focus(args);

@@ -24,4 +24,7 @@ test('the model draws a canvas with a read tool; the answer names it and the con
   // the next request carries what the person sees
   const tail = String((model.requests.at(-1) as { messages: Array<{ role: string; content?: unknown }> }).messages.at(-1)?.content ?? '');
   expect(tail).toContain('Pipelines');
+  // The selected canvas's outline travels with the context, and a badge's text is only
+  // in the outline — so this also says the draw carried `askUser` and took the selection.
+  expect(tail).toContain('badge failed');
 });

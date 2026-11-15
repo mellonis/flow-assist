@@ -62,6 +62,29 @@ test('canvas_open asks the host for the same screen; a canvas nobody drew opens 
   expect(asked).toHaveLength(1);
 });
 
+test('a draw from a session — a ctx with askUser — takes the person\'s screen', async () => {
+  const { group, store } = deps();
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});
+  await group.exec('canvas_draw', { canvas: 'b', tree: ['Text', {}, 'y'] }, { askUser: async () => ({ answers: [], cancelled: true }) });
+  expect(store.selectedId).toBe('b');
+});
+
+test('a draw with no askUser in its ctx — background work — leaves the person\'s selection alone', async () => {
+  const { group, store } = deps();
+  const session = { askUser: async () => ({ answers: [], cancelled: true }) };
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, session);
+  const out = await group.exec('canvas_draw', { canvas: 'b', tree: ['Text', {}, 'y'] }, {});
+  expect(out).toContain('«b»');
+  expect(store.selectedId).toBe('a');
+  expect(store.canvases.get('b')!.tree[2]).toBe('y');
+});
+
+test('a background draw on a registry with nothing selected still selects what it drew', async () => {
+  const { group, store } = deps();
+  await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});
+  expect(store.selectedId).toBe('a');
+});
+
 test('a draw while the surface is down says one line; a draw while it is up says nothing', async () => {
   const { group, store, notes } = deps();
   await group.exec('canvas_draw', { canvas: 'a', tree: ['Text', {}, 'x'] }, {});

@@ -63,8 +63,11 @@ const collectDeclared = (node: Node): Record<string, TValue> => {
 
 // Draw a canvas, or replace it whole. A redraw keeps a bind's live value while
 // the declared value is unchanged; a changed one takes effect (a deliberate
-// prefill or reset); a vanished bind drops its value.
-export function drawCanvas(store: TStore, input: { id: string; title?: string; owner?: string; tree: Node; stats: TStats }): TCanvas {
+// prefill or reset); a vanished bind drops its value. `select: false` — a draw that
+// may not take the person's screen, a background agent's — keeps the selection it
+// found; with nothing selected yet the drawn canvas still takes it, because a surface
+// with canvases never sits with none selected.
+export function drawCanvas(store: TStore, input: { id: string; title?: string; owner?: string; tree: Node; stats: TStats; select?: boolean }): TCanvas {
   const declared = collectDeclared(input.tree);
   const existing = store.canvases.get(input.id);
   const values: Record<string, TValue> = {};
@@ -84,7 +87,7 @@ export function drawCanvas(store: TStore, input: { id: string; title?: string; o
     stats: input.stats,
   };
   store.canvases.set(input.id, canvas);
-  store.selectedId = input.id;
+  if (input.select !== false || store.selectedId === null) store.selectedId = input.id;
   store.pressed = null;
   return canvas;
 }
@@ -147,6 +150,19 @@ const formatAge = (ms: number): string => {
 
 const REGISTRY_MAX_ITEMS = 10;
 
+// One canvas as the model reads it in a line: id, title, owner, age, node count, and
+// whether the plugin's side is up. `registryItems` is the chat context's capped list of
+// these lines; the `canvas_list` tool answers with every one of them, uncapped.
+export function canvasLine(store: TStore, canvas: TCanvas, now: number): string {
+  const parts: string[] = [`«${canvas.id}»`];
+  if (canvas.title !== '') parts.push(canvas.title);
+  if (canvas.owner !== '') parts.push(canvas.owner);
+  parts.push(`${formatAge(now - canvas.updatedAt)} old`);
+  parts.push(`${canvas.stats.nodes} nodes`);
+  parts.push(store.personOpened ? 'side up' : 'side down');
+  return parts.join(' · ');
+}
+
 // One chat-context item per canvas, in draw order: id, title, owner, age, node
 // count, and whether the plugin's side is up. The list stays within ten items —
 // the design's cap, the host's context budget being shared with every other
@@ -157,13 +173,7 @@ export function registryItems(store: TStore, now: () => number): Array<{ label: 
   const shown = canvases.length > REGISTRY_MAX_ITEMS ? REGISTRY_MAX_ITEMS - 1 : canvases.length;
   const items: Array<{ label: string; text: string }> = [];
   for (const c of canvases.slice(0, shown)) {
-    const parts: string[] = [`«${c.id}»`];
-    if (c.title !== '') parts.push(c.title);
-    if (c.owner !== '') parts.push(c.owner);
-    parts.push(`${formatAge(now() - c.updatedAt)} old`);
-    parts.push(`${c.stats.nodes} nodes`);
-    parts.push(store.personOpened ? 'side up' : 'side down');
-    items.push({ label: `Canvas: «${c.id}»`, text: parts.join(' · ') });
+    items.push({ label: `Canvas: «${c.id}»`, text: canvasLine(store, c, now()) });
   }
   if (canvases.length > REGISTRY_MAX_ITEMS) items.push({ label: 'Canvas', text: `… ${canvases.length - shown} more` });
   return items;
