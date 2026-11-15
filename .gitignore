@@ -23,8 +23,9 @@ plugins-enabled/
 # macOS
 .DS_Store
 # Plugins that live in their own repositories are dropped in here and stay
-# untracked; only the bundled tool-group plugins are part of this repo.
+# untracked; only the bundled plugins are part of this repo.
 /plugins-available/*
 !/plugins-available/gitlab/
 !/plugins-available/repo/
 !/plugins-available/mcp/
+!/plugins-available/canvas/
