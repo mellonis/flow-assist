@@ -110,6 +110,13 @@ export interface HostServices {
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
   // `ui.overlay` and re-renders. Generic — the tracker uses it for its detail view.
   setOverlay: (overlay: string | null) => void;
+  // Puts a message into the chat from OUTSIDE the conversation — a plugin's press, a
+  // background item — into the session whose work it is, framed as a plugin item (never
+  // as the person's words). It never interrupts a running turn: what is posted lands
+  // when the turn ends and starts the follow-up turn there (`Conversation.deliver`).
+  // The default is a no-op; the App rebinds it (app.tsx) over the chat's own `post`
+  // (src/plugins/assistant.ts), so every plugin's `host.services` view sees it.
+  postToChat: (text: string) => void;
   // What an armed Ctrl+C / Ctrl+D / Ctrl+Z says (`^c again to exit`), '' when none is
   // armed. The App owns the arm (src/runtime/exit-keys.ts); the chat draws it on its
   // status line, the App on the bottom row of every other screen.
@@ -254,6 +261,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     suspend: async (fn) => fn(),
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
+    postToChat: () => {},
     armedHint: '',
     chatDock: null,
     hostKeys: () => ({ panel: false, line: false }),
