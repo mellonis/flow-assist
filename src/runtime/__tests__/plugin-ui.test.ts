@@ -6,6 +6,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { stringWidth } from '@flowtty/core';
+import * as flowtty from '@flowtty/react';
 import { makePluginUi } from '../plugin-ui.js';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -45,4 +46,41 @@ test('ui.stringWidth is @flowtty/core\'s own, measuring by grapheme cluster', ()
   expect(ui.stringWidth('\u{1F468}‍\u{1F469}‍\u{1F467}')).toBe(2);
   expect(ui.stringWidth('✅ done')).toBe(7);
   expect(ui.stringWidth('漢字')).toBe(4);
+});
+
+// The components a plugin draws a state with, and the ones a plugin's own surface needs
+// (a press, a focus group, a form), are flowtty's own — passed through, never copied.
+// A copy would drift from the host's rendering, and a second React copy breaks every
+// hook (the guide's first rule about `ui`).
+test('ui carries flowtty\'s own widgets and hooks, not copies', () => {
+  const ui = makePluginUi() as unknown as Record<string, unknown>;
+  const own = flowtty as unknown as Record<string, unknown>;
+  const members = [
+    // A state the person watches while a turn runs.
+    'Spinner', 'Shimmer', 'ProgressBar', 'TaskList', 'useTicker',
+    // Text a plugin's own layout is made of.
+    'Span', 'Title', 'HRule', 'HelpBar',
+    // The widgets whose keys a plugin gates itself.
+    'TextArea', 'Button', 'ScrollList',
+    // A surface's own focus and its clicks.
+    'FocusGroup', 'useFocus', 'useClick', 'useHover',
+    // A form over fields the plugin declares.
+    'Form', 'useField', 'Confirm',
+  ];
+  for (const name of members) {
+    expect(own[name]).toBeDefined();
+    expect(`${name}:${typeof ui[name]}`).toBe(`${name}:${typeof own[name]}`);
+    expect(ui[name]).toBe(own[name]);
+  }
+});
+
+// The guide's promise that a plugin's surface can be made deaf in one move: `Box inert`
+// is flowtty's own input layer, and a plugin that owns no keyboard writes it once
+// instead of gating every control. Nothing tests the behaviour here — the host's
+// `hasKeyboard()` is not flowtyt's — but the recipe must be written down where a person
+// building a plugin reads it.
+test('the guide names `<Box inert>` as how a plugin goes deaf when the chat has the keys', () => {
+  const doc = read('../../../docs/plugins.md');
+  const section = doc.slice(doc.indexOf('## What a plugin is given'), doc.indexOf('## Commands, keys and the footer'));
+  expect(section).toContain('inert');
 });

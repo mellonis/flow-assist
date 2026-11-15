@@ -2,7 +2,7 @@
 // React and flowtty ship, passed through unchanged. The App calls this once, so every
 // plugin of an App holds the same object.
 
-import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, TextInput, useInput } from '@flowtty/react';
+import { Box, Text, Span, Markdown, Title, HRule, HelpBar, Table, Link, ScrollBox, ScrollList, Select, ListSelect, ListMultiSelect, Checkbox, TextInput, TextArea, Button, Confirm, Form, FocusGroup, Spinner, Shimmer, ProgressBar, TaskList, useInput, useTicker, useFocus, useField, useClick, useHover } from '@flowtty/react';
 import { isPrintable, stringWidth } from '@flowtty/core';
 import { Fragment, createElement as h, useEffect, useRef, useState } from 'react';
 import type { PluginUi } from './plugin-api.js';
@@ -15,15 +15,34 @@ export function makePluginUi(): PluginUi {
     useRef,
     Box,
     Text,
+    Span,
     Markdown,
+    Title,
+    HRule,
+    HelpBar,
     Table,
     Link,
     ScrollBox,
+    ScrollList,
     Select,
     ListSelect,
     ListMultiSelect,
     Checkbox,
     TextInput,
+    TextArea,
+    Button,
+    Confirm,
+    Form,
+    FocusGroup,
+    Spinner,
+    Shimmer,
+    ProgressBar,
+    TaskList,
+    useFocus,
+    useField,
+    useClick,
+    useHover,
+    useTicker,
     Fragment,
     isPrintable: isPrintable as unknown as PluginUi['isPrintable'],
     stringWidth,

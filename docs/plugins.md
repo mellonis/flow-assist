@@ -368,17 +368,31 @@ object with two parts:
 | `ui` | `host` |
 |---|---|
 | `h`, `useState`, `useEffect`, `useRef`, `Fragment` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `postToChat`, `cache`, …) with the plugin's own under them |
-| `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
-| `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput` | `config`, `keys`, `keyCap(action)` |
-| `isPrintable(key)` (@flowtty/core) — whether a key types a character | |
-| `stringWidth(text)` (@flowtty/core) — how many cells a text takes on screen; a CJK character or an emoji takes two, so size a column from a name with this, never with `.length` (a host older than this member lacks it: check it is there) | |
-| `useInput` — flowtty's own, beside the host's key path | `useInputHandler` — the host's key path |
-| | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
-| | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
-| | `hasKeyboard()` — whether the plugin's side has the keyboard now |
-| | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
-| | `open(screen, params)`, `close(screen)` — open or close one of your declared screens ([Screens the model can open](#screens-the-model-can-open)) |
+| `Box`, `Text`, `Span`, `Markdown`, `Table`, `Link`, `ScrollBox`, `ScrollList` | `store` — the channel between plugins and the host |
+| `Title`, `HRule`, `HelpBar` — a heading, a rule, a key line | `config`, `keys`, `keyCap(action)` |
+| `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput`, `TextArea` | `useInputHandler` — the host's key path |
+| `Button`, `Confirm`, `Form`, `useField(name, opts)`, `FocusGroup`, `useFocus`, `useClick(rectRef, onClick)`, `useHover` | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
+| `Spinner`, `Shimmer`, `ProgressBar`, `TaskList` — a running state, painted off their own ticker; `useTicker({ interval, active })` is that ticker | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
+| `isPrintable(key)` (@flowtty/core) — whether a key types a character | `hasKeyboard()` — whether the plugin's side has the keyboard now |
+| `stringWidth(text)` (@flowtty/core) — how many cells a text takes on screen; a CJK character or an emoji takes two, so size a column from a name with this, never with `.length` (a host older than this member lacks it: check it is there) | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
+| `useInput` — flowtty's own, beside the host's key path | `open(screen, params)`, `close(screen)` — open or close one of your declared screens ([Screens the model can open](#screens-the-model-can-open)) |
 | | Not on `host` but handed to the builder beside `z`: `modelMaySet`, `modelMaySave`, `appliesOnRestart` — the marks on a key of `configSchema` ([The builder](#the-builder)) |
+
+**Going deaf.** flowtty hears keys per subtree: `<Box inert={!host.hasKeyboard()}>` around
+your whole surface mutes every flowtyt component inside it — the fields, the pickers,
+`Button`, and `FocusGroup`'s own Tab — in one move, while `host.useInputHandler` stays
+yours (it is the host's key path, not flowtyt's). That is the recipe for a surface that
+shares the screen with the chat: wrapped once, it can hear nothing while the chat has the
+keys, and there is no control left to forget. Gating each control by hand (`isFocused`,
+`isActive`) is what `Box` `inert` replaces; it is still the way to gate ONE control inside a surface that is awake
+(the fields, the pickers, `Confirm` and `Form` take `isFocused`, `ScrollBox` and
+`FocusGroup` take `isActive`).
+
+`Button` has no `isFocused` of its own: inside a `FocusGroup` the group's Tab decides,
+and with no group it reads as focused — which is why an awake surface that is not alone on
+screen needs the `inert` box rather than a per-button gate. `FocusGroup` is your focus, the
+host's keyboard is another thing: a group left `isActive` while the chat has the keys would
+steal Tab from it, so pass the same `host.hasKeyboard()` you gave `inert`.
 
 The services stay on `host.services` and are read when they are called
 (`host.services.showMessage('saved')`): the host rebinds some of them on every render,

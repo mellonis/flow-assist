@@ -40,10 +40,15 @@ export interface PluginUi {
   // its own state, off whenever its side does not have the keyboard.
   Box: unknown;
   Text: unknown;
+  Span: unknown;
   Markdown: unknown;
+  Title: unknown;
+  HRule: unknown;
+  HelpBar: unknown;
   Table: unknown;
   Link: unknown;
   ScrollBox: unknown;
+  ScrollList: unknown;
   Select: unknown;
   ListSelect: unknown;
   ListMultiSelect: unknown;
@@ -51,6 +56,42 @@ export interface PluginUi {
   // A one-line text field (`frame`: `field`, `none`, `border`), as wide as the column
   // around it — it hears keys itself, gated like the pickers.
   TextInput: unknown;
+  // A multi-line field: soft wrap, a caret that moves across visual rows, `maxRows` a
+  // height cap. It is gated the same way, and it takes `isFocused` as a prop, so no
+  // group is needed for the one field a surface has.
+  TextArea: unknown;
+  // A press. `Button` carries no `isFocused` of its own: it is focused by the group
+  // around it, or ALWAYS focused when there is none. So a surface that does not hold
+  // the host's keyboard goes deaf with `<Box inert>` (docs/plugins.md, "What a plugin
+  // is given") rather than by gating the press per control.
+  Button: unknown;
+  // The state a person watches while work runs: `Spinner` and `Shimmer` paint
+  // themselves off their own ticker, `ProgressBar` takes a `value` and a `total`,
+  // `TaskList` a list of `{ label, state }`.
+  Spinner: unknown;
+  Shimmer: unknown;
+  ProgressBar: unknown;
+  TaskList: unknown;
+  // flowtty's ticker — a re-render every `interval` ms while `active`, what the state
+  // components above are built on and what a plugin's own elapsed-time line uses.
+  useTicker: unknown;
+  // A surface's own focus: Tab moves through the registered controls while `isActive`,
+  // `useFocus()` reports which one has it and calls `focus(id)` to move it. This is
+  // the plugin's focus, not the host's keyboard — the two are gated apart (see
+  // `Box inert` below).
+  FocusGroup: unknown;
+  useFocus: unknown;
+  // A click on what the plugin drew: `useClick(rectRef, onClick)` fires when the press
+  // lands in that rect. `useHover()` reports a pointer over the component it is called
+  // in — what a row under the pointer is painted with.
+  useClick: unknown;
+  useHover: unknown;
+  // A form over the fields the plugin declares: `useField(name, opts)` registers one
+  // (validators included), `Form` owns the values, the errors and which field has the
+  // focus, `Confirm` the y/n a destructive step asks.
+  Form: unknown;
+  useField: unknown;
+  Confirm: unknown;
   // Whether a key types a character (@flowtty/core): never a chord, never a control
   // character — what a plugin's own field or filter accepts.
   isPrintable: (key: { name: string; ctrl?: boolean; meta?: boolean }) => boolean;
