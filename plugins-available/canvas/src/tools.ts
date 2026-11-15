@@ -170,8 +170,10 @@ export function buildGroup(deps: TToolsDeps) {
     return show(id);
   };
 
-  // A save keeps the tree and the title the canvas has now, never the values the
-  // person typed: a recipe is a shape, and the canvas drawn from it carries the data.
+  // A save keeps the tree and the title the canvas has now — the layout and every
+  // value the model declared in it, never the values the person typed into a field.
+  // Drawing it alone replays those declared values; a tree sent beside the template is
+  // what makes it current.
   // `scope: 'global'` keeps it for every project; the default is this call's project.
   const save = (args: Record<string, unknown>, ctx: unknown): string => {
     const id = canvasOf(args.canvas);
@@ -210,7 +212,7 @@ export function buildGroup(deps: TToolsDeps) {
         type: 'function',
         function: {
           name: 'canvas_draw',
-          description: 'Draw a canvas, or replace it whole: the person sees it. canvas — its id (a short word like ci); title, owner — optional labels; tree — [type, props?, ...children] (the group text has the vocabulary and an example) or template — a saved recipe\'s name (canvas_templates lists them), drawn with its tree and title. A tree sent beside a template wins and the recipe supplies the title. A bind\'s value the person typed survives a redraw while you send the same `value`; send a different `value` to prefill or reset it. Display only: nothing outside the app changes. A tree that breaks the vocabulary is refused and the canvas is left as it was.',
+          description: 'Draw a canvas, or replace it whole: the person sees it. canvas — its id (a short word like ci); title, owner — optional labels; tree — [type, props?, ...children] (the group text has the vocabulary and an example) or template — a saved recipe\'s name (canvas_templates lists them), drawn with its tree and its title — the values that tree declared included, so send a fresh tree when the data has moved. A tree sent beside a template wins and the recipe supplies the title; a template that does not resolve refuses the draw before a tree beside it is read. A bind\'s value the person typed survives a redraw while you send the same `value`; send a different `value` to prefill or reset it. Display only: nothing outside the app changes. A tree that breaks the vocabulary is refused and the canvas is left as it was.',
           parameters: {
             type: 'object',
             properties: {

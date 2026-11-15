@@ -3,10 +3,10 @@
 A standalone, **domain-agnostic** TUI/CLI assistant host. It has no notion of
 "issue", "board", or "sprint" in its core, and none of any company's systems. Functionality is delivered as
 **plugins** that register surfaces, commands, keybindings, LLM tool groups, and
-config schema. The bundled plugins are `gitlab`, `repo` and `mcp` — tool groups only — and
-`canvas`, a surface a model composes out of components. A plugin with a surface of its own
-(a tracker's board, a company's views and modals) lives in its own repository and is
-dropped into `plugins-available/`, which ignores everything not bundled.
+config schema. The bundled plugins are `gitlab`, `repo` and `mcp` (tool groups only) and
+`canvas` (a surface a model composes out of components). A plugin with a *domain* surface
+of its own (a tracker's board, a company's views and modals) lives in its own repository
+and is dropped into `plugins-available/`, which ignores everything not bundled.
 
 ## Language rule
 

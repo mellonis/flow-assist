@@ -104,14 +104,16 @@ Each plugin ships a `manifest.json` and a `shape` (commands/keys/views/surfaces/
 aiTools/services/tools/configSchema). Tool groups are delivered by plugins; there
 is no separate tools repo.
 
-Plugins here: `gitlab` (glab CLI), `repo` (local clones and git) and `mcp` — the tools
-of MCP servers, reached over Streamable HTTP or started as a command (Safari's
-`safaridriver --mcp`), each call asked about first
+Plugins here: `gitlab` (glab CLI), `repo` (local clones and git), `canvas` (a panel the
+assistant draws) and `mcp` — the tools of MCP servers, reached over Streamable HTTP or
+started as a command (Safari's `safaridriver --mcp`), each call asked about first
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
-`config set plugins.<name>.<key> <value>`. `repo` reads and writes only inside
-`plugins.repo.roots`, and without it inside the shell's `shell.roots`; it also carries
-the skill `repo/change-discipline`, rules for a code change from the ticket to the merge
-request (docs/usage.md, "Skills"). A config that
+`config set plugins.<name>.<key> <value>` — `config set` knows a plugin's keys only
+where the plugin declares a `configSchema`; `canvas` declares none, so its palette is
+edited by hand in `config.local.json` (`plugins-available/canvas/README.md`). `repo`
+reads and writes only inside `plugins.repo.roots`, and without it inside the shell's
+`shell.roots`; it also carries the skill `repo/change-discipline`, rules for a code
+change from the ticket to the merge request (docs/usage.md, "Skills"). A config that
 still sets the roots as `fs.roots` works for one more
 release, and the log (`L`) says where to move it.
 

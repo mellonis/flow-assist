@@ -20,7 +20,8 @@ export const TEMPLATE_LIMIT = 50;
 // on/off switch. The host's own service fits it whole (src/runtime/services/cache.ts).
 export type TCache = { get(ns: string, key: string): unknown; set(ns: string, key: string, value: unknown, ttl?: number): void; enabled(): boolean };
 // What a recipe keeps: its name, the title it draws under, the tree, and when it was
-// saved. Nothing else — no values, no owner, no data timestamp.
+// saved. Nothing else — no values the person typed into a field, no owner, no data
+// timestamp.
 export type TTemplate = { name: string; title: string; tree: Node; savedAt: number };
 // A scope is `global` or `project:<path>`; the scope is the first half of every key.
 export type TScope = string;

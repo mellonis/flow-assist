@@ -161,10 +161,10 @@ test('the : line owns every key while it is open — the surface\'s keys wait fo
 });
 
 // ── Saved layouts (Task 9) ───────────────────────────────────────────────────
-// A recipe is a shape, not a canvas: one turn draws a layout, keeps it, deletes the
-// canvas, and draws the recipe under another id. The cache behind it is the host's own
-// (in memory under `bun test`); reuse across restarts is the cache's behaviour, not this
-// plugin's, and the host's own tests cover it.
+// A recipe is a stored tree, not a canvas: one turn draws a layout, keeps it, deletes
+// the canvas, and draws the recipe under another id. The cache behind it is the host's
+// own (in memory under `bun test`); reuse across restarts is the cache's behaviour, not
+// this plugin's, and the host's own tests cover it.
 test('a layout is saved as a recipe and drawn again from it — the frame shows the recipe\'s text', async () => {
   const model = new ScriptedModel();
   model.script(
@@ -226,11 +226,22 @@ test('a pipeline is drawn from gitlab-shaped data and redrawn after a press', as
   await turn(ui, 'draw my pipeline');
   await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines · prices-index'));
   const drawn = ui.backend.lastFrame;
-  // The picture a person reads instead of the JSON: the status, the bar, the jobs and
-  // the way to ask again.
+  // The picture a person reads instead of the JSON — every composite in it, read from
+  // the frame rather than from the tree: the badge's status, `rows`' labels and values,
+  // the bar and its percentage, the jobs and the running one's glyph, the field and the
+  // checkbox, the link's address (no hyperlink on the test surface, so the address is
+  // what is drawn) and the way to ask again.
   expect(drawn).toContain('failed · 2m');
+  expect(drawn).toContain('project');
+  expect(drawn).toContain('commit');
+  expect(drawn).toContain('a3f19c2');
   expect(drawn).toContain('75%');
   expect(drawn).toContain('build');
+  expect(drawn).toContain('● test:unit');
+  expect(drawn).toContain('branch');
+  expect(drawn).toContain('feature-MP-123');
+  expect(drawn).toContain('watch it');
+  expect(drawn).toContain('https://gitlab…/pipelines/1234');
   expect(drawn).toContain('check again');
   await toPlugin(ui);
   // Tab to the button (the field, the checkbox, then the button — tree order) and press
@@ -244,6 +255,11 @@ test('a pipeline is drawn from gitlab-shaped data and redrawn after a press', as
   const pressed = answered.filter((message) => msgText(message).includes('pressed «check again»'));
   expect(pressed).toHaveLength(1);
   expect(msgText(pressed[0]!)).toContain('branch: feature-MP-123 · watch: on');
-  expect(ui.backend.lastFrame).toContain('failed · 2m');
-  expect(ui.backend.lastFrame).toContain('check again');
+  // The redraw's data change, proven on the frame rather than by a string both trees
+  // share: the percentage fell and the job the press had running now failed. The
+  // strings the press did not change are gone from the frame with it.
+  expect(ui.backend.lastFrame).toContain('66%');
+  expect(ui.backend.lastFrame).toContain('✗ test:unit');
+  expect(ui.backend.lastFrame).not.toContain('● test:unit');
+  expect(ui.backend.lastFrame).not.toContain('75%');
 });
