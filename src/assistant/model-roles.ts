@@ -14,10 +14,11 @@ interface AiConfig {
 
 const asAi = (ai: unknown): AiConfig => (ai && typeof ai === 'object' ? (ai as AiConfig) : {});
 const name = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-const positive = (v: unknown): number | undefined => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
-};
+// A window as configured: a whole positive number, or no value at all. A fraction, a
+// string or a boolean is none — the schema takes `z.number().int().positive()`, and a
+// hand-edited file that breaks it must never become a zero window.
+const positive = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
 
 // `ai.model` as written — a model id, never a role.
 export function baseModel(ai: unknown): string | undefined {

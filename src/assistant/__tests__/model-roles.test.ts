@@ -13,6 +13,8 @@ describe('roles', () => {
   test('a role nothing defines has no model', () => {
     expect(roleModel(ai, 'deep')).toBeUndefined();
     expect(roleModel(ai, '')).toBeUndefined();
+    expect(roleModel(ai, '   ')).toBeUndefined();
+    expect(roleModel(ai, 42)).toBeUndefined();
     expect(roleModel(ai, undefined)).toBeUndefined();
   });
   test('ai.model is a model id, never read as a role', () => {
@@ -38,6 +40,11 @@ describe('the window', () => {
   test('with neither, 200k — and a nonsense value is no value', () => {
     expect(modelWindow({}, undefined)).toBe(DEFAULT_CONTEXT_WINDOW);
     expect(modelWindow({ models: { x: { contextWindow: 0 } }, contextWindow: -1 }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: 0.5 } }, contextWindow: -1 }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: 1.5 } }, contextWindow: -1 }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ contextWindow: 0.5 }, undefined)).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ contextWindow: true }, undefined)).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ contextWindow: '250000' }, undefined)).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 });
 
@@ -50,5 +57,6 @@ describe('withModel', () => {
   test('no model of its own leaves the options as they are', () => {
     const base = llmOpts({ model: 'default-model' });
     expect(withModel(base, undefined)).toBe(base);
+    expect(withModel(base, '   ')).toBe(base);
   });
 });

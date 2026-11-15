@@ -93,5 +93,6 @@ export function llmOpts(ai: unknown, env: Record<string, string | undefined> = p
 // The same options on another model: a conversation that runs a model of its own (a
 // child's role) overrides what `ai.model` says, and everything else stays.
 export function withModel(opts: LlmOpts, model: string | undefined): LlmOpts {
-  return model ? { ...opts, model } : opts;
+  const id = model?.trim();
+  return id ? { ...opts, model: id } : opts;
 }
