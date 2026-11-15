@@ -14,7 +14,15 @@ import { bar, fit, percentText, taskGlyph, toneToken, type TTaskState } from './
 import type { Node } from './tree.ts';
 
 export type TUi = { h: (type: unknown, props?: Record<string, unknown>, ...children: unknown[]) => unknown; Box: unknown; Text: unknown; Markdown: unknown; Table: unknown; ScrollBox: unknown; Link: unknown };
-export type TRenderCtx = { ui: TUi; width: number; stringWidth: (s: string) => number; focusKey: string | null; hasKeyboard: boolean; values: Record<string, string | boolean>; onValue: (bind: string, value: string | boolean) => void; onPress: (label: string, action: string) => void };
+export type TRenderCtx = { ui: TUi; width: number; stringWidth: (s: string) => number; focusKey: string | null; hasKeyboard: boolean; values: Record<string, string | boolean>; onValue: (bind: string, value: string | boolean) => void; onPress: (label: string, action: string) => void; colors?: Record<string, string> };
+
+// The plugin's palette: the vocabulary's tones as the named colours flowtty paints in
+// (its own `Color` is a named colour or a literal, so a token like `ok` would be
+// dropped as an unknown name and paint nothing). `make('canvas', { colors })` hands
+// this map to the host theme, where it lands as `theme.canvas` with the person's
+// `config.plugins.canvas.colors` laid over it; the surface passes that resolved map in
+// as `ctx.colors`, and `default` is what a tone with no colour of its own gets.
+export const TOKEN_COLOR: Record<string, string> = { ok: 'green', warn: 'yellow', error: 'red', accent: 'cyan', dim: 'gray', muted: 'gray', default: 'default' };
 
 type TProps = Record<string, unknown>;
 
@@ -33,9 +41,8 @@ const TASK_TONE: Record<TTaskState, string> = { done: 'ok', running: 'accent', q
 const BADGE_GLYPH: Record<string, string> = { ok: '●', warn: '▲', error: '✗' };
 const BADGE_GLYPH_DEFAULT = '●';
 
-const BOX_PROPS = ['flexDirection', 'gap', 'padding', 'paddingX', 'paddingY', 'width', 'height', 'flexGrow', 'border', 'overflow', 'alignItems', 'justifyContent'];
+const BOX_PROPS = ['flexDirection', 'gap', 'padding', 'paddingX', 'paddingY', 'width', 'height', 'flexGrow', 'overflow', 'alignItems', 'justifyContent'];
 const SCROLL_PROPS = ['height', 'flexGrow'];
-const TABLE_PROPS = ['columns', 'rows', 'border', 'selectedIndex'];
 
 const isPlainObject = (v: unknown): v is TProps => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -62,15 +69,57 @@ const readNode = (node: Node): { type: string; props: TProps; children: Array<No
 // broken shape, so a non-object here is dropped rather than drawn as a blank line.
 const itemsOf = (props: TProps): TProps[] => (Array.isArray(props.items) ? props.items : []).filter(isPlainObject);
 
-// The Text props, sanitised: a colour is a palette token, the flags are booleans, and
-// `wrap` is flowtty's word wrap. `truncate` is cut here with `fit` — only the renderer
-// measures with the pane's `stringWidth` — so it contributes no wrap mode of its own.
-const textProps = (props: TProps): TProps => {
+// The Text props, sanitised: a colour is a palette token painted through `paint`, the
+// flags are booleans, and `wrap` is flowtty's word wrap. `truncate` is cut here with
+// `fit` — only the renderer measures with the pane's `stringWidth` — so it contributes
+// no wrap mode of its own.
+const textProps = (props: TProps, paint: (tone: unknown) => string): TProps => {
   const out: TProps = {};
-  if (props.color !== undefined) out.color = toneToken(props.color);
+  if (props.color !== undefined) out.color = paint(props.color);
   if (props.bold === true) out.bold = true;
   if (props.dim === true) out.dim = true;
   if (props.wrap === true) out.wrap = 'wrap';
+  return out;
+};
+
+// flowtty's borders are styles, the vocabulary's are a flag: `true` is the round border
+// the host's own panels draw, `false` is no border — omitted for a Box, which has none
+// by default, and `'none'` for a Table, whose grid takes an explicit "no border".
+const borderOf = (border: unknown, off: string | undefined): string | undefined =>
+  border === true ? 'round' : border === false ? off : undefined;
+
+// A Box's layout props, with the border flag mapped to a style it accepts: passed on
+// as a boolean, flowtty indexes its glyph set by it and throws.
+const boxProps = (props: TProps): TProps => {
+  const out = only(props, BOX_PROPS);
+  const border = borderOf(props.border, undefined);
+  if (border !== undefined) out.border = border;
+  return out;
+};
+
+// A Table adapted to flowtty's own props: `rows` of strings become one record per row
+// keyed by the column `key` (a row with fewer cells is padded with `''`), and the
+// vocabulary's `{ key, label, width? }` becomes `{ accessor, header, width? }`.
+const tableProps = (props: TProps): TProps => {
+  const columns = (Array.isArray(props.columns) ? props.columns : []).filter(isPlainObject);
+  const rows = (Array.isArray(props.rows) ? props.rows : []).filter(Array.isArray);
+  const keys = columns.map((column) => str(column.key));
+  const data = rows.map((row) => {
+    const record: TProps = {};
+    keys.forEach((key, index) => {
+      const cell = row[index];
+      record[key] = typeof cell === 'string' ? cell : '';
+    });
+    return record;
+  });
+  const adapted = columns.map((column) => {
+    const width = column.width === undefined ? {} : { width: column.width };
+    return { accessor: str(column.key), header: str(column.label), ...width };
+  });
+  const out: TProps = { data, columns: adapted };
+  const border = borderOf(props.border, 'none');
+  if (border !== undefined) out.border = border;
+  if (props.selectedIndex !== undefined) out.selectedIndex = props.selectedIndex;
   return out;
 };
 
@@ -88,6 +137,11 @@ const controlLine = (type: string, props: TProps): string => {
 
 export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
   const { ui } = ctx;
+  // The palette the surface hands in, else the plugin's own: a tone is a token first
+  // and a flowtty colour after that, and a token the palette does not name paints as
+  // the terminal's default.
+  const colors = ctx.colors ?? TOKEN_COLOR;
+  const paint = (tone: unknown): string => colors[toneToken(tone)] ?? TOKEN_COLOR.default;
   const dimLine = (line: string): unknown => ui.h(ui.Text, { dim: true }, fit(line, ctx.width, ctx.stringWidth));
 
   const draw = (child: Node | string): unknown => {
@@ -97,7 +151,7 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
       // Containers keep their layout props and draw their children, which are nodes
       // here: the validator refuses a bare string inside a Box.
       case 'Box':
-        return ui.h(ui.Box, only(props, BOX_PROPS), ...children.map(draw));
+        return ui.h(ui.Box, boxProps(props), ...children.map(draw));
       case 'ScrollBox':
         return ui.h(ui.ScrollBox, only(props, SCROLL_PROPS), ...children.map(draw));
       case 'Text': {
@@ -105,18 +159,19 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
         const strings = children
           .filter((c): c is string => typeof c === 'string')
           .map((s) => (truncate ? fit(s, ctx.width, ctx.stringWidth) : s));
-        return ui.h(ui.Text, textProps(props), ...strings);
+        return ui.h(ui.Text, textProps(props, paint), ...strings);
       }
       case 'Markdown':
         return ui.h(ui.Markdown, {}, ...children.filter((c): c is string => typeof c === 'string'));
-      // The table's props are the vocabulary's own — `columns` of `{ key, label }` and
-      // `rows` of string arrays — passed through unchanged.
+      // The vocabulary's `columns`/`rows` are adapted to the props flowtty's Table
+      // reads; passed on raw, its first `data.length` throws.
       case 'Table':
-        return ui.h(ui.Table, only(props, TABLE_PROPS));
+        return ui.h(ui.Table, tableProps(props));
       case 'Link':
         return ui.h(ui.Link, { href: str(props.url) });
-      // The composites: one line each, built from the pieces in `parts`. The outer
-      // Box keeps a composite to one row of the column it sits in.
+      // The composites: one line each, built from the pieces in `parts`. A composite is
+      // a Box holding its line as the one child — the shape the brief's tests read —
+      // and the line is a row of Texts.
       case 'progress': {
         const value = typeof props.value === 'number' ? props.value : 0;
         const percent = percentText(value);
@@ -128,18 +183,18 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
         const cut = fit(label, labelRoom, ctx.stringWidth);
         const line = [
           ...(cut === '' ? [] : [ui.h(ui.Text, { dim: true }, `${cut} `)]),
-          ui.h(ui.Text, { color: toneToken(props.tone) }, bar(value, barWidth)),
+          ui.h(ui.Text, { color: paint(props.tone) }, bar(value, barWidth)),
           ui.h(ui.Text, { dim: true }, ` ${percent}`),
         ];
         return ui.h(ui.Box, {}, ui.h(ui.Box, { flexDirection: 'row' }, ...line));
       }
       case 'badge': {
-        const tone = toneToken(props.tone);
-        const line = fit(`${BADGE_GLYPH[tone] ?? BADGE_GLYPH_DEFAULT} ${str(props.text)}`, ctx.width, ctx.stringWidth);
-        return ui.h(ui.Text, { color: tone, bold: true }, line);
+        const token = toneToken(props.tone);
+        const line = fit(`${BADGE_GLYPH[token] ?? BADGE_GLYPH_DEFAULT} ${str(props.text)}`, ctx.width, ctx.stringWidth);
+        return ui.h(ui.Text, { color: paint(token), bold: true }, line);
       }
       case 'rows': {
-        const items = itemsOf(props).map((item) => ({ label: str(item.label), value: str(item.value), tone: toneToken(item.tone) }));
+        const items = itemsOf(props).map((item) => ({ label: str(item.label), value: str(item.value), tone: paint(item.tone) }));
         // The labels share one column, half the pane at most, so the values line up
         // under each other; a value takes the rest of the line.
         const widest = items.reduce((n, item) => Math.max(n, ctx.stringWidth(item.label)), 0);
@@ -158,7 +213,7 @@ export function toElement(node: Node | string, ctx: TRenderCtx): unknown {
         const items = itemsOf(props).map((item) => ({ text: str(item.text), state: item.state as TTaskState }));
         const textWidth = Math.max(0, ctx.width - 2);
         const lines = items.map((item) => {
-          const glyph = ui.h(ui.Text, { color: TASK_TONE[item.state] ?? 'default' }, `${taskGlyph(item.state)} `);
+          const glyph = ui.h(ui.Text, { color: paint(TASK_TONE[item.state] ?? 'default') }, `${taskGlyph(item.state)} `);
           return ui.h(ui.Box, { flexDirection: 'row' }, glyph, ui.h(ui.Text, {}, fit(item.text, textWidth, ctx.stringWidth)));
         });
         return ui.h(ui.Box, { flexDirection: 'column' }, ...lines);

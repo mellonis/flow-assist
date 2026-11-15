@@ -10,6 +10,7 @@
 // the real `PluginApi` lives).
 import { createStore, outline, registryItems, selectCanvas, selectedCanvas } from './store.ts';
 import { buildGroup, SHOW_SCREEN, missingCanvas } from './tools.ts';
+import { TOKEN_COLOR } from './render.ts';
 import type { TStore } from './store.ts';
 
 type Make = (name: string, shape: Record<string, unknown>) => Record<string, unknown>;
@@ -66,6 +67,11 @@ export default function buildCanvasPlugin({ config, make, z }: { config?: unknow
 
   return make('canvas', {
     name: 'canvas',
+    // The canvas palette: the vocabulary's tones as the named colours flowtty paints
+    // in. The host resolves it into `theme.canvas`, a person overrides an entry with
+    // `config.plugins.canvas.colors`, and the surface hands the resolved map to the
+    // renderer's ctx.
+    colors: TOKEN_COLOR,
     keycaps: () => [],
     tools: [group],
     screens: {
