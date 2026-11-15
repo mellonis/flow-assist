@@ -11,6 +11,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { askUp } from './helpers/ask-block';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -116,16 +117,17 @@ test('the session\'s own question over the tree cursor on an idle subagent is ar
   await settleUntil(() => model.held);
   await ui.press('down');
   model.release();
-  await settleUntil(() => frameOf(ui).includes('Which branch?'));
+  await settleUntil(() => askUp(frameOf(ui)));
   await ui.press('x');
   await ui.press('y');
   await settle(4);
   // Swallowed by the arming: the question is still up and its field took no letter.
+  expect(askUp(frameOf(ui))).toBe(true);
   expect(frameOf(ui)).toContain('Which branch?');
   expect(frameOf(ui)).not.toContain('› xy');
   pause();
   await ui.press('escape');
-  await settleUntil(() => !frameOf(ui).includes('Which branch?'));
+  await settleUntil(() => !askUp(frameOf(ui)));
   expect(frameOf(ui)).toContain('◦ idle-qst-go · idle');
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();

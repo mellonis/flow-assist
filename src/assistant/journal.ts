@@ -13,7 +13,8 @@
 //            A subagent's file (`<id>.sub/<its id>.log.jsonl`, beside the session's journal)
 //            starts with the same kind: its `id`, `parent` (the journal id of the session or
 //            subagent that started it), `root` (the session), `label` and `by`
-//   row      a row of the conversation — `role` user, bg, note, assistant, view
+//   row      a row of the conversation — `role` user, bg, note, assistant, view, ask
+//            (a question the person answered: `answer`, or `dismissed`)
 //   step     the text of a round that went on to call tools
 //   answer   the final text of a turn
 //   call-start  a tool call beginning: `id`, `name`, `args` whole, `confirm` — whether
@@ -235,6 +236,7 @@ export function rowOf(m: Record<string, unknown>, renderers: ViewRenderers): Jou
   const text = typeof m.content === 'string' ? m.content : '';
   switch (m.role) {
     case 'user': case 'bg': return { t: 'row', role: m.role, text, ...(m.hostAsk ? { hostAsk: true } : {}) };
+    case 'ask': return { t: 'row', role: 'ask', text, ...(typeof m.answer === 'string' ? { answer: m.answer } : {}), ...(m.dismissed === true ? { dismissed: true } : {}) };
     case 'note': return typeof m.summary === 'string' ? { t: 'compact', summary: m.summary, note: text } : { t: 'row', role: 'note', text };
     case 'shell': {
       const v0 = Array.isArray(m.views) ? (m.views[0] as ViewRecord | undefined) : undefined;
@@ -388,6 +390,7 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         else if (ev.role === 'bg') out.push(`**Background result**${at}`, '', text, '');
         else if (ev.role === 'note') out.push(`*Note${at}:* ${nd(rawText.split('\n')[0]!)}`, ...(rawText.includes('\n') ? ['', block(rawText.split('\n').slice(1).join('\n'))] : []), '');
         else if (ev.role === 'view') for (const v of Array.isArray(ev.views) ? ev.views as { text?: unknown }[] : []) out.push(block(String(v.text ?? '')), '');
+        else if (ev.role === 'ask') out.push(`*Question${at}:* ${nd(rawText)}`, '', ev.dismissed === true ? '*You dismissed it.*' : `*You answered: ${nd(String(ev.answer ?? ''))}*`, '');
         else if (ev.role === 'assistant') {
           for (const st of Array.isArray(ev.steps) ? ev.steps as string[] : []) out.push(`*Step:* ${nd(st)}`, '');
           const calls = Array.isArray(ev.calls) ? ev.calls as { name?: unknown; outcome?: unknown; args?: unknown }[] : [];

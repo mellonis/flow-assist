@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A question you answered stays in the chat.** `ask_user`'s block no longer disappears
+  the moment it is answered: the question stays where it was asked with the answer under
+  it — the options you picked, your own words, or `→ dismissed` — saved with the
+  session and drawn by `/export`. The model is sent the tool's result as before, and
+  nothing more.
+
 - **A plugin can put a message into the chat — `services.postToChat`.** A press on a plugin's
   own surface, or anything else it needs the model to act on, reaches the session whose work it
   is as a plugin's message — framed as data from a plugin, never as your words — and the chat

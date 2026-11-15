@@ -12,6 +12,7 @@ import { recordAgentStart } from '../assistant/agent-trust.ts';
 import { refreshToolRegistry } from '../loader/tools.ts';
 import { hostStateDir } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
+import { askUp } from './helpers/ask-block';
 import { listTree } from './helpers/session-files';
 
 const made: string[] = [];
@@ -142,11 +143,14 @@ test('two missing parameters are asked one after the other, in the declared orde
   write(path.join(agents, 'job.md'), doc('params: ticket, branch\n', 'ASK-B {{ticket}}|{{branch}}'));
   child.script([{ text: 'ok' }]);
   await ask(ui, '/subagent @job');
-  await settleUntil(() => frameOf(ui).includes('@job: ticket'));
+  await settleUntil(() => askUp(frameOf(ui)));
+  expect(frameOf(ui)).toContain('@job: ticket');
   expect(frameOf(ui)).not.toContain('@job: branch');
   await ask(ui, 'T-9');
-  await settleUntil(() => frameOf(ui).includes('@job: branch'));
-  expect(frameOf(ui)).not.toContain('@job: ticket');
+  await settleUntil(() => askUp(frameOf(ui)) && frameOf(ui).includes('@job: branch'));
+  // The one just answered stays above, its answer under it.
+  expect(frameOf(ui)).toContain('@job: ticket');
+  expect(frameOf(ui)).toContain('→ T-9');
   await ask(ui, 'dev');
   await settleUntil(() => child.requests.length === 1);
   expect(firstUser(child.requests[0]!)).toBe('ASK-B T-9|dev');
@@ -157,9 +161,10 @@ test('Esc on the block cancels the start and puts the typed line back in the fie
   const { agents, child, model, ui } = await chat('ASK-C');
   write(path.join(agents, 'job.md'), doc('params: ticket, branch\n', 'ASK-C {{ticket}}|{{branch}}'));
   await ask(ui, '/subagent @job T-1');
-  await settleUntil(() => frameOf(ui).includes('@job: branch'));
+  await settleUntil(() => askUp(frameOf(ui)));
+  expect(frameOf(ui)).toContain('@job: branch');
   await ui.press('escape');
-  await settleUntil(() => !frameOf(ui).includes('@job: branch'));
+  await settleUntil(() => !askUp(frameOf(ui)));
   expect(frameOf(ui)).toContain('/subagent @job T-1');
   await settle(10);
   expect(child.requests).toHaveLength(0);

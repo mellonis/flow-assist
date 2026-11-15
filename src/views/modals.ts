@@ -177,6 +177,9 @@ interface ChatRow {
   label?: boolean | string;
   // The first content row of a message: it carries the speaker's marker.
   first?: boolean;
+  // The answer row of a question the person was asked and answered (role 'ask'): the
+  // `→` in the gutter, under the question's `?`.
+  askAnswer?: boolean;
   // A view that is not a command draws no run mark.
   plainGutter?: boolean;
   // A console block's own state, read off its view record — resolved here, once,
@@ -904,6 +907,16 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       const opened = isOpen(folds, id);
       rows.push({ role, first: true, fold: id, foldLine: true, spans: [{ text: cutStep(String(m.content ?? ''), Math.max(1, inner - 10)) }, { text: ` ${opened ? '▾' : '▸'} summary`, dim: true }] });
       if (opened) for (const line of mdLines(m.summary, inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, fold: id });
+    } else if (role === 'ask') {
+      // A question the person answered stays where it was asked: the title the block
+      // was shown under, then the answer under it. Display only — the model already has
+      // the answer as the tool's result (role 'ask' never reaches it).
+      const dismissed = m.dismissed === true;
+      typedLines(String(m.content ?? ''), inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+      typedLines(String(m.answer ?? ''), inner).forEach((line, li) => rows.push({
+        role, askAnswer: li === 0, spans: dismissed ? line.spans.map((s) => ({ ...s, dim: true })) : line.spans,
+        continues: line.continues, chrome: line.chrome, frame: line.frame,
+      }));
     } else {
       const text = String(m.content ?? '');
       // The person's message is drawn as typed. A background result and a
@@ -989,6 +1002,10 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
     if (row.first && row.role === 'note') return h(Text, { dim: true }, '· ');
+    // A question the person was asked and answered: `?` for the question, `→` under it
+    // for the answer. The two cells line up as every other marker does.
+    if (row.first && row.role === 'ask') return h(Text, { bold: true, color: m.accent }, '? ');
+    if (row.askAnswer && row.role === 'ask') return h(Text, { dim: true, color: m.accent }, '→ ');
     // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
     // ∮ reads well as "a loop" but is East-Asian-ambiguous width — flowtty reads it as
     // one cell, so it would shift the row in a terminal that draws it two cells wide.

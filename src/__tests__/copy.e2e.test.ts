@@ -21,6 +21,7 @@ mock.module('../assistant/copy.ts', () => ({
   },
 }));
 const { ScriptedModel, bootApp, settle } = await import('./helpers/scripted');
+const { askUp } = await import('./helpers/ask-block');
 const { onCopySelection } = await import('../runtime/app.tsx');
 
 const realFetch = globalThis.fetch;
@@ -293,14 +294,18 @@ test('a click does not answer or dismiss an ask_user question', async () => {
   await ui.type('which?');
   await ui.press('return');
   await settle(10);
+  expect(askUp(ui.backend.lastFrame ?? '')).toBe(true);
   expect(ui.backend.lastFrame).toContain('Rebase or merge?');
   await click(ui, cellOf(ui, 'merge'));
   await click(ui, cellOf(ui, 'which?'));
+  expect(askUp(ui.backend.lastFrame ?? '')).toBe(true);
   expect(ui.backend.lastFrame).toContain('Rebase or merge?');
   expect(model.requests).toHaveLength(1);
   await ui.press('escape');
   await settle(10);
-  expect(ui.backend.lastFrame).not.toContain('Rebase or merge?');
+  // Dismissed: the block stays, with its answer word under it, and takes no key.
+  expect(askUp(ui.backend.lastFrame ?? '')).toBe(false);
+  expect(ui.backend.lastFrame).toContain('→ dismissed');
   ui.app.unmount();
 });
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { askKey, askResult, askRows, askStart, parseAskArgs, type AskState } from '../ask';
+import { askKey, askResult, askRows, askShown, askStart, parseAskArgs, type AskState } from '../ask';
 
 // Key names are the ones flowtty's decoder really produces — checked against
 // `decodeKeys`: the space bar is ' ' (there is no 'space'), Enter is 'return'
@@ -102,6 +102,28 @@ test('several questions are asked in turn; Esc cancels the whole ask', () => {
   // A dismissal is told to the model as such — it must not read as consent to anything.
   expect(askResult(cancelled)).toMatch(/dismissed the question without answering/);
   expect(askResult(cancelled)).toMatch(/do not assume/i);
+});
+
+test('what the chat keeps of an answered question: the title it was shown under, and the answer', () => {
+  // The model gets the answer as the tool's result; the person keeps the block they
+  // answered, so the question does not vanish the moment it is answered.
+  expect(askShown(press(askStart(one.questions), 'down', 'return'))).toEqual([
+    { title: 'Library — Which library should we use for dates?', answer: 'dayjs' },
+  ]);
+  // Their own words, in a multi-select that also picked a label.
+  const multi = [{ question: 'Which checks?', options: [{ label: 'lint' }, { label: 'tests' }], multiSelect: true }];
+  const both = press(type(press(press(askStart(multi), ' ', 'down', ' '), 'down', 'return'), 'docs'), 'return');
+  expect(askShown(both)).toEqual([{ title: 'Which checks?', answer: 'lint, tests, docs' }]);
+  // A dismissal is its own word, and a question never reached is dismissed too.
+  expect(askShown(press(askStart(one.questions), 'escape'))).toEqual([{ title: 'Library — Which library should we use for dates?', answer: 'dismissed', dismissed: true }]);
+  const qs = [
+    { question: 'First?', options: [{ label: 'a' }, { label: 'b' }] },
+    { question: 'Second?', options: [{ label: 'c' }, { label: 'd' }] },
+  ];
+  expect(askShown(press(askStart(qs), 'return', 'escape'))).toEqual([
+    { title: 'First?', answer: 'a' },
+    { title: 'Second?', answer: 'dismissed', dismissed: true },
+  ]);
 });
 
 test('typing starts the answer: a printable key opens the field with it in, a digit still picks', () => {

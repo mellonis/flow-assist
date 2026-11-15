@@ -185,3 +185,18 @@ export function askResult(state: AskState): string {
   });
   return `The user answered:\n${lines.join('\n')}`;
 }
+
+// What the chat KEEPS of a question once it is answered: the title the block was shown
+// under and the answer as the person gave it, one entry per question. The model already
+// has the answer as the tool's result, so this is display only — it is what stops the
+// question vanishing the moment it is answered. A question the person never reached
+// reads as dismissed, the word its own block would show.
+export interface AskShown { title: string; answer: string; dismissed?: boolean }
+export function askShown(state: AskState): AskShown[] {
+  return state.questions.map((q, i) => {
+    const title = q.header ? `${q.header} — ${q.question}` : q.question;
+    const a = state.answers[i];
+    if (!a) return { title, answer: 'dismissed', dismissed: true };
+    return { title, answer: [...a.labels, ...(a.other ? [a.other] : [])].join(', ') };
+  });
+}

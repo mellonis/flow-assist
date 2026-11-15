@@ -2,6 +2,9 @@
 // question block takes the input's place → key presses answer it → the answer
 // reaches the model as the tool result. Only the network is faked.
 import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../loader/build';
 import { assembleToolRegistry } from '../loader/tools';
@@ -85,7 +88,14 @@ test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as cons
     expect(backend.lastFrame).toContain('▸ plan · ☐ one');
     expect(backend.lastFrame).toContain('Esc Esc collapse');
   }
-  expect(backend.lastFrame).not.toContain('Rebase or merge?');
+  expect(backend.lastFrame).not.toContain('ask_user');
+  // The question the person answered stays where it was asked — its own block, not a
+  // trail line that does not even name the question. The model already has the answer
+  // as the tool's result. A 12-row docked panel has room for the turn's tail alone.
+  if (mode !== 'panel') {
+    expect(backend.lastFrame).toContain('? Strategy — Rebase or merge?');
+    expect(backend.lastFrame).toContain('→ merge');
+  }
   handle.unmount();
 });
 
@@ -118,5 +128,70 @@ test('typing starts the answer, the field takes a paste, and the model is sent t
   // The paste went in whole — its line break a space, since the field is one line —
   // and it neither answered the question by itself nor fired a binding.
   expect(String(result?.content)).toContain('use feature/ABC-1 please now');
+  // Kept as it was answered, in the person's own words.
+  expect(ui.backend.lastFrame).toContain('? Which branch?');
+  expect(ui.backend.lastFrame).toContain('→ use feature/ABC-1 please now');
+  ui.app.unmount();
+});
+
+test('an answered question is saved with the session and drawn again when it is continued', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ask-sessions-'));
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', header: 'Branch', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+    [{ text: 'Using it.' }],
+  );
+  const ui = await bootApp(model, 110, 30, undefined, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('which branch should I use?');
+  await ui.press('return');
+  await settleUi(15);
+  await ui.press('return');
+  await settleUi(20);
+  await new Promise((r) => setTimeout(r, 400)); // the save is 250 ms after the turn
+  ui.app.unmount();
+
+  // A restart continues the session: what the person answered is still there.
+  const next = new ScriptedModel();
+  next.script([{ text: 'Ready.' }]);
+  const ui2 = await bootApp(next, 110, 30, undefined, { sessions: { dir } });
+  await settleUi(10);
+  await ui2.press('F');
+  await settleUi(10);
+  expect(ui2.backend.lastFrame).toContain('? Branch — Which branch?');
+  expect(ui2.backend.lastFrame).toContain('→ master');
+  ui2.app.unmount();
+});
+
+test('each question keeps its own block: what was picked, and what was dismissed', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_user', args: { questions: [
+      { question: 'Which branch?', header: 'Branch', options: [{ label: 'master' }, { label: 'develop' }] },
+      { question: 'Which checks?', options: [{ label: 'lint' }, { label: 'tests' }] },
+    ] } }],
+    [{ text: 'Fine.' }],
+  );
+  const ui = await bootApp(model, 110, 40);
+  await ui.press('F');
+  await ui.type('set this up');
+  await ui.press('return');
+  await settleUi(15);
+  await ui.press('return'); // the first question: master
+  await settleUi(4);
+  await ui.press('escape'); // the second: dismissed
+  await settleUi(20);
+
+  expect(ui.backend.lastFrame).toContain('? Branch — Which branch?');
+  expect(ui.backend.lastFrame).toContain('→ master');
+  expect(ui.backend.lastFrame).toContain('? Which checks?');
+  expect(ui.backend.lastFrame).toContain('→ dismissed');
+  expect(ui.backend.lastFrame).not.toContain('ask_user');
+  // The model is told the dismissal as one, and is sent no copy of the blocks: the
+  // result it already has IS its record of the answer.
+  expect(model.requests).toHaveLength(2);
+  const sent = model.requests[1]!.messages as { role: string; content?: string }[];
+  expect(sent.some((m) => m.role === 'ask')).toBe(false);
+  expect(String(sent.find((m) => m.role === 'tool')?.content)).toContain('dismissed the question');
   ui.app.unmount();
 });
