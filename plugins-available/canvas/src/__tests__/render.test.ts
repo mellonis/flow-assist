@@ -1,0 +1,101 @@
+import { expect, test } from 'bun:test';
+import { toElement, type TRenderCtx } from '../render.ts';
+
+type T = { type: string; props: Record<string, unknown>; children: unknown[] };
+const h = (type: unknown, props: Record<string, unknown> = {}, ...children: unknown[]): T => ({ type: String(type), props, children });
+const ui = { h, Box: 'Box', Text: 'Text', Markdown: 'Markdown', Table: 'Table', ScrollBox: 'ScrollBox', Link: 'Link' };
+const ctx = (over: Partial<TRenderCtx> = {}): TRenderCtx => ({ ui, width: 80, stringWidth: (s) => s.length, focusKey: null, hasKeyboard: true, values: {}, onValue: () => {}, onPress: () => {}, ...over });
+
+test('Text keeps its props and passes tokens through', () => {
+  const el = toElement(['Text', { color: 'error', bold: true }, 'hello'], ctx()) as T;
+  expect(el.type).toBe('Text');
+  expect(el.props).toEqual({ color: 'error', bold: true });
+  expect(el.children).toEqual(['hello']);
+});
+
+test('a literal colour is never passed through', () => {
+  const el = toElement(['Text', { color: '#ff0000' }, 'x'], ctx()) as T;
+  expect(el.props.color).toBe('default');
+});
+
+test('progress becomes a label and a bar sized to the width', () => {
+  const el = toElement(['progress', { label: 'jobs', value: 75 }], ctx({ width: 40 })) as T;
+  expect(el.type).toBe('Box');
+  const line = (el.children as T[])[0]!;
+  const text = (line.children as T[]).map((c) => c.children?.[0] ?? c).join('');
+  expect(text).toContain('jobs');
+  expect(text).toContain('75%');
+  expect(text).toContain('█');
+});
+
+test('progress on a narrow pane still draws one cell of bar', () => {
+  const el = toElement(['progress', { label: 'jobs', value: 50 }], ctx({ width: 12 })) as T;
+  expect(JSON.stringify(el)).toContain('█');
+});
+
+test('tasks and rows render one line per item, narrow panes truncated', () => {
+  const el = toElement(['tasks', { items: [{ text: 'a very long job name that will not fit', state: 'done' }] }], ctx({ width: 14 })) as T;
+  expect(JSON.stringify(el)).toContain('…');
+  const rows = toElement(['rows', { items: [{ label: 'branch', value: 'main' }] }], ctx()) as T;
+  expect(JSON.stringify(rows)).toContain('branch');
+});
+
+test('a table passes columns and rows through, capped by the tree caps', () => {
+  const el = toElement(['Table', { columns: [{ key: 'a', label: 'A' }], rows: [['1']] }], ctx()) as T;
+  expect(el.type).toBe('Table');
+  expect(el.props.columns).toEqual([{ key: 'a', label: 'A' }]);
+});
+
+test('wide characters are measured with the injected stringWidth', () => {
+  const el = toElement(['Text', { wrap: 'truncate' }, '日本語テキスト'], ctx({ width: 6, stringWidth: () => 20 })) as T;
+  expect(JSON.stringify(el)).toContain('…');
+});
+
+test('a badge is one pill: its glyph, its text and its tone', () => {
+  const el = toElement(['badge', { text: 'failed', tone: 'error' }], ctx()) as T;
+  expect(el.type).toBe('Text');
+  expect(el.props).toEqual({ color: 'error', bold: true });
+  expect(el.children).toEqual(['✗ failed']);
+});
+
+test('a rule fills the pane width, and a label sits in it', () => {
+  const plain = toElement(['rule'], ctx({ width: 10 })) as T;
+  expect(plain.children).toEqual(['──────────']);
+  const labelled = toElement(['rule', { label: 'logs' }], ctx({ width: 20 })) as T;
+  expect(labelled.children).toEqual([`─ logs ${'─'.repeat(13)}`]);
+});
+
+test('a link carries its url as the target', () => {
+  const el = toElement(['Link', { url: 'https://gitlab/pipelines/1' }], ctx()) as T;
+  expect(el.type).toBe('Link');
+  expect(el.props).toEqual({ href: 'https://gitlab/pipelines/1' });
+});
+
+test('containers recurse, and Markdown keeps its one string', () => {
+  const el = toElement(['Box', { flexDirection: 'column' }, ['ScrollBox', { height: 3 }, ['Text', {}, 'a']]], ctx()) as T;
+  expect(el.type).toBe('Box');
+  expect(el.props).toEqual({ flexDirection: 'column' });
+  const scroll = el.children[0] as T;
+  expect(scroll.type).toBe('ScrollBox');
+  expect(scroll.props).toEqual({ height: 3 });
+  expect((scroll.children[0] as T).children).toEqual(['a']);
+  const md = toElement(['Markdown', {}, '# hi'], ctx()) as T;
+  expect(md.type).toBe('Markdown');
+  expect(md.children).toEqual(['# hi']);
+});
+
+test('an interactive control is a dim placeholder naming it and its bind', () => {
+  const input = toElement(['input', { bind: 'branch', label: 'branch', value: 'feature-x' }], ctx()) as T;
+  const check = toElement(['check', { bind: 'watch', label: 'watch it', value: true }], ctx()) as T;
+  const select = toElement(['select', { bind: 'env', options: [{ value: 'dev', label: 'dev' }], value: 'dev' }], ctx()) as T;
+  const button = toElement(['button', { label: 'check again', action: 'check the pipeline' }], ctx()) as T;
+  for (const el of [input, check, select, button]) {
+    expect(el.type).toBe('Text');
+    expect(el.props).toEqual({ dim: true });
+  }
+  expect(JSON.stringify(input)).toContain('branch');
+  expect(JSON.stringify(input)).toContain('feature-x');
+  expect(JSON.stringify(check)).toContain('watch');
+  expect(JSON.stringify(select)).toContain('env');
+  expect(JSON.stringify(button)).toContain('check again');
+});

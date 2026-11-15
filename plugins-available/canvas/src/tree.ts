@@ -178,12 +178,14 @@ export function checkTree(tree: unknown): TChecked {
         }
       }
     } else if (type === 'rows' && key === 'items') {
+      if (Array.isArray(value) && value.length > LIMITS.children) problem(`rows has ${value.length} items — the limit is ${LIMITS.children}`);
       checkItemArray("rows' items", value, "rows' items must be { label, value, tone? }", [
         { name: 'label', kind: 'string', cap: LIMITS.text },
         { name: 'value', kind: 'string', cap: LIMITS.text },
         { name: 'tone', kind: 'token', optional: true },
       ]);
     } else if (type === 'tasks' && key === 'items') {
+      if (Array.isArray(value) && value.length > LIMITS.children) problem(`tasks has ${value.length} items — the limit is ${LIMITS.children}`);
       checkItemArray("tasks' items", value, "tasks' items must be { text, state } — a state is done, running, queued or failed", [
         { name: 'text', kind: 'string', cap: LIMITS.text },
         { name: 'state', kind: 'state' },
@@ -306,8 +308,8 @@ ScrollBox: height, flexGrow — takes node children
 Link: url — drawn as one line
 progress: label, value (0–100), tone
 badge: text, tone
-rows: items ({label, value, tone?})
-tasks: items ({text, state: done|running|queued|failed})
+rows: items ({label, value, tone?}, ≤ 100)
+tasks: items ({text, state: done|running|queued|failed}, ≤ 100)
 rule: label?
 input: bind, label?, placeholder?, value?, width?
 check: bind, label, value?

@@ -46,6 +46,19 @@ test('caps hold: nodes, depth, children, text, interactive count, bytes', () => 
   if (!fatCheck.ok) expect(fatCheck.error).toContain('too big');
 });
 
+test("rows' and tasks' items are capped at 100, like a box's children", () => {
+  const tasks = (n: number) => ['tasks', { items: Array.from({ length: n }, (_, i) => ({ text: `t${i}`, state: 'done' })) }];
+  const rows = (n: number) => ['rows', { items: Array.from({ length: n }, (_, i) => ({ label: `l${i}`, value: `v${i}` })) }];
+  expect(checkTree(tasks(LIMITS.children)).ok).toBe(true);
+  const tasksOver = checkTree(tasks(LIMITS.children + 1));
+  expect(tasksOver.ok).toBe(false);
+  if (!tasksOver.ok) expect(tasksOver.error).toContain(`the limit is ${LIMITS.children}`);
+  expect(checkTree(rows(LIMITS.children)).ok).toBe(true);
+  const rowsOver = checkTree(rows(LIMITS.children + 1));
+  expect(rowsOver.ok).toBe(false);
+  if (!rowsOver.ok) expect(rowsOver.error).toContain(`the limit is ${LIMITS.children}`);
+});
+
 test('the error is one short message, not a wall: three problems are cut with a count', () => {
   const r = checkTree(['Box', {}, ['Nope', {}], ['Nope2', {}], ['Nope3', {}], ['Nope4', {}]]);
   expect(r.ok).toBe(false);
