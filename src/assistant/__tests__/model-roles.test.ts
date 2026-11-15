@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { baseModel, modelWindow, roleModel, roleStart } from '../model-roles.ts';
 import { withModel, llmOpts } from '../llm-endpoint.ts';
 import { DEFAULT_CONTEXT_WINDOW } from '../context-meter.ts';
+import { hostConfigSchema } from '../../config/schema.ts';
 
 const ai = { model: 'default-model', roles: { fast: 'small-model' }, models: { 'small-model': { contextWindow: 256_000 }, 'big-model': { contextWindow: 512_000 } }, contextWindow: 300_000 };
 
@@ -58,5 +59,17 @@ describe('withModel', () => {
     const base = llmOpts({ model: 'default-model' });
     expect(withModel(base, undefined)).toBe(base);
     expect(withModel(base, '   ')).toBe(base);
+  });
+});
+
+describe('the schema', () => {
+  test('takes the catalogue and the roles', () => {
+    const parsed = hostConfigSchema.parse({ ai: { models: { 'big-model': { contextWindow: 512_000 } }, roles: { fast: 'small-model' } } });
+    expect(parsed.ai?.models).toEqual({ 'big-model': { contextWindow: 512_000 } });
+    expect(parsed.ai?.roles).toEqual({ fast: 'small-model' });
+  });
+  test('refuses a window that is not a positive integer', () => {
+    expect(hostConfigSchema.safeParse({ ai: { models: { 'big-model': { contextWindow: 0 } } } }).success).toBe(false);
+    expect(hostConfigSchema.safeParse({ ai: { models: { 'big-model': { contextWindow: 1.5 } } } }).success).toBe(false);
   });
 });

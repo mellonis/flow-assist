@@ -58,6 +58,14 @@ export const hostConfigSchema = z.object({
     provider: z.string().register(appliesOnRestart, {}).optional(),
     baseUrl: z.string().register(appliesOnRestart, {}).optional(),
     model: z.string().optional(),
+    // What a role draws on (`src/assistant/model-roles.ts`):
+    // `models.<id>.contextWindow` is one model's window — the API cannot be asked for it,
+    // and the meter, the automatic compaction and the recall threshold measure against the
+    // window of the model a conversation runs; `roles.<name>` is the model id an agent
+    // file's `model:` or the subagent tool's `model` means here. `ai.contextWindow` is the
+    // window of a model the catalogue does not name (200000 otherwise).
+    models: z.record(z.string(), z.object({ contextWindow: z.number().int().positive() }).partial()).optional(),
+    roles: z.record(z.string(), z.string()).optional(),
     tokenEnv: z.string().register(appliesOnRestart, {}).optional(),
     stream: z.boolean().optional(),
     // The Anthropic wire only (`provider: 'anthropic'`, src/assistant/anthropic.ts):
