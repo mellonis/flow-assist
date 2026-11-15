@@ -1,5 +1,6 @@
 // src/__tests__/canvas-plugin.e2e.test.ts
 import { expect, test } from 'bun:test';
+import { TestBackend } from '@flowtty/core/testing';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import buildCanvasPlugin from '../../plugins-available/canvas/src/index.ts';
 
@@ -41,6 +42,18 @@ type Ui = Awaited<ReturnType<typeof bootApp>>;
 const settleUntil = async (ui: Ui, ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); if (!ok()) throw new Error(`never\n${ui.backend.lastFrame}`); };
 const turn = async (ui: Ui, text: string) => { await ui.press('F'); await ui.type(text); await ui.press('return'); await settle(20); };
 const toPlugin = async (ui: Ui) => { ui.backend.press({ name: ']', ctrl: true }); await settle(); };
+// A terminal that can be resized, as a real one is (chat-modes.e2e.test.ts has the same
+// backend for the layout tests): the surface reads its room through `useSurfaceSize`,
+// which follows `onResize`, so the width and height below reach it without a remount.
+class ResizableBackend extends TestBackend {
+  private w: number;
+  private h: number;
+  private subs = new Set<() => void>();
+  constructor(w: number, h: number) { super(w, h); this.w = w; this.h = h; }
+  override size() { return { width: this.w, height: this.h }; }
+  override onResize(fn: () => void) { this.subs.add(fn); return () => { this.subs.delete(fn); }; }
+  resize(w: number, h: number) { this.w = w; this.h = h; for (const fn of this.subs) fn(); }
+}
 // A request message's text — a plain string on this wire, but read defensively, the way
 // `frameItem` frames the press as one text block the string holds whole.
 const msgText = (m: { role: string; content?: unknown }): string => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''));
@@ -158,6 +171,74 @@ test('the : line owns every key while it is open — the surface\'s keys wait fo
   await ui.press('x');
   await settle();
   expect(ui.backend.lastFrame).toContain('press x again to delete');
+});
+
+// The terminal decides the room: the same surface, drawn again at each size, with no
+// remount and no state lost. The renderer cuts with `fit` at the width it is handed, so
+// the long line below is the ruler — whole at 78 cells, cut at 60, whole again after.
+test('the surface is laid out again when the terminal is resized', async () => {
+  const long = 'a pipeline line long enough that a narrow terminal has to cut it — ENDMARK';
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'canvas_draw', args: { canvas: 'ci', title: 'Pipelines', owner: 'reviewer', tree: ['Box', { flexDirection: 'column', gap: 1 },
+      ['progress', { label: 'jobs passed', value: 75, tone: 'warn' }],
+      ['Text', { truncate: true }, long],
+      ['Text', {}, 'row two'],
+      ['Text', {}, 'row three'],
+      ['Text', {}, 'row four'],
+      ['button', { label: 'check again', action: 'check again' }]] } },
+     { tool: 'canvas_open', args: { canvas: 'ci' } }],
+    [{ text: 'Here it is.' }],
+  );
+  const backend = new ResizableBackend(120, 32);
+  const ui = await bootApp(model, 120, 32, (make) => [buildCanvasPlugin({ make, config: {} })], {}, { chatMode: 'panel', backend });
+  await turn(ui, 'draw my pipeline');
+  await settleUntil(ui, () => ui.backend.lastFrame.includes('Pipelines'));
+  // 120 columns: the chat is docked beside the canvas, the surface has 78 cells, and the
+  // whole line, the bar and the button are on screen.
+  expect(ui.backend.lastFrame).toContain(long);
+  expect(ui.backend.lastFrame).toContain('75%');
+  expect(ui.backend.lastFrame).toContain('check again');
+  // 60 columns: the chat goes to the bottom and the surface is 60 cells wide — the same
+  // line is cut by the renderer, not left at the width it was first drawn with.
+  backend.resize(60, 32);
+  await settle(20);
+  const narrowRows = ui.backend.lastFrame.split('\n');
+  const cut = narrowRows.find((line) => line.includes('a pipeline line'));
+  expect(cut).toBeDefined();
+  expect(cut).toContain('…');
+  expect(cut).not.toContain('ENDMARK');
+  // The surface is still the same one: its header, its bar, its footer.
+  expect(ui.backend.lastFrame).toContain('canvas · «Pipelines» · reviewer');
+  expect(ui.backend.lastFrame).toContain('75%');
+  // Nothing threw and the app is alive after the resize: the canvas takes the keys and
+  // `x` arms the delete, which the header says on screen (a later `tab` clears it). The
+  // armed header is longer than the pane, so it is the second thing `fit` cuts at 60.
+  await toPlugin(ui);
+  await ui.press('x');
+  const armedHeader = ui.backend.lastFrame.split('\n').find((line) => line.startsWith('canvas · «Pipelines»'));
+  expect(armedHeader).toContain('…');
+  expect(armedHeader).toContain('press x again');
+  await ui.press('tab');
+  expect(ui.backend.lastFrame).not.toContain('press x again');
+  // Back to 120x32: the layout is computed from the new size again, not frozen narrow.
+  backend.resize(120, 32);
+  await settle(20);
+  const wideAgain = ui.backend.lastFrame.split('\n').find((line) => line.includes('a pipeline line'));
+  expect(wideAgain).toContain(long);
+  // A short terminal: the body scrolls inside the pane — the header stays the surface's
+  // first row, the button below the fold is not drawn over the footer, and every painted
+  // line fits the terminal.
+  backend.resize(120, 12);
+  await settle(20);
+  const shortRows = ui.backend.lastFrame.split('\n');
+  expect(shortRows.length).toBeLessThanOrEqual(12);
+  for (const line of shortRows) expect(line.length).toBeLessThanOrEqual(120);
+  const headerAt = shortRows.findIndex((line) => line.includes('canvas · «Pipelines»'));
+  const barAt = shortRows.findIndex((line) => line.includes('75%'));
+  expect(headerAt).toBeGreaterThanOrEqual(0);
+  expect(headerAt).toBeLessThan(barAt);
+  expect(ui.backend.lastFrame).not.toContain('check again');
 });
 
 // ── Saved layouts (Task 9) ───────────────────────────────────────────────────
