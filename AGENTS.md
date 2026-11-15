@@ -828,7 +828,8 @@ there is no `/fullscreen`.
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
   conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / asks / queued /
   delayed / idle, `answered` — an idle node whose latest answer nobody has read, `latest` — the tool label while one runs, else the round's verb, `below` — its live
-  descendants); `nodeByKey` returns the live descendant of a key. One rule, `childState`,
+  descendants, `model` — the model it runs, when it has one); `nodeByKey` returns the
+  live descendant of a key. One rule, `childState`,
   gives a child's status to `runningChildren()` and to `tree()`: `waiting` while a y/n is parked, `asks` while its `ask_parent` question waits (a child holds one of the two at a time), else `working`. Ended children are not
   nodes: their result is a row of the conversation and `endedChildren` keeps the last
   twenty. A change reaches the chat as the `tree` event, raised on the conversation where it
@@ -875,7 +876,9 @@ there is no `/fullscreen`.
   other row, a hidden state, the chat folded away or without the keyboard) and when the
   conversation on screen changes (`adopt`). `/agents` is a command panel (`follow: true`, so
   its cursor stays on its row id as rows start and end) whose rows are
-  `agentsPanelRows`: live nodes with the time spent, then the ended ones; `x` asks in place
+  `agentsPanelRows`: live nodes with the time spent and the model a node runs when it is
+  not the conversation's own (`chatModel`; a conversation with no model names them all),
+  then the ended ones; `x` asks in place
   of the row and `y` stops, as in the rows; ⏎ on a live row closes the panel and starts watching it, on an ended row it says there is nothing to watch. A subagent's
   block is never drawn under it (the panel hides it), so a subagent's request is not
   answerable there. The conversation's own request that arrives while the cursor is in the
@@ -1040,7 +1043,10 @@ the resolve message, `@id is not trusted here — ask the person to start @id on
 (checked first, `agentTrusted`), an `args` that is not an object, an unknown parameter
 (naming what it takes), a missing required one. The agent runs as a `task` with
 `write: true` (each write asks the person), the file's tool groups and the capped auto
-mode. The system prompt of every kind that is offered `subagent` ends with a list of
+mode. **`model` names a ROLE from `ai.roles`** (`roleStart`), never a model id — on an
+agent call (the call's role wins over the file's) and a plain task alike; a role nothing
+defines degrades as a file's does (models): one note, and the work starts on the
+conversation's model. The system prompt of every kind that is offered `subagent` ends with a list of
 the agents the model may start (`agentsBlock`: `@id — description (params)`, only those
 `agentTrusted`, at most twenty, read at each build of the prompt). An agent never starts
 itself: `runningAgentKeys` (`conversation-turn.ts`) collects the `agentKey` (source and real
@@ -1686,7 +1692,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
   `src/assistant/conversation-turn.ts`), not only the turn's last one — a long turn shows it climb
   rather than jump once at the answer. The split between parts is always an estimate,
   scaled to the total.
-  The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
+  The window is the one the conversation's model has — `ai.models.<id>.contextWindow`,
+  else `ai.contextWindow`, else 200 000 (see (models)) — the API cannot be asked for it.
   `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
   shrinks what the MODEL sees (the conversation's `api` → a summary in the system context) and leaves
   the screen alone — the display list keeps the conversation and gains a `note` marking
@@ -1716,9 +1723,14 @@ A saved history that holds calls under the name `background` is sent as it is. T
   previous kept`. Tool-call markup written as text (`stripToolMarkup`: DeepSeek's DSML
   `<｜DSML｜…>`, `<tool_call>`, `<function_calls>`, `<invoke …>`, closed or cut off) is
   stripped from the answer, from the previous summary it is shown, and from a summary
-  read back from a saved session.
+  read back from a saved session. Compaction runs on the conversation's model
+  (`foldIntoHandoff` sends `withModel(llmOpts(ai), c.model)`): the summary request sends
+  the WHOLE history above, so a model with a smaller window cannot compact a larger
+  conversation. That gap is recorded for its return in docs/internal/plans/_followups.md
+  ("Compaction on a role of its own").
 - **The chat compacts by itself before the context overflows** (`ai.autoCompact`:
-  `enabled`, default true; `threshold`, 0.5–0.95 of `ai.contextWindow`, default 0.8;
+  `enabled`, default true; `threshold`, 0.5–0.95 of the window in use (see (models)),
+  default 0.8;
   `autoCompactLimits` / `overThreshold` in `src/assistant/compaction.ts`). The place is
   `AgentOpts.beforeRequest`, which `agentChat` calls before EVERY request of a turn —
   the first, and each after a round's tool results are all in — so a compaction never
@@ -1824,7 +1836,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   module-level. It is decided in BATCHES at the END of a turn (`decideBatch`, in
   `runTurn`'s `finally`): replacing old content changes the request's prefix and costs
   one prompt-cache miss, so it happens when the measured context passes
-  `ai.recall.threshold` (0.5 of `ai.contextWindow`) or every `ai.recall.everyTurns`
+  `ai.recall.threshold` (0.5 of the window in use, see (models)) or every `ai.recall.everyTurns`
   turns (10; 0 — the threshold alone), every eligible item at once; a stub is a pure
   function of its item, so between batches the prefix is byte-stable, and a batch that
   finds nothing new changes nothing. The end of a turn is the one moment everything in
@@ -2127,7 +2139,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
     (<by>)*`, `person` read as `by you`.
   - `subagent` — a subagent started or ended: `label`, `by` (`model` or `person`, who
     started it), `event` (`start`, `answered` or `end`), `id` (the name of the subagent's own journal,
-    below; absent when it has none) and, on an answer or an end, its `outcome`
+    below; absent when it has none), on a `start` `model` (the model the child runs, when
+    it has one) and, on an answer or an end, its `outcome`
     (`answer`, `empty`, `limit`, `failed` or `stopped`); one stopped with its session or at
     exit, or by the person, says what stopped it in `stoppedBy` (`clear`, `exit` or `person`). Tagged `subagent: <label>`,
     written through the route's `about` into the journal of the subagent's owner (the
@@ -2146,8 +2159,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
     `name` (the id), `source`, `path`, `hash` (of the directory). The model's own load is its
     `call` event. `/export` draws `*Skill «x» loaded by you | by an agent (source, path,
     content <12 hex>)*`; the person's turn row is the typed `/skill <name> [text]`.
-  - `task-start` — a background task the model started from an agent file: `label`, `by`
-    and the same `agent`, `source`, `path`, `hash`; a task of no file writes none. Written
+  - `task-start` — a background task the model started from an agent file: `label`, `by`,
+    `model` (the model the child runs, when it has one) and the same `agent`, `source`,
+    `path`, `hash`; a task of no file writes none. Written
     through the route's `about` into the owner's journal; `/export` draws `Task «<label>»
     started from @<id> (by the model)`.
   **A subagent's journal.** A subagent keeps its whole conversation in
@@ -3212,6 +3226,17 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` and `ask_user` are withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (a subagent's `chatLLM` adds both to the list, a task's adds `ask_user`). The worker prompt both kinds get says not to wait for the user, to make a reasonable assumption where the task leaves something open and name each assumption in the result, and to ask the conversation that started it ONE question with `ask_parent` (below) only when the work cannot go on without an answer, reading a `no answer` reply as "proceed on the best assumption". The turn shape carries `askParent` and `answerChild`: a task and a subagent are offered `ask_parent`, a session and a subagent are offered `answer_child`; the session withholds `ask_parent`, the task `answer_child`, the one-shot prompt both, and every run a tool starts through `ctx.chatLLM` withholds both (`NESTED_WITHHELD`). A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
+- **A conversation runs ONE model (models)** — its own (a child's, resolved from a role at
+  its start), else `ai.model`, else the provider's default (`effectiveModel()`), and every
+  request carries it (`withModel`). A child without a role of its own inherits its parent's
+  model, materialised at the start (`child.model = spec.model ?? this.effectiveModel()`),
+  so a task a subagent starts runs what that subagent runs; a session file records no
+  model. The window is that model's: `Conversation.contextWindow()` —
+  `ai.models.<id>.contextWindow` → `ai.contextWindow` → 200 000 — is the ONE reader of the
+  window, so the meter, the automatic compaction's threshold and the recall threshold all
+  measure against it. A role nothing defines is not a refusal: one note, `role "<key>" is
+  not defined (ai.roles) — using the conversation's model`, and the work starts on the
+  conversation's model — a model id given where a role belongs is exactly that case.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
   `src/assistant/registry.ts`): the chat one for its life, the one-shot one for its run,
   a test rig one per rig. The registry holds the host's lock token, what is said once for
@@ -3589,7 +3614,7 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
   docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two
   `---` lines — `description` (required), `params` (names, a trailing `?` for an optional
-  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`) —
+  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`), `model` (a role from `ai.roles` — a ROLE, never a model id, so the file travels between machines; see (models)) —
   and a body; `{{name}}` in the body is replaced, single braces never. The reader is our
   own and total: every error carries the file and its 1-based line, an unknown or repeated
   key, an undeclared `{{name}}`, a declared parameter the body never spells and a
@@ -4878,6 +4903,12 @@ reducer filters as you type and submits on Enter, and here the line is the filte
 - `ai.recall` (`enabled` true, `threshold` 0.5, `minChars` 4096, `everyTurns` 10) —
   bulky content as stubs (see "What the model can do"). Its `config_schema` note
   (`KEY_DEFAULTS['ai.recall']`) says what a stub is and how to turn it off.
+- **`ai.models`, `ai.roles` and `ai.model`** (`src/assistant/model-roles.ts`) — models by
+  role, and a window per model. `ai.model` is a model id, never read as a role;
+  `ai.roles.<role>` is the model id a role means on this machine (the name an agent file's
+  `model:` or the `subagent` tool's `model` asks for); `ai.models.<id>.contextWindow` is
+  one model id's window. All three sit under `ai`, on the model's leash: no mark, only the
+  person sets them, `config set` treating them as any other key.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 - **Roots: each consumer has its own key, and the host never reads a plugin's.** The
   host's shell (`!command`, `run_command`) is confined to `shell.roots` (`shellRoots`

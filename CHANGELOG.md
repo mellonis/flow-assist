@@ -5,6 +5,20 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Work can run on a model of its own: roles, and a window per model.** An agent file's
+  `model:` line and the `subagent` tool's `model` argument name a role — `fast`, `deep`, a
+  name you choose — and `config set ai.roles.fast small-model` says what that role runs on
+  this machine, so one file works on every machine you have and each maps the name to a
+  model id of its own. A subagent without a role runs the model of the chat that started it
+  (a task a subagent starts runs what that subagent runs), and a role this machine does not
+  define is not an error: the work runs on the conversation's model and one note says so.
+  Each model can also say what it holds (`config set ai.models.big-model
+  '{"contextWindow":512000}'`) — the context meter, the automatic compaction and the
+  recall measure against the window of the model the work runs, `ai.contextWindow`
+  (200 000) standing for models you did not name. `/agents` names the model a subagent runs
+  when it is not the chat's, and the journal keeps it with the start line. All of it is
+  under `ai`, like the rest of the model's settings: yours alone to set.
+
 - **A question you answered stays in the chat.** `ask_user`'s block no longer disappears
   the moment it is answered: the question stays where it was asked with the answer under
   it — the options you picked, your own words, or `→ dismissed` — saved with the
