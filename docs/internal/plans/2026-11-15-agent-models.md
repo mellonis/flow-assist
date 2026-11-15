@@ -128,9 +128,14 @@ describe('the window', () => {
     expect(modelWindow(ai, 'unlisted-model')).toBe(300_000);
     expect(modelWindow(ai, undefined)).toBe(300_000);
   });
-  test('with neither, 200k — and a nonsense value is no value', () => {
+  test('with neither, 200k — and anything but a whole positive number is no value', () => {
     expect(modelWindow({}, undefined)).toBe(DEFAULT_CONTEXT_WINDOW);
     expect(modelWindow({ models: { x: { contextWindow: 0 } }, contextWindow: -1 }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: 0.5 } } }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: 1.5 } } }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ contextWindow: 0.5 })).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: true } } }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
+    expect(modelWindow({ models: { x: { contextWindow: '250000' } } }, 'x')).toBe(DEFAULT_CONTEXT_WINDOW);
   });
 });
 
@@ -180,10 +185,10 @@ interface AiConfig {
 
 const asAi = (ai: unknown): AiConfig => (ai && typeof ai === 'object' ? (ai as AiConfig) : {});
 const name = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-const positive = (v: unknown): number | undefined => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
-};
+// A whole positive number, or no value: the schema says the same, and a hand-edited
+// file that says `0.5` must not become a window of zero.
+const positive = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
 
 // `ai.model` as written — a model id, never a role.
 export function baseModel(ai: unknown): string | undefined {
