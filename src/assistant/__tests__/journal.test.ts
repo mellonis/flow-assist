@@ -468,3 +468,15 @@ test('/export: a job id opened again (a session resumed after a crash counts fro
   expect(second).toContain('*exit 0');
   expect(second).not.toContain('did not finish');
 });
+
+test('/export says a turn whose answer looped was stopped — the dropped text is the journal\'s evidence, not the document\'s', () => {
+  const md = exportMarkdown([
+    { t: 'start', id: 'x' },
+    { t: 'row', role: 'user', text: 'go on' },
+    { t: 'answer', text: 'the head' },
+    { t: 'end', ms: 1200, looped: 405, loopTail: 'loop loop loop ' },
+  ], { title: 't', id: 'x' });
+  expect(md).toContain('the head');
+  expect(md).toContain('*stopped (the answer looped)*');
+  expect(md).not.toContain('loop loop');
+});

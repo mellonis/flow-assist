@@ -19,6 +19,13 @@ export function roundCapTurn(rounds: number, lastStep?: string, tokens?: number)
   const limit = tokens !== undefined ? `${tokens} tokens, its budget for one turn (ai.maxTurnTokens)` : `${rounds} rounds, its limit for one turn (ai.maxRounds)`;
   return `(The host stopped this turn after ${limit}${lastStep ? `; my last step was ${lastStep}` : ''}. The work is not finished: on "continue" I pick up from there.)`;
 }
+// What the model's history says of a turn the host stopped because the answer fell
+// into a loop: in the model's voice, what was cut and that the work is unfinished — so
+// a "continue" after it reads as picking up from the head that was kept, and the dropped
+// repetition is never offered back as something it said.
+export function loopTurn(dropped: number): string {
+  return `(The host stopped this turn because my answer fell into a loop: the ${dropped} characters after the repeat began were dropped, and the text above is where it stopped. The work is not finished: on "continue" I pick up from there.)`;
+}
 export function failedTurn(message: unknown): string {
   const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
   return `(This turn failed before I could finish${why ? `: ${why}` : ''}.)`;

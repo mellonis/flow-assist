@@ -72,6 +72,10 @@ interface ChatMsg {
   reasoning?: string;
   // The turn ran out of rounds after this many, with no answer.
   roundLimit?: number;
+  // The answer fell into a repeat and the guard stopped it: how many characters were
+  // dropped (src/assistant/loop-guard.ts). The head above is the answer; this line says
+  // what was cut and that the model never sees it.
+  looped?: number;
   // The last step of a turn that stopped at the cap — where it stopped.
   roundLimitAt?: string;
   // Set when it was the token budget (`ai.maxTurnTokens`) that stopped it: the tokens spent.
@@ -903,6 +907,12 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // streamed (a `Next:` it held reflows by a word), now in the normal colour
       // under `ƒ`.
       if (answer) mdLines(answer, inner).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
+      // The answer fell into a loop and the host stopped it: said in the warn colour
+      // right under the head the person read, where the round-cap line is — the
+      // dropped repetition is the journal's, never the model's history.
+      if (Number(m.looped) > 0) {
+        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`⚠ stopped — the answer was looping (${Number(m.looped)} chars dropped); it is not kept in the model's history`, inner) }] });
+      }
     } else if (role === 'note' && typeof m.summary === 'string') {
       // /compact's note: ONE separator row, the summary the model now sees folded
       // under it (a click or the key opens it). A note saved before carries the

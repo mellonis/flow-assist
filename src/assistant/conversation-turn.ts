@@ -15,7 +15,7 @@ import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
 import { addCalls, addReasoning, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
-import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
+import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, loopTurn, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
@@ -279,6 +279,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   let roundLimit = 0;
   let lastStep = '';
   let limitTokens: number | undefined; // set when the token budget ended the turn
+  // The answer degenerated into a repeat and the guard stopped it (./loop-guard.ts):
+  // `dropped` code units went, `tail` is the head of them — journaled as evidence,
+  // never kept in the answer or the model's history.
+  let loopedInfo: { dropped: number; tail: string } | null = null;
   c.inTurn = true; // a project note from here on waits for the turn's end (the `finally`)
   try {
     const chatResult = await c.deps.chatLLM(wire, {
@@ -626,6 +630,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     lastStep = String((chatResult as { lastStep?: string } | undefined)?.lastStep ?? '');
     const limited = chatResult as { limitBy?: string; turnTokens?: number } | undefined;
     limitTokens = limited?.limitBy === 'tokens' ? Number(limited.turnTokens ?? 0) : undefined;
+    loopedInfo = (chatResult as { looped?: { dropped: number; tail: string } } | undefined)?.looped ?? null;
     const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
     const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
     if (reported) c.usage = reported;
@@ -635,8 +640,11 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // Stopped at the cap: the turn is closed in the model's history by the
       // host's line saying where, and the person is offered ⏎ continue.
       ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined, limitTokens) } as ChatMessage] : []),
+      // Stopped for looping: the kept head is the answer, closed by the host's line
+      // saying what was cut — the dropped repetition never goes back to the model.
+      ...(loopedInfo ? [{ role: 'assistant', content: loopTurn(loopedInfo.dropped) } as ChatMessage] : []),
     ];
-    if (roundLimit) c.setContinueOffer(true);
+    if (roundLimit || loopedInfo) c.setContinueOffer(true);
     // The calls are already in the turn, where they were made (`onToolRun`).
     const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
     // After a real write the plugins reload what they show — otherwise an open
@@ -692,6 +700,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       t: 'end', ms: finalMs, ...(spent ? { tokens: spent } : {}),
       ...(aborted ? { stopped: c.stopKey || keyGlyph('escape') } : {}), ...(failed ? { failed: failure } : {}),
       ...(roundLimit ? { roundLimit, ...(lastStep ? { lastStep } : {}), ...(limitTokens !== undefined ? { limitBy: 'tokens', turnTokens: limitTokens } : {}) } : {}),
+      ...(loopedInfo ? { looped: loopedInfo.dropped, loopTail: loopedInfo.tail } : {}),
       // A round cut off by Esc or an error never reached `onLiveCommit`.
       ...(c.roundText ? { cut: c.roundText } : {}), ...(c.roundReasoning ? { reasoning: c.roundReasoning } : {}),
     });
@@ -720,7 +729,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // above what the turn did after it. (An answer is always the turn's last
       // message: `onLiveCommit` puts it on a fresh one under a block.)
       if ((aborted || failed || roundLimit) && at >= 0 && at < next.length - 1) { next.push({ role: 'assistant', content: '' }); at = next.length - 1; }
-      if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(c.stopKey ? { stoppedBy: c.stopKey } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}) };
+      if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(c.stopKey ? { stoppedBy: c.stopKey } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}), ...(loopedInfo ? { looped: loopedInfo.dropped } : {}) };
       return next;
     });
     // Empty answer: the model gave only reasoning but no final text — say so
@@ -736,7 +745,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       c.answeredAt = at;
       if (c.shows()) c.seenAt = at;
     }
-    if (!c.content.trim() && !failed && !aborted && !roundLimit) c.setEmptyAnswer(true);
+    if (!c.content.trim() && !failed && !aborted && !roundLimit && !loopedInfo) c.setEmptyAnswer(true);
     // c.busy follows the stream lifecycle synchronously: true from `send`'s top
     // guard, false again HERE when the stream ends. Nothing a render does sets it, so a
     // render skipped (the chat closed mid-turn, an aborted turn that does not commit)
