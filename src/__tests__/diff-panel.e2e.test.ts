@@ -244,6 +244,35 @@ test('a click on a trail row beside the panel opens it: the rows are measured at
   ui.app.unmount();
 });
 
+test('the hint offers no fold while /context takes the field', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  expect(ui.backend.lastFrame).toContain('⏎ fold');
+  await ui.type('/context');
+  await ui.press('return');
+  await settle(4);
+  // The panel is still beside the conversation, and the hint names the keys that have it:
+  // `/context` closes on Esc or ⏎, and ⏎ folds nothing while it is up.
+  expect(ui.backend.lastFrame).toContain('diff · 1 file');
+  expect(ui.backend.lastFrame).not.toContain('⏎ fold');
+  ui.app.unmount();
+});
+
+test('a terminal too small for either shape says so, not /mode window', async () => {
+  const root = scratchTree();
+  // Twelve rows of a chat in a window: the field's strip leaves the split fewer rows than
+  // the conversation's least, in the one mode `/mode window` already is.
+  const ui = await bootApp(new ScriptedModel(), 80, 12, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('the terminal is too small for the diff panel');
+  expect(ui.backend.lastFrame).not.toContain('/mode window');
+  ui.app.unmount();
+});
+
 test('a docked chat with no rows for the panel says where it can be shown', async () => {
   const root = scratchTree();
   const model = new ScriptedModel();

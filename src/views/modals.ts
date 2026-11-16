@@ -2076,9 +2076,9 @@ export function renderChatModal({
               // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
               // names them instead of the history it does not walk here. With the field
               // offering `⏎ continue` after a limit, ⏎ is the field's and is not a fold.
-              // A y/n or a question takes the keys, and the panel's keys are not offered
-              // then.
-              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice
+              // A y/n, a question or the `/context` panel takes the keys, and the
+              // panel's keys are not offered then.
+              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
               ? (continueOffer
                 ? `${CAP.upDown} file · ${CAP.esc} close`
                 : `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`)

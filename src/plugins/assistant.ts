@@ -1215,13 +1215,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffCollapsed(next);
             host.notify();
           };
-          // A panel the layout gave no rows is open and invisible: the docked chat has the
-          // field's strip and nothing left over. Say how to give it room, once, when the
+          // A panel the layout gave no rows is open and invisible: a chat docked beside a
+          // plugin has the field's strip and nothing left over, and a terminal too small
+          // for either shape leaves none. Say what would give it room, once, when the
           // panel is asked for — and with the chat open, since a collapsed chat draws no
           // panel for another reason and the way out is its own key.
           ui.useEffect(() => {
-            if (diffOpen && open && !diffShownRef.current) (host.services as Record<string, any>).showMessage?.('no room for the diff panel here — /mode window');
-          }, [diffOpen, open]);
+            if (!diffOpen || !open || diffShownRef.current) return;
+            (host.services as Record<string, any>).showMessage?.(layout === 'panel'
+              ? 'no room for the diff panel here — /mode window'
+              : 'the terminal is too small for the diff panel');
+          }, [diffOpen, open, layout]);
           // A tree that changes while the panel is open is read again: once a second, so a
           // write lands in the panel as it happens, and after every round of a turn.
           // A panel nobody can see costs no git call: collapsed in panel mode or closed in

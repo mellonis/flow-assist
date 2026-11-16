@@ -346,9 +346,11 @@ async function scanRoot(root: string): Promise<RootScan> {
   if (fromAbove) tops.push(fromAbove);
   const claimed = fromAbove !== null;
   // `.git` as a directory is a repository and as a file a worktree; either way the
-  // entry's presence makes a top, and an entry that cannot be looked at is none.
+  // entry's presence makes a top. It is asked with `stat`, so a link is read as what it
+  // leads to: one that leads nowhere names no repository. An entry that cannot be
+  // looked at is none.
   const isTop = async (abs: string): Promise<boolean> => {
-    try { await fs.promises.lstat(path.join(abs, '.git')); return true; } catch { return false; }
+    try { await fs.promises.stat(path.join(abs, '.git')); return true; } catch { return false; }
   };
   let examined = 0;
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -406,7 +408,7 @@ const JUNK = new Set(['.DS_Store']);
 interface SnapshotIndex {
   root: string; // the root's REAL path
   taken: number; // when the baseline was captured, ms since the epoch
-  truncated: boolean; // the capture stopped at `SNAPSHOT_MAX_FILES` and left files out
+  truncated: boolean; // the capture left files out: it reached `SNAPSHOT_MAX_FILES`, or a directory would not be read
   files: Record<string, string>; // root-relative '/'-path → sha-256 hex of the file's bytes
 }
 
@@ -510,11 +512,12 @@ async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex
         try {
           await fs.promises.link(tmp, blob);
         } catch (e) {
-          const code = (e as NodeJS.ErrnoException).code;
-          // A store on a filesystem without hard links: a rename publishes the complete
-          // file just as well, and the bytes behind a hash are always the same bytes.
-          if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'ENOTSUP') throw e;
-          if (code !== 'EEXIST') await fs.promises.rename(tmp, blob);
+          // A blob already published under its hash is the same bytes, and is kept as it
+          // stands. Any other failure means a store without hard links (a link is
+          // refused, or the directory does not take one): a rename publishes the
+          // complete file just as well, and whatever else it throws leaves this file out
+          // of the index rather than under a name its bytes do not fill.
+          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') await fs.promises.rename(tmp, blob);
         }
       } catch { continue; } finally {
         // The temp name never outlives the attempt, whatever it ended in.
