@@ -41,6 +41,23 @@ test('a session with no model of its own runs ai.model, and its file carries no 
   expect(Object.hasOwn(raw, 'model')).toBe(false);
 });
 
+test('the writer trims what a conversation holds as its model', async () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { model: 'default-model' } });
+  rig.conv.model = '  big-model  ';
+  await rig.conv.send('hello');
+  rig.conv.save();
+  const id = rig.conv.sessionId!;
+  const file = path.join(homeIn(rig.sessionsDir!, id), `${id}.json`);
+  let raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+  expect(raw.model).toBe('big-model'); // a padded id is saved as the id it names
+  rig.conv.model = '   ';
+  rig.conv.save();
+  raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+  // Whitespace is no model at all, as on the read — never a blank name saved for good.
+  expect(Object.hasOwn(raw, 'model')).toBe(false);
+});
+
 test('a model the catalogue does not name still runs, on the window ai.contextWindow stands for', async () => {
   const model = new ScriptedModel();
   const rig = conversationRig(model, { ai: { model: 'default-model', contextWindow: 90000 } });
