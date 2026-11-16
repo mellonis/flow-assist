@@ -19,6 +19,17 @@ test('a stopped result reads `<label> stopped:` and the text it had, or that it 
   expect(childResultText('w', { outcome: 'failed', text: '', error: 'boom' })).toBe('w failed:\nboom');
 });
 
+test('a delivered result names the loop as it names a limit — one clause, only when the turn looped', () => {
+  expect(childResultText('w', { outcome: 'answer', text: 'ok', looped: 405 })).toBe(
+    'w finished:\nok\nthe answer was looping (405 chars dropped) — the loop is not kept in the model\'s history',
+  );
+  // Nothing said of a turn that did not loop, and the clause never hides the limit's.
+  expect(childResultText('w', { outcome: 'answer', text: 'ok' })).toBe('w finished:\nok');
+  expect(childResultBody({ outcome: 'limit', text: 'ok', looped: 405, limit: { rounds: 3, lastStep: 'datetime {}' } })).toBe(
+    'ok\nstopped after 3 rounds — last: datetime {}\nthe answer was looping (405 chars dropped) — the loop is not kept in the model\'s history',
+  );
+});
+
 test('`admit` hands back what gives the place up: true while queued, false once it started', async () => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-dequeue-')));
   const config: Record<string, unknown> = { ai: {}, memory: { file: path.join(home, 'm.json') }, workspace: { dir: path.join(home, 'p') }, shell: { roots: [home] }, sessions: { maxRunning: 2 } };

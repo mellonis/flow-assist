@@ -1270,6 +1270,7 @@ export class Conversation {
           ...(end ? { ms: end.ms } : {}),
           ...(end?.tokens ? { tokens: end.tokens } : {}),
           ...(end?.error ? { error: end.error } : {}),
+          ...(end?.looped ? { looped: end.looped } : {}),
           ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep, ...(end.limit.by ? { by: end.limit.by } : {}) } } : {}),
         };
       } catch (e) {

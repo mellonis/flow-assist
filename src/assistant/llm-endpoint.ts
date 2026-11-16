@@ -10,6 +10,7 @@
 // sessions — has one shape for both; only the request and the stream differ.
 
 import { RETRIES_DEFAULT, RETRY_DELAY_DEFAULT } from './llm-retry.js';
+import { baseModel, modelWindow } from './model-roles.js';
 
 export type Provider = 'openai' | 'anthropic';
 
@@ -26,7 +27,7 @@ export interface LlmOpts {
   token?: string;
   // The variable the token is read from — named in the error when it is not set.
   tokenEnv: string;
-  // The Messages API requires a ceiling on the answer; the OpenAI path does not send one.
+  // The ceiling on one answer, sent as `max_tokens` on both wires (`answerCeiling`).
   maxTokens: number;
   thinking?: ThinkingConfig;
   // How many times a request that failed for a reason that passes is repeated, and the
@@ -36,12 +37,40 @@ export interface LlmOpts {
 }
 
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
-export const DEFAULT_MAX_TOKENS = 8192;
+
+// How long one answer may run: never over this, never under the floor the API's own
+// thinking needs, and never past the room the window has left.
+export const ANSWER_CEILING_MAX = 32_000;
+export const ANSWER_CEILING_MIN = 1_024;
+
+// The ceiling a provider that refuses the resolved one by name is asked for next: the
+// smallest output cap a current model is assumed to take. One retry only — a refusal of
+// this value stands, and both wires remember it for the process (`./wire-fields.ts`).
+export const CEILING_FALLBACK = 8_192;
 
 // Read as written by a person: `Anthropic` and ` anthropic ` are anthropic.
 export function providerOf(ai: unknown): Provider {
   const p = (ai as { provider?: unknown } | null | undefined)?.provider;
   return typeof p === 'string' && p.trim().toLowerCase() === 'anthropic' ? 'anthropic' : 'openai';
+}
+
+// The ceiling one answer may take, in tokens — what both wires send as `max_tokens`. The
+// person's `ai.maxTokens` is over everything; else the model's own entry in `ai.models`;
+// else the room its window leaves after what this conversation last sent, kept between
+// the floor and the cap. A model with no `inputTokens` said yet (a first request) gets
+// the whole window's room. Pure: `config.ai` in, a number out.
+export function answerCeiling(ai: unknown, opts: { model?: string; inputTokens?: number } = {}): number {
+  const a = (ai && typeof ai === 'object' ? ai : {}) as Record<string, unknown>;
+  const positive = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  const ceiling = positive(a.maxTokens);
+  if (ceiling) return ceiling;
+  const model = opts.model?.trim() || baseModel(a);
+  const models = (a.models && typeof a.models === 'object' ? a.models : {}) as Record<string, { maxTokens?: unknown } | undefined>;
+  const own = positive(model ? models[model]?.maxTokens : undefined);
+  if (own) return own;
+  const room = Math.floor(modelWindow(a, model) * 0.99) - Math.max(0, opts.inputTokens ?? 0) - ANSWER_CEILING_MIN;
+  return Math.min(ANSWER_CEILING_MAX, Math.max(ANSWER_CEILING_MIN, room));
 }
 
 // What the log says once at start about `config.ai` — never a refusal to start: the
@@ -58,8 +87,8 @@ export function llmConfigNotes(ai: unknown): string[] {
   const o = llmOpts(ai, {});
   const budget = o.thinking?.budgetTokens;
   if (o.provider === 'anthropic' && budget && budget > o.maxTokens - 1024) {
-    const ceiling = Math.max(o.maxTokens, 2048);
-    notes.push(`ai.thinking.budgetTokens ${budget} does not fit under ai.maxTokens ${o.maxTokens} with room for the answer — sent as ${ceiling - 1024}${ceiling > o.maxTokens ? ` with max_tokens ${ceiling}` : ''}; raise ai.maxTokens to keep the budget`);
+    const ceiling = Math.max(o.maxTokens, ANSWER_CEILING_MIN * 2);
+    notes.push(`ai.thinking.budgetTokens ${budget} does not fit under the answer ceiling of ${o.maxTokens} with room for the answer — sent as ${ceiling - ANSWER_CEILING_MIN}${ceiling > o.maxTokens ? ` with max_tokens ${ceiling}` : ''}; raise ai.maxTokens to keep the budget`);
   }
   return notes;
 }
@@ -70,7 +99,7 @@ export function llmOpts(ai: unknown, env: Record<string, string | undefined> = p
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
   const tokenEnv = str(a.tokenEnv) ?? (provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'LLM_TOKEN');
   const baseUrl = str(a.baseUrl) ?? (provider === 'anthropic' ? ANTHROPIC_BASE_URL : undefined);
-  const maxTokens = typeof a.maxTokens === 'number' && Number.isInteger(a.maxTokens) && a.maxTokens > 0 ? a.maxTokens : DEFAULT_MAX_TOKENS;
+  const maxTokens = answerCeiling(a);
   const t = a.thinking as { adaptive?: unknown; budgetTokens?: unknown } | undefined;
   const thinking: ThinkingConfig | undefined = t && typeof t === 'object'
     ? t.adaptive === true

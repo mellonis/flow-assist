@@ -487,7 +487,7 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
       case 'task-end': out.push(`*${nd(String(ev.task ?? ''))} stopped (${nd(stoppedByText(String(ev.by ?? '')))})*${at}`, ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', nd(ev.cut), '');
-        const how = [ev.stopped ? `stopped (${nd(String(ev.stopped))})` : '', ev.failed ? `failed: ${nd(String(ev.failed))}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${nd(String(ev.lastStep))}` : ''}` : ''].filter(Boolean);
+        const how = [ev.stopped ? `stopped (${nd(String(ev.stopped))})` : '', ev.looped ? 'stopped (the answer looped)' : '', ev.failed ? `failed: ${nd(String(ev.failed))}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${nd(String(ev.lastStep))}` : ''}` : ''].filter(Boolean);
         if (how.length) out.push(`*${how.join(' · ')}*`, '');
         break;
       }

@@ -145,7 +145,7 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // What ⏎ on the empty field sends after a turn stopped at a turn limit
 // (`ai.maxRounds`, `ai.maxTurnTokens`).
 export const CONTINUE_WORD = 'continue';
-export { STOPPED_TURN, failedTurn, roundCapTurn } from '../assistant/system-prompt.js';
+export { STOPPED_TURN, failedTurn, loopTurn, roundCapTurn } from '../assistant/system-prompt.js';
 export { allServices } from '../assistant/conversation-turn.js';
 export { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 

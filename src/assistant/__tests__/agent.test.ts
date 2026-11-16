@@ -1120,3 +1120,145 @@ test('the system prompt is sent without a known secret — the chat\'s per-round
     setActiveSecrets(null);
   }
 });
+
+// ─── A looping answer is stopped and reported ─────────────────────────────────
+// A round that degenerates into a repeat is cut where the repeats began, the stream
+// is aborted (its own controller, the turn's abort forwarded into it), and the kept
+// head becomes the answer. The dropped text goes up as `looped` — never back into
+// the model's history.
+
+const LOOP_UNIT = 'loop '.repeat(200); // 1 000 code units of exact repeats, ends on a unit boundary
+
+test('a looping answer is trimmed and the turn ends', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let requests = 0;
+  let roundSignal: AbortSignal | undefined;
+  const chatRound = async (_m: any[], opts: any) => {
+    requests++;
+    roundSignal = opts.signal;
+    // The guard fires inside this delta and aborts the round: a real stream ends in
+    // its abort. A round that was NOT aborted falls through and resolves — recording
+    // `aborted` pins that the mechanism aborts at all.
+    opts.onDelta?.('ok ' + LOOP_UNIT);
+    if (opts.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    return { reasoning: '', content: 'ok ' + LOOP_UNIT, finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+  });
+  expect(res.content).toBe('ok ');
+  expect(res.looped?.dropped).toBe(LOOP_UNIT.length);
+  expect(res.looped?.tail.startsWith('loop ')).toBe(true);
+  expect(requests).toBe(1); // the turn ends — no round two
+  expect(roundSignal?.aborted).toBe(true); // the round was aborted when the guard fired
+});
+
+test('the trimmed text is what the model\'s history would carry', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const chatRound = async (_m: any[], opts: any) => {
+    opts.onDelta?.('ok ' + LOOP_UNIT);
+    if (opts.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    return { reasoning: '', content: 'ok ' + LOOP_UNIT, finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+  });
+  // The transcript is the caller's history: the assistant message the turn added holds
+  // the kept head and nothing of the debris.
+  expect(res.transcript.map((m) => m.role)).toEqual(['assistant']);
+  expect(res.transcript[0]!.content).toBe('ok ');
+});
+
+test('a clean long answer is untouched', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  // Repetitive-looking — 395 code units of repeats — but under the detector's minRun.
+  const text = 'ok ' + 'loop '.repeat(79);
+  let requests = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    requests++;
+    opts.onDelta?.(text);
+    return { reasoning: '', content: text, finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+  });
+  expect(res.looped).toBeUndefined();
+  expect(res.content).toBe(text);
+  expect(requests).toBe(1);
+});
+
+test('a loop on a turn that already called a tool ends the turn without inventing anything', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => 'ran' }] as any;
+  let round = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    round++;
+    if (round === 1) return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+    opts.onDelta?.('ok ' + LOOP_UNIT);
+    if (opts.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    return { reasoning: '', content: 'ok ' + LOOP_UNIT, finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'go' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound,
+  } as any);
+  expect(res.looped).toBeDefined();
+  expect(res.toolRuns.map((r) => r.name)).toEqual(['demo:show']); // the call ran
+  expect(res.transcript.map((m) => m.role)).toEqual(['assistant', 'tool', 'assistant']);
+  // The call/result pair is intact — the history keeps the wire name (what the
+  // provider is sent), the trail the real one …
+  expect((res.transcript[0] as any).tool_calls[0].function.name).toBe('demo__show');
+  expect(res.transcript[1]!.tool_call_id).toBe('c1');
+  expect(String(res.transcript[1]!.content)).toContain('ran');
+  // … and nothing is fabricated after it: the turn ends on the kept head alone.
+  expect(res.transcript[2]!.content).toBe('ok ');
+});
+
+test('a guard that fires on a round that already carried tool calls ends the turn the same way', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const ran: string[] = [];
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => { ran.push('demo:show'); return 'ran'; } }] as any;
+  // This round IGNORES the abort and resolves carrying tool calls — the harsher case:
+  // the calls it was going to carry must still be dropped, none may run.
+  const chatRound = async (_m: any[], opts: any) => {
+    opts.onDelta?.('ok ' + LOOP_UNIT);
+    opts.onToolCalls?.();
+    return { reasoning: '', content: 'ok ' + LOOP_UNIT, finishReason: 'tool_calls', toolCalls: [{ id: 'c9', name: 'demo__show', arguments: '{}' }] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'go' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound,
+  } as any);
+  expect(res.looped).toBeDefined();
+  expect(res.content).toBe('ok ');
+  expect(ran).toEqual([]); // nothing ran
+  expect(res.toolRuns).toEqual([]);
+  expect(res.transcript.map((m) => m.role)).toEqual(['assistant']); // no call, no invented result
+  expect(res.transcript[0]!.content).toBe('ok ');
+});
+
+test("the turn's abort still stops the round, and each round gets its own controller", async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const turn = new AbortController();
+  const signals: AbortSignal[] = [];
+  let round = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    signals.push(opts.signal);
+    round++;
+    if (round === 1) {
+      // Round one answers with a tool call; its own listener must be gone once it ends.
+      return { reasoning: '', content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+    }
+    // Esc presses during round two: the turn's signal aborts the ROUND's.
+    turn.abort();
+    if (opts.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    return { reasoning: '', content: 'no', finishReason: 'stop', toolCalls: [] };
+  };
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => 'ran' }] as any;
+  const thrown = await agentChat([{ role: 'user', content: 'go' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound,
+    signal: turn.signal,
+  } as any).catch((e) => e);
+  expect(thrown.name).toBe('AbortError'); // Esc stays the person's stop, not an answer
+  expect(signals.length).toBe(2);
+  expect(signals[0]).not.toBe(signals[1]); // one controller per round
+  expect(signals[1]!.aborted).toBe(true);
+});

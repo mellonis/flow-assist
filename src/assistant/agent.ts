@@ -25,6 +25,7 @@ import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { failedRequest, reach, readChunk, withRetry, type RetryOpts } from './llm-retry.js';
+import { ceilingMemory, rememberCeilingRefusal, retryFields, sendWithRefusals, OPENAI_CEILING_STEPS, type WireFields } from './wire-fields.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
@@ -32,7 +33,7 @@ import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from './rounds.js';
 
 export { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, TASK_ROUNDS_DEFAULT, maxRoundsOf, maxTurnTokensOf, taskRoundsOf } from './rounds.js';
 import { estimateTokens } from './context-meter.js';
-import type { ThinkingConfig } from './llm-endpoint.js';
+import { CEILING_FALLBACK, type ThinkingConfig } from './llm-endpoint.js';
 import {
   TOOLS_LOAD, TOOLS_LOAD_PARAMETERS, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
@@ -41,6 +42,7 @@ import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } fr
 import { SKILL_TOOL } from './skill-file.js';
 import { toolArgsError } from './tool-args.js';
 import { planReminder, type Plan } from './plan.js';
+import { createLoopGuard } from './loop-guard.js';
 import { RAW_OMITTED, RAW_RESULT, findToolResult, keptRaw, toolReturn, type FoundResult } from './tool-results.js';
 import type { RecallSource } from './recall.js';
 
@@ -140,6 +142,12 @@ export interface AgentResult {
   lastStep?: string;
   limitBy?: 'tokens';
   turnTokens?: number;
+  // The answer degenerated into a repeat and the turn stopped itself: the text before
+  // the repeat run is the answer, and this says what was cut. `dropped` is how much of
+  // the streamed text was dropped (never kept in the answer or the model's history);
+  // `tail` is its first 2 000 characters — the text as it was kept, already secret-
+  // redacted (./secrets.ts) — for the caller to record, never to re-send.
+  looped?: { dropped: number; tail: string };
   // What the provider reported for the LAST round, when it reports usage at all.
   usage?: TokenUsage;
 }
@@ -464,6 +472,16 @@ function roundFor(opts: Record<string, unknown>): NonNullable<AgentOpts['chatRou
   return realChatRound as NonNullable<AgentOpts['chatRound']>;
 }
 
+// The ceiling one request carries, as `./wire-fields.ts`' states say it: the resolved
+// value (`ask`), the smaller named fallback (`fallback`, `min(CEILING_FALLBACK, asked)`
+// so a ceiling that shrank below it is kept), or nothing — under the field name the
+// provider takes it as.
+function ceilingFieldOf(fields: WireFields, asked: number | undefined): Record<string, number> {
+  if (fields.ceiling === 'none' || typeof asked !== 'number') return {};
+  const value = fields.ceiling === 'fallback' ? Math.min(CEILING_FALLBACK, asked) : asked;
+  return { [fields.ceilingField === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: value };
+}
+
 // The OpenAI-compatible round, repeated while it fails for a reason that passes and has
 // given nothing to its callbacks (./llm-retry.ts).
 type RoundOpts = {
@@ -471,10 +489,14 @@ type RoundOpts = {
   model?: string;
   token?: string;
   tokenEnv?: string;
+  maxTokens?: number;
   tools?: ToolDef[];
   onDelta?: (d: string) => void;
   onReasoning?: (d: string) => void;
   onToolCalls?: () => void;
+  // A line for the person about the request itself (AgentOpts.onNote): a field a
+  // provider refused is adjusted and remembered, and the adjustment is never silent.
+  onNote?: (text: string) => void;
   signal?: AbortSignal;
 } & RetryOpts;
 
@@ -489,43 +511,52 @@ async function openAiRound(
     model,
     token,
     tools,
+    maxTokens,
     onDelta = () => {},
     onReasoning = () => {},
     onToolCalls = () => {},
+    onNote,
     signal,
     tokenEnv,
   }: RoundOpts,
 ): Promise<ChatRoundResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
-  // A streamed response carries token usage only when asked (`stream_options`). Most
-  // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
-  // refusal that NAMES the field is retried once without it, and that base URL is not
-  // asked again. Usage is a nicety; a chat that stops working over it is not.
-  const post = (withUsage: boolean) => {
+  // A streamed response carries token usage only when asked (`stream_options`), and the
+  // answer's ceiling goes as `max_tokens` — or as `max_completion_tokens` for a
+  // provider that names it as the fix. Most OpenAI-compatible servers know both; one
+  // that does not answers 400 NAMING the field, and the refusal is read for what it
+  // says (`./wire-fields.ts`): a name to use instead, a value too large, or a plain
+  // unknown field. The sequence is bounded (`sendWithRefusals`): a server that refuses
+  // past its three requests fails the request. Every refusal is remembered and said on
+  // the note line, so the adjustment is never a silent one.
+  const post = (fields: WireFields) => {
     const url = `${baseUrl}/chat/completions`;
     const init: RequestInit = {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...ceilingFieldOf(fields, maxTokens), ...(fields.usage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
     };
     return reach(() => fetch(url, init), signal);
   };
-  const askUsage = !noUsage.has(String(baseUrl));
-  let res = await post(askUsage);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    if (askUsage && res.status === 400 && /stream_options|include_usage/i.test(body)) {
-      noUsage.add(String(baseUrl));
-      res = await post(false);
-      if (!res.ok) {
-        const again = await res.text().catch(() => '');
-        throw failedRequest(res, again, { model });
-      }
-    } else {
-      throw failedRequest(res, body, { model });
-    }
-  }
+  const mem = ceilingMemory('openai', baseUrl, model);
+  const start: WireFields = {
+    usage: !noUsage.has(String(baseUrl)),
+    ceiling: typeof maxTokens !== 'number' || mem.value === 'none' ? 'none' : mem.value === 'fallback' ? 'fallback' : 'ask',
+    ...(mem.field ? { ceilingField: mem.field } : {}),
+  };
+  const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
+    retryFields(fields, failed, text, {
+      ceiling: OPENAI_CEILING_STEPS,
+      remember: (refused, add) => {
+        if (refused === 'usage') {
+          noUsage.add(String(baseUrl));
+          onNote?.(`[llm] ${model ?? baseUrl ?? 'the provider'} refused stream_options — the provider is asked without it from now on`);
+        } else rememberCeilingRefusal('openai', baseUrl, model, add, onNote);
+      },
+    }),
+  );
+  if (!res.ok) throw failedRequest(res, body, { model });
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
   const decoder = new TextDecoder();
@@ -864,6 +895,9 @@ export async function agentChat(
   // (this turn's own call counter, unique within it) would already be enough, but
   // keeping the provider's id absent from the key means it can never matter again.
   const turnKey = crypto.randomUUID();
+  // The streaming text is watched for a loop (./loop-guard.ts): one guard per call,
+  // fed each round's accumulated text, firing once. Its hit ends the turn (below).
+  const loopGuard = createLoopGuard();
 
   const chatRoundFn = roundFor(opts);
 
@@ -872,6 +906,8 @@ export async function agentChat(
   // Did a round come back as an ANSWER? Without one the loop ran out of rounds, and
   // the caller has nothing to show for the turn but the trail.
   let answered = false;
+  // What one firing of the loop guard dropped, for the result's `looped`.
+  let looped: { dropped: number; tail: string } | null = null;
   let rounds = 0;
   // Where the history stood when the last reported usage was taken: what joined after
   // it (the round's tool results) is not in that figure.
@@ -929,18 +965,49 @@ export async function agentChat(
         if (replaced?.append?.length) current.push(...replaced.append);
       }
       let roundContent = '';
+      // The round runs on a stop of its own (./loop-guard.ts): the loop guard aborts
+      // THIS stream without ending the turn, while the person's Esc — the turn's own
+      // signal — still stops it, forwarded in through one listener that is taken off
+      // when the round ends.
+      const roundStop = new AbortController();
+      const turnSignal = typeof (opts.signal as { addEventListener?: unknown } | null | undefined)?.addEventListener === 'function' ? (opts.signal as AbortSignal) : null;
+      const stopWithTurn = () => roundStop.abort();
+      if (turnSignal) {
+        if (turnSignal.aborted) roundStop.abort();
+        else turnSignal.addEventListener('abort', stopWithTurn, { once: true });
+      }
       // What the model writes is shown, kept and saved without a known secret in it
       // (./secrets.ts): its text and its reasoning each pass a redacting stream, which
       // holds back a tail a chunk boundary may have split; the tails go out when the
       // round ends, however it ends.
       const answerStream = secretStream();
       const thinkStream = secretStream();
-      const onLive = (d: string) => { if (d) { roundContent += d; (opts.onLive as AgentOpts['onLive'])?.(d); } };
+      const onLive = (d: string) => {
+        if (!d) return;
+        roundContent += d;
+        // The guard reads the accumulated round text — already redacted, as it is kept.
+        // On its one hit the kept text is the head before the repeat run, the tail is
+        // recorded once for the result, and the stopped round is aborted; a later
+        // append (the redacting stream's held tail, flushed in the `finally`) is cut
+        // again by the same hit, so the kept text never moves.
+        const hit = loopGuard.push(roundContent);
+        if (hit) {
+          if (!looped) {
+            looped = { dropped: hit.dropped, tail: roundContent.slice(hit.at, hit.at + 2000) };
+            roundStop.abort();
+          }
+          roundContent = roundContent.slice(0, hit.at);
+        }
+        (opts.onLive as AgentOpts['onLive'])?.(d);
+      };
       const onThink = (d: string) => { if (d) opts.onReasoning?.(d); };
       let r: ChatRoundResult;
       try {
         r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
           ...opts,
+          // The round's own signal: what the loop guard stops, and what the turn's
+          // signal reaches through the listener above.
+          signal: roundStop.signal,
           tools: roundTools(),
           ...(noThinking ? { thinking: undefined } : {}),
           onToolCalls: () => opts.onRoundKind?.('tools'),
@@ -950,12 +1017,23 @@ export async function agentChat(
           onDelta: (d: string) => onLive(answerStream.push(d)),
           onReasoning: (d: string) => onThink(thinkStream.push(d)),
         } as Record<string, unknown>);
+      } catch (e) {
+        // The stop the loop guard raised ends the round as its answer, with the text
+        // that was kept; every other throw goes up as it is — the person's Esc, a
+        // provider failure.
+        if (!looped || (e as { name?: string } | null)?.name !== 'AbortError') throw e;
+        r = { content: '', reasoning: '', toolCalls: [], finishReason: 'stop' };
       } finally {
+        if (turnSignal) turnSignal.removeEventListener('abort', stopWithTurn);
         // Whatever the round ends in — its end, a stop, an error — the held tails go
         // out, a begun secret as its mark.
         onThink(thinkStream.flush());
         onLive(answerStream.flush());
       }
+      // A round the loop guard stopped is the answer round with what was kept, whatever
+      // it was carrying: tool calls it had begun to stream are dropped before anything
+      // can run them, and no result is invented for them.
+      if (looped) r = { content: '', reasoning: '', toolCalls: [], finishReason: 'stop' };
       if (r.usage) {
         usage = r.usage;
         // New tokens: the prompt less its cached part — or, with no cache figure reported,
@@ -985,7 +1063,9 @@ export async function agentChat(
         contentLen: r.content.length,
         ...(r.usage ? { usage: r.usage } : {}),
       });
-      if (!r.toolCalls.length && hasToolMarkup(roundContent)) {
+      // A looped round is the answer round already: its kept text ends the turn, and
+      // nothing asks the model again (below, `continue`).
+      if (!looped && !r.toolCalls.length && hasToolMarkup(roundContent)) {
         // A tool call written as text: nothing ran, and the markup is neither the answer
         // nor kept anywhere — what the model wrote around it stays, as a step. Once in a
         // row the model is told in one line and asked again (an unknown name answered
@@ -1353,6 +1433,7 @@ export async function agentChat(
   return {
     content, process, toolRuns, transcript: current.slice(turnStart),
     ...(answered ? {} : { roundLimit: rounds, ...(lastStep ? { lastStep } : {}), ...(limitBy ? { limitBy, turnTokens: spent } : {}) }),
+    ...(looped ? { looped } : {}),
     ...(usage ? { usage } : {}),
   };
 }
@@ -1379,7 +1460,7 @@ export interface CompactResult { summary: string; incomplete?: string }
 // anything is kept. No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '', retries, retryDelay, onRetry }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string } & Pick<RetryOpts, 'retries' | 'retryDelay' | 'onRetry'>,
+  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '', retries, retryDelay, onRetry, onNote }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string; onNote?: (text: string) => void } & Pick<RetryOpts, 'retries' | 'retryDelay' | 'onRetry'>,
 ): Promise<CompactResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
   const history = messages.filter((m) => m.role !== 'system').map(compactable);
@@ -1390,17 +1471,28 @@ export async function compactConversation(
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
     const url = `${baseUrl}/chat/completions`;
-    const init: RequestInit = {
-      method: 'POST',
-      signal,
-      headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: sent }),
+    // The handoff carries the ceiling the chat's own requests carry, and a provider that
+    // refuses the field gets the same bounded sequence, with the same memory of what it
+    // refused (`./wire-fields.ts`).
+    const post = (fields: WireFields) => {
+      const init: RequestInit = {
+        method: 'POST',
+        signal,
+        headers: LLM_HEADERS(token as string),
+        body: JSON.stringify({ model, messages: sent, ...ceilingFieldOf(fields, maxTokens) }),
+      };
+      return reach(() => fetch(url, init), signal);
     };
-    const res = await reach(() => fetch(url, init), signal);
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw failedRequest(res, body, { model });
-    }
+    const mem = ceilingMemory('openai', baseUrl, model);
+    const start: WireFields = {
+      usage: false,
+      ceiling: typeof maxTokens !== 'number' || mem.value === 'none' ? 'none' : mem.value === 'fallback' ? 'fallback' : 'ask',
+      ...(mem.field ? { ceilingField: mem.field } : {}),
+    };
+    const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
+      retryFields(fields, failed, text, { ceiling: OPENAI_CEILING_STEPS, remember: (_refused, add) => rememberCeilingRefusal('openai', baseUrl, model, add, onNote) }),
+    );
+    if (!res.ok) throw failedRequest(res, body, { model });
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data?.choices?.[0]?.message?.content ?? '';
   });

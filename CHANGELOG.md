@@ -5,6 +5,28 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Every request says how long its answer may be.** A request now carries an answer ceiling
+  as `max_tokens` on the OpenAI-compatible wire as well as the Anthropic one, and on the
+  `/compact` request: `ai.maxTokens`, else the model's own `ai.models.<id>.maxTokens` (new),
+  else the room its window leaves — `min(32 000, max(1 024, floor(window × 0.99) − input −
+  1 024))`. A provider that refuses the field by name is asked once more without it (the
+  Anthropic wire at 8 192 instead) and the refusal is remembered for the run, so an answer
+  is left to the provider's default only where it takes no ceiling at all.
+  `ai.models.<id>.maxTokens` names a model's own output cap, so with `ai.maxTokens` unset a
+  model that takes less than the derived ceiling is never asked for more; `docs/config.md`
+  has the resolution and the catalogue.
+
+- **An answer that loops is stopped, and the loop is not kept.** A streamed answer is watched
+  for a sustained exact repeat; at 400 characters of it the turn is cut where the repeat
+  began, the stream is aborted, and the text above it stays as the answer, under
+  `⚠ stopped — the answer was looping (N chars dropped); it is not kept in the model's
+  history` in the warn colour. What the model's history gets is that trimmed answer and one
+  line of the host's saying where it stopped — never the dropped text — so `⏎ continue`
+  picks the work up from there, or writes the answer again from the start when the loop began
+  before anything was kept. There is no setting: a false positive costs a visible trim, a
+  silent loop costs the session. `/export` says `stopped (the answer looped)`; the journal
+  keeps the count and the start of the loop (up to 2 000 characters).
+
 - **`/diff`: the working tree, live, beside the chat.** `/diff` splits the chat — the
   conversation on the left, every file you have changed on the right, the field across the
   bottom — and stacks the panel under the field where the terminal is narrow. Each file

@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
-import { ScriptedModel, handoff } from './helpers/scripted';
+import { ScriptedModel, handoff, longText } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { sessionIdOf } from './helpers/session-files';
 
@@ -405,7 +405,7 @@ test('the journal keeps an automatic compaction with its summary, and a turn end
   const rig = conversationRig(model, { ai: { contextWindow: window, maxTurnTokens: 1 } });
   await rig.conv.send('first');
   const base = Math.ceil(JSON.stringify(model.requests[0]).length / 4);
-  model.script([{ text: `BIG ${'b'.repeat(Math.ceil((window * 0.85 - base) * 4))}` }]);
+  model.script([{ text: `BIG ${longText(Math.ceil((window * 0.85 - base) * 4))}` }]);
   await rig.conv.send('tell me everything');
   const summary = `## Goal\nJOURNALED ${'f'.repeat(1500)}\n## Done\n-\n## In progress\n-\n## Open decisions\nnone\n## Facts learned\n-`;
   model.usage = { prompt_tokens: 50, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } };

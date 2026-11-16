@@ -376,10 +376,13 @@ test('the label counts the wait', () => {
 test('a refused stream_options is resent once without it, and that is not a retry', async () => {
   serve(new Response('{"error":{"message":"unknown field stream_options"}}', { status: 400 }), failing(503), openAiAnswer('ok'));
   const seen: RetryInfo[] = [];
-  await chat({ baseUrl: 'http://fallback.test', retries: 1, onRetry: (i: RetryInfo) => { seen.push(i); } });
+  const notes: string[] = [];
+  await chat({ baseUrl: 'http://fallback.test', retries: 1, onRetry: (i: RetryInfo) => { seen.push(i); }, onNote: (n: string) => notes.push(n) });
   expect(calls.map((c) => 'stream_options' in c.body)).toEqual([true, false, false]);
   expect(seen).toHaveLength(1);
   expect(slept).toEqual([3000]);
+  // The degradation is said, never silent.
+  expect(notes).toEqual(['[llm] m refused stream_options — the provider is asked without it from now on']);
 });
 
 test('a refused thinking block is resent once without it, and that is not a retry', async () => {
@@ -429,6 +432,106 @@ test('compaction does not repeat a refusal, nor an abort', async () => {
   serve(failing(401));
   await fails(compactConversation(history, { ...OPENAI }));
   expect(calls).toHaveLength(1);
+});
+
+// A 400 naming the ceiling as an unknown field, as a server without the field answers.
+const noCeiling = () => new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model." } }), { status: 400 });
+// A 400 naming the field to use instead — the o-series/gpt-5-class host's fix.
+const renamesCeiling = () => new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } }), { status: 400 });
+// A 400 refusing the ceiling's VALUE, not its name.
+const ceilingTooLarge = () => new Response(JSON.stringify({ error: { message: 'max_tokens is too large: 32000. This model supports at most 16384 completion tokens.' } }), { status: 400 });
+const handoffAnswer = () => Response.json({ choices: [{ message: { content: HANDOFF } }] });
+
+test('compaction carries the ceiling, drops it on a refusal, and remembers it with the chat\'s', async () => {
+  serve(noCeiling(), handoffAnswer());
+  const host = { ...OPENAI, baseUrl: 'http://compact-ceiling.test' };
+  const r = await compactConversation(history, { ...host, maxTokens: 32_000 });
+  expect(r.summary).toBe(HANDOFF);
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.body.max_tokens).toBe(32_000);
+  expect('max_tokens' in calls[1]!.body).toBe(false);
+
+  // One refusal, remembered for the process: the next compaction of the same host and
+  // model starts without the field.
+  calls = [];
+  serve(handoffAnswer());
+  await compactConversation(history, { ...host, maxTokens: 32_000 });
+  expect(calls).toHaveLength(1);
+  expect('max_tokens' in calls[0]!.body).toBe(false);
+});
+
+test('a provider refusing both fields is asked three times at most, whichever it names first', async () => {
+  serve(noCeiling(), new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'stream_options' is not supported with this model." } }), { status: 400 }), openAiAnswer('done'));
+  const answer = await chat({ baseUrl: 'http://both-fields.test', maxTokens: 32_000 });
+  expect(answer.content).toBe('done');
+  expect(calls).toHaveLength(3);
+  expect(calls[0]!.body).toMatchObject({ stream_options: { include_usage: true }, max_tokens: 32_000 });
+  // The ceiling goes first this time; the usage field is still dropped in the second
+  // retry, rather than being missed because its turn had passed.
+  expect(calls[1]!.body).toMatchObject({ stream_options: { include_usage: true } });
+  expect('max_tokens' in calls[1]!.body).toBe(false);
+  expect('stream_options' in calls[2]!.body).toBe(false);
+  expect('max_tokens' in calls[2]!.body).toBe(false);
+
+  // And the other order: the usage field refused first, the ceiling on the retry.
+  calls = [];
+  serve(new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'stream_options' is not supported with this model." } }), { status: 400 }), noCeiling(), openAiAnswer('done again'));
+  const reversed = await chat({ baseUrl: 'http://both-fields-reversed.test', maxTokens: 32_000 });
+  expect(reversed.content).toBe('done again');
+  expect(calls).toHaveLength(3);
+  expect(calls[0]!.body).toMatchObject({ stream_options: { include_usage: true }, max_tokens: 32_000 });
+  expect(calls[1]!.body).toMatchObject({ max_tokens: 32_000 });
+  expect('stream_options' in calls[1]!.body).toBe(false);
+  expect('max_tokens' in calls[2]!.body).toBe(false);
+  expect('stream_options' in calls[2]!.body).toBe(false);
+});
+
+// ─── what a ceiling refusal is read as, and what is remembered ─────────────────
+
+test('a ceiling refused with a name to use instead is retried under that name, same ceiling, remembered and said', async () => {
+  serve(renamesCeiling(), openAiAnswer('ok'));
+  const notes: string[] = [];
+  await chat({ baseUrl: 'http://ceiling-rename.test', maxTokens: 32_000, onNote: (n: string) => notes.push(n) });
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.body).toMatchObject({ max_tokens: 32_000 });
+  // The one retry carries the SAME ceiling under the name the host asked for.
+  expect(calls[1]!.body).toMatchObject({ max_completion_tokens: 32_000 });
+  expect(notes).toEqual(['[llm] m refused max_tokens — the answer ceiling goes as max_completion_tokens from now on']);
+  // Remembered: the next request of this process goes under that name from the start.
+  calls = [];
+  serve(openAiAnswer('again'));
+  const second = await chat({ baseUrl: 'http://ceiling-rename.test', maxTokens: 32_000 });
+  expect(second.content).toBe('again');
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.body).toMatchObject({ max_completion_tokens: 32_000 });
+});
+
+test('a ceiling refused by VALUE is retried at the capped fallback, remembered and said', async () => {
+  serve(ceilingTooLarge(), openAiAnswer('ok'));
+  const notes: string[] = [];
+  await chat({ baseUrl: 'http://ceiling-value.test', maxTokens: 32_000, onNote: (n: string) => notes.push(n) });
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.body.max_tokens).toBe(32_000);
+  // `min(CEILING_FALLBACK, asked)` — never more than the person's ceiling.
+  expect(calls[1]!.body.max_tokens).toBe(8_192);
+  expect(notes).toEqual(['[llm] m refused max_tokens — the answer ceiling goes at 8192 or lower from now on']);
+  // Remembered: the next request starts at the fallback and sees no further 400.
+  calls = [];
+  serve(openAiAnswer('again'));
+  await chat({ baseUrl: 'http://ceiling-value.test', maxTokens: 32_000 });
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.body.max_tokens).toBe(8_192);
+});
+
+test('a ceiling refused by name is dropped, remembered and said', async () => {
+  serve(noCeiling(), openAiAnswer('ok'));
+  const notes: string[] = [];
+  await chat({ baseUrl: 'http://ceiling-name.test', maxTokens: 32_000, onNote: (n: string) => notes.push(n) });
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.body.max_tokens).toBe(32_000);
+  expect(calls[1]!.body).not.toHaveProperty('max_tokens');
+  expect(calls[1]!.body).not.toHaveProperty('max_completion_tokens');
+  expect(notes).toEqual(['[llm] m refused max_tokens — no answer ceiling is sent from now on']);
 });
 
 // ─── the settings ─────────────────────────────────────────────────────────────

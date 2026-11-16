@@ -134,6 +134,33 @@ test('D5, D6: a one-shot turn stops at ai.maxTurnTokens the same way', async () 
   expect(said(r.err)).toEqual(['flow-assist: stopped after 1220 tokens (ai.maxTurnTokens) — no answer; last step: datetime {}']);
 });
 
+// A looped answer has no screen to say so on (`looped-answer.e2e.test.ts` is the chat's
+// half): the kept head is delivered with one stderr line naming what was dropped, and a
+// cut that kept nothing answers nothing at all — the limit's exit 2.
+const LOOP = 'loop '.repeat(200);
+
+test('a looped answer that kept its head: the head on stdout, one stderr line, exit 0', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: `ok ${LOOP}` }]);
+  const r = await oneShot(model);
+  expect(r.code).toBe(0);
+  expect(r.out).toBe('ok \n');
+  expect(said(r.err)).toHaveLength(1);
+  const line = said(r.err)[0]!;
+  expect(line).toMatch(/^flow-assist: the answer was looping \(\d+ chars dropped\) — the loop is not kept in the model's history$/);
+  expect(Number(/\((\d+) chars dropped\)/.exec(line)![1])).toBeGreaterThanOrEqual(400);
+});
+
+test('a looped answer that kept nothing: one stderr line, nothing answered, exit 2', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'z'.repeat(1200) }]);
+  const r = await oneShot(model);
+  expect(r.code).toBe(2);
+  expect(r.out).toBe('');
+  expect(said(r.err)).toHaveLength(1);
+  expect(said(r.err)[0]).toMatch(/^flow-assist: the answer was looping \(\d+ chars dropped\) — the loop is not kept in the model's history$/);
+});
+
 test('D26: the one-shot is not offered background or remind, and a call to one answers as an unknown tool', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'subagent', args: { task: 'count the files' } }], [{ text: 'Could not.' }]);

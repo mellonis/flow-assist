@@ -2132,7 +2132,10 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - `compact` — the summary and its row, `auto` when the chat compacted by itself;
     `end` — how the turn ended: duration, tokens, stopped or failed, `roundLimit` with
     `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
-    and the text of a round cut off, which never reached `onLiveCommit`.
+    `looped` — the code units the loop guard's hit dropped — with `loopTail`, the text
+    from the run's start (at most 2 000 characters). `/export` draws such a turn as
+    `stopped (the answer looped)`. The `end` also carries the text of a round cut off,
+    which never reached `onLiveCommit`.
   - `task-end` — a background task that stopped without finishing: `task` (its label),
     `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session,
     `exit` when the process exited while it ran or waited on its delay (`closeAll`),
@@ -2760,6 +2763,14 @@ message is model-side only: the screen already says `stopped (Esc)` or shows the
 error. It is saved with the session like the rest of the conversation's `api`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
 
+**A turn the loop guard stopped is closed the same way, without an error.** The text
+before the cut is pushed as the answer and stays the answer; the chat appends
+`loopTurn(dropped, kept)` — the model's own voice saying where it stopped, or that
+nothing of the answer was kept (`kept` is whether any text survived the cut) — beside
+`roundCapTurn`, so `⏎ continue` writes on from there, or again from the start. No
+whole repeat goes back into the history, which is what keeps the next rounds from
+repeating it.
+
 **A provider's refusal is read, not pasted** (`llmErrorMessage` in
 `src/assistant/llm-error.ts`, pure). The raw body is not the error: pasted as-is it
 would show `LLM 403: { "message":"model_access_denied", "request_id":"2395…" }`. The body is
@@ -2851,7 +2862,8 @@ thinking for the rest of the turn, so later rounds do not pay the 400 again.
 `ai.thinking`: `{adaptive: true}` → `{type:'adaptive', display:'summarized'}` (the
 current models' only mode; they omit the thinking text by default, and the fold would
 be empty); `{budgetTokens}` → a fixed budget for older models, LOWERED to leave the
-answer 1024 under `ai.maxTokens` when it does not fit (said once in the log) — the
+answer 1024 under the ceiling the request is handed (`answerCeiling`) when it does not
+fit (said once in the log, for the start-time reading) — the
 person's ceiling is kept, only one under 2048 is raised to 2048; unset → no `thinking` field at all (a current model then thinks by its
 own default, its text not shown — but its blocks still come and still go back). The
 scripted model has an Anthropic wire (`model.wire = 'anthropic'`) that REFUSES what the
@@ -3445,7 +3457,8 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   stays; a task above it is passed over, since it ends after its answer and its inbox goes
   with it; none open: the result goes nowhere) —
   (`childResultText`: `<label> finished:` or `<label> failed:`, then
-  `childResultBody`: the text and the limit, or the reason), never to whatever the chat
+  `childResultBody`: the text and the limit, or the reason — a looped answer names the
+  dropped run beside them), never to whatever the chat
   shows. With no recipient the end carries
   `delivered: ''` and no `landedIn`. Otherwise it carries `delivered` (the text) and
   `landedIn` (the title of the conversation it landed in — a subagent's label — and
@@ -4581,6 +4594,19 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
   (the conversation's `continueOffer`) goes with the next message and wherever the empty-answer notice
   is reset.
+- **A looped answer is stopped where the repeat began, and the same `⏎ continue`
+  carries the work on** (`src/assistant/loop-guard.ts`, pure: one guard per answer, fed
+  the round's accumulated text, firing once — a unit of 1–32 code units repeating
+  EXACTLY, whole repeats counted back from the text's end, `LOOP_MIN_RUN` = 400 code
+  units of run, with `LOOP_TAIL` = 512 looked at for candidate units). On the hit
+  `agentChat` keeps the text before the run and records `looped` on the result, aborts
+  the round's own stream — `roundStop`, a controller the turn's own signal feeds, so the
+  person's Esc still stops the turn — and drops the call fragments it had begun: a
+  stopped round is the answer round, and nothing asks the model again. The chat draws
+  the kept answer, then `⚠ stopped — the answer was looping (N chars dropped); it is
+  not kept in the model's history` in the warn colour, and sets the same
+  `continueOffer`. The guard is always on and has no config key: a false positive costs
+  a visible trim, a silent loop costs the session.
 - **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
   delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
   `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
@@ -4866,8 +4892,11 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   the app — nor is any model run a tool starts inside it through `ctx.chatLLM`
   (its registry's `withhold` covers every run it makes). Nothing is streamed: the answer is printed once, on stdout, when the turn
   ends. Exit codes (`oneShotOutcome`): 0 — an answer (an empty line for a turn that
-  gave reasoning and no text); 2 — a limit, said on stderr (`flow-assist: stopped
-  after N rounds (ai.maxRounds) — no answer; last step: …`); 1 — a failure (the
+  gave reasoning and no text; the kept head of a looped answer is its answer, with one
+  stderr line saying what was dropped); 2 — a limit, said on stderr (`flow-assist: stopped
+  after N rounds (ai.maxRounds) — no answer; last step: …`), or a looped answer that kept
+  nothing (`flow-assist: the answer was looping (N chars dropped) — the loop is not kept
+  in the model's history`); 1 — a failure (the
   provider's error on stderr), an empty prompt, a bare `--allow-writes` with no
   prompt, or anything that fails before the turn. Every stderr line about the turn —
   the failure, the limit, `[write]` — passes `redactSecrets`, as the chat's lines do,
@@ -4940,11 +4969,20 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   bulky content as stubs (see "What the model can do"). Its `config_schema` note
   (`KEY_DEFAULTS['ai.recall']`) says what a stub is and how to turn it off.
 - **`ai.models`, `ai.roles` and `ai.model`** (`src/assistant/model-roles.ts`) — models by
-  role, and a window per model. `ai.model` is a model id, never read as a role;
-  `ai.roles.<role>` is the model id a role means on this machine (the name an agent file's
-  `model:` or the `subagent` tool's `model` asks for); `ai.models.<id>.contextWindow` is
-  one model id's window. All three sit under `ai`, on the model's leash: no mark, only the
-  person sets them, `config set` treating them as any other key.
+  role, and a window and an answer ceiling per model. `ai.model` is a model id, never read
+  as a role; `ai.roles.<role>` is the model id a role means on this machine (the name an
+  agent file's `model:` or the `subagent` tool's `model` asks for);
+  `ai.models.<id>.contextWindow` is one model id's window and `.maxTokens` its answer
+  ceiling — the longest answer one request on it may get, sent as `max_tokens` on both
+  wires, or as `max_completion_tokens` for a provider that names that as its fix
+  (`answerCeiling`, `src/assistant/llm-endpoint.ts`: `ai.maxTokens` over it, else
+  this entry, else the room the window leaves). All three sit under `ai`, on the model's
+  leash: no mark, only the person sets them, `config set` treating them as any other key.
+- **A derived ceiling shrinks as the window fills.** `answerCeiling` measures the room a
+  conversation has left, so the ceiling falls turn by turn, and `thinkingParams` raises or
+  lowers a fixed `ai.thinking.budgetTokens` to fit whatever ceiling it is handed — per
+  request, and silent: `llmConfigNotes` says a mismatch once, for the start-time reading
+  only.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 - **Roots: each consumer has its own key, and the host never reads a plugin's.** The
   host's shell (`!command`, `run_command`) is confined to `shell.roots` (`shellRoots`

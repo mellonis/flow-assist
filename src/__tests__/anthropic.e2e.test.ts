@@ -48,7 +48,7 @@ test('a text answer streams from /messages, with the API\'s headers, a max_token
   expect(model.headers[0]).toMatchObject({ 'x-api-key': 'sk-ant-scripted', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' });
   expect(model.headers[0]!.authorization).toBeUndefined();
   const body = sent(model, 0);
-  expect(body).toMatchObject({ model: 'default-model', max_tokens: 8192, stream: true });
+  expect(body).toMatchObject({ model: 'default-model', max_tokens: 32_000, stream: true });
   expect('stream_options' in body).toBe(false);
   expect('thinking' in body).toBe(false);
   // The system prompt left the messages for the top-level field. Two breakpoints: the
@@ -255,7 +255,7 @@ test('with a fixed budget, a thinking block refused goes with the thinking field
   expect(sent(model, 0).thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
   for (const i of [1, 2]) {
     expect('thinking' in sent(model, i)).toBe(false);
-    expect(sent(model, i).max_tokens).toBe(8192);
+    expect(sent(model, i).max_tokens).toBe(32_000);
     expect(JSON.stringify(sent(model, i).messages)).not.toContain('"type":"thinking"');
   }
   expect(ui.backend.lastFrame).toContain('Noon.');
@@ -369,4 +369,64 @@ test('an attached image goes as a base64 image block', async () => {
     { type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(file).toString('base64') }, cache_control: { type: 'ephemeral' } },
   ]);
   expect(ui.backend.lastFrame).toContain('A screenshot.');
+});
+
+test('a provider refusing the resolved ceiling is asked once at 8192, and remembers it per model', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'the first answer' }], [{ text: 'the second answer' }]);
+  // A model id of its own: the refusal is remembered per (base URL, model), and the
+  // tests that check 32000 keep their own.
+  const ui = await boot(model, { model: 'small-cap-model' });
+  const scripted = globalThis.fetch;
+  const sentBodies: Sent[] = [];
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Sent;
+    sentBodies.push(req);
+    if (req.max_tokens !== 8_192) {
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: `max_tokens: ${req.max_tokens} > 8192, which is the maximum allowed number of output tokens for small-cap-model` } }), { status: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_too_big' } });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  try {
+    await ask(ui, 'first?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the first answer'));
+    // The resolved ceiling first, then the one retry at the fallback — never a third.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([32_000, 8_192]);
+
+    await ask(ui, 'second?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the second answer'));
+    // Remembered for this process: the next request starts at the fallback, asked once.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([32_000, 8_192, 8_192]);
+  } finally {
+    globalThis.fetch = scripted;
+  }
+});
+
+test('the fallback keeps a ceiling that shrank below 8192 — never asks more than the person\'s', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'the kept answer' }]);
+  // A ceiling of its own, under the fallback: a late-conversation derived ceiling.
+  const ui = await boot(model, { model: 'tiny-capped-model', maxTokens: 4_000 });
+  const scripted = globalThis.fetch;
+  const sentBodies: Sent[] = [];
+  let attempts = 0;
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Sent;
+    sentBodies.push(req);
+    // The probe: the first attempt is refused by value, the retry is accepted whatever
+    // it carries — what is under test is the value the retry carries.
+    if (attempts++ === 0) {
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'max_tokens: 4000 > 1024, which is the maximum allowed number of output tokens for tiny-capped-model' } }), { status: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_too_big' } });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  try {
+    await ask(ui, 'first?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the kept answer'));
+    // The one retry at the fallback keeps the person's ceiling (`min(CEILING_FALLBACK,
+    // asked)`): it never asks for the 8192 that does not fit under it.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([4_000, 4_000]);
+  } finally {
+    globalThis.fetch = scripted;
+  }
 });

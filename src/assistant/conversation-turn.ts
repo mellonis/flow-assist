@@ -9,13 +9,13 @@ import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
-import { llmOpts, withModel } from './llm-endpoint.js';
+import { answerCeiling, llmOpts, withModel } from './llm-endpoint.js';
 import { retryClock, retryLabel, type RetryInfo } from './llm-retry.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
 import { addCalls, addReasoning, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
-import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
+import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, loopTurn, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
@@ -141,6 +141,15 @@ export function workerPrompt(task: string): string {
 // The same worker prompt for a subagent: the task is the person's own, framed as that.
 export function subagentPrompt(task: string): string {
   return `${WORKER_PROMPT}The person's task: ${task}`;
+}
+
+// The ceiling this conversation's answer may take (`answerCeiling`): its own model's
+// entry in the catalogue when the person gave one, else the room that model's window
+// leaves after what the last measurement said was already sent. A conversation that has
+// measured nothing yet sends no `inputTokens` and gets the whole window's room.
+export function answerCeilingFor(c: Conversation, ai: Record<string, any>): number {
+  const inputTokens = c.usage?.promptTokens;
+  return answerCeiling(ai, { model: c.model, ...(inputTokens ? { inputTokens } : {}) });
 }
 
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
@@ -270,10 +279,17 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   let roundLimit = 0;
   let lastStep = '';
   let limitTokens: number | undefined; // set when the token budget ended the turn
+  // The answer degenerated into a repeat and the guard stopped it (./loop-guard.ts):
+  // `dropped` code units went, `tail` is the head of them — journaled as evidence,
+  // never kept in the answer or the model's history.
+  let loopedInfo: { dropped: number; tail: string } | null = null;
   c.inTurn = true; // a project note from here on waits for the turn's end (the `finally`)
   try {
     const chatResult = await c.deps.chatLLM(wire, {
       ...withModel(llmOpts(ai), c.model),
+      // The ceiling this answer may take, over the one `llmOpts` resolved without a
+      // model or a measurement to go on.
+      maxTokens: answerCeilingFor(c, ai),
       signal: abort.signal,
       // A request that failed for a reason that passes waits to be made again: a log
       // line, and on a session's status line the countdown.
@@ -614,6 +630,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     lastStep = String((chatResult as { lastStep?: string } | undefined)?.lastStep ?? '');
     const limited = chatResult as { limitBy?: string; turnTokens?: number } | undefined;
     limitTokens = limited?.limitBy === 'tokens' ? Number(limited.turnTokens ?? 0) : undefined;
+    loopedInfo = (chatResult as { looped?: { dropped: number; tail: string } } | undefined)?.looped ?? null;
     const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
     const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
     if (reported) c.usage = reported;
@@ -623,8 +640,12 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // Stopped at the cap: the turn is closed in the model's history by the
       // host's line saying where, and the person is offered ⏎ continue.
       ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined, limitTokens) } as ChatMessage] : []),
+      // Stopped for looping: the kept head is the answer, closed by the host's line
+      // saying what was cut — the dropped repetition never goes back to the model. No
+      // head kept (`at === 0`) is said as that, never as "the text above".
+      ...(loopedInfo ? [{ role: 'assistant', content: loopTurn(loopedInfo.dropped, c.content.trim() !== '') } as ChatMessage] : []),
     ];
-    if (roundLimit) c.setContinueOffer(true);
+    if (roundLimit || loopedInfo) c.setContinueOffer(true);
     // The calls are already in the turn, where they were made (`onToolRun`).
     const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
     // After a real write the plugins reload what they show — otherwise an open
@@ -680,6 +701,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       t: 'end', ms: finalMs, ...(spent ? { tokens: spent } : {}),
       ...(aborted ? { stopped: c.stopKey || keyGlyph('escape') } : {}), ...(failed ? { failed: failure } : {}),
       ...(roundLimit ? { roundLimit, ...(lastStep ? { lastStep } : {}), ...(limitTokens !== undefined ? { limitBy: 'tokens', turnTokens: limitTokens } : {}) } : {}),
+      ...(loopedInfo ? { looped: loopedInfo.dropped, loopTail: loopedInfo.tail } : {}),
       // A round cut off by Esc or an error never reached `onLiveCommit`.
       ...(c.roundText ? { cut: c.roundText } : {}), ...(c.roundReasoning ? { reasoning: c.roundReasoning } : {}),
     });
@@ -708,7 +730,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // above what the turn did after it. (An answer is always the turn's last
       // message: `onLiveCommit` puts it on a fresh one under a block.)
       if ((aborted || failed || roundLimit) && at >= 0 && at < next.length - 1) { next.push({ role: 'assistant', content: '' }); at = next.length - 1; }
-      if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(c.stopKey ? { stoppedBy: c.stopKey } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}) };
+      if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(c.stopKey ? { stoppedBy: c.stopKey } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}), ...(loopedInfo ? { looped: loopedInfo.dropped } : {}) };
       return next;
     });
     // Empty answer: the model gave only reasoning but no final text — say so
@@ -724,7 +746,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       c.answeredAt = at;
       if (c.shows()) c.seenAt = at;
     }
-    if (!c.content.trim() && !failed && !aborted && !roundLimit) c.setEmptyAnswer(true);
+    if (!c.content.trim() && !failed && !aborted && !roundLimit && !loopedInfo) c.setEmptyAnswer(true);
     // c.busy follows the stream lifecycle synchronously: true from `send`'s top
     // guard, false again HERE when the stream ends. Nothing a render does sets it, so a
     // render skipped (the chat closed mid-turn, an aborted turn that does not commit)
@@ -764,6 +786,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       ...(aborted ? { stoppedBy: c.stopKey || keyGlyph('escape') } : {}),
       ...(failed ? { error: failure } : {}),
       ...(roundLimit ? { limit: { rounds: roundLimit, lastStep, ...(limitTokens !== undefined ? { by: 'tokens' as const, turnTokens: limitTokens } : {}) } } : {}),
+      ...(loopedInfo ? { looped: loopedInfo.dropped } : {}),
       ...(spent ? { tokens: spent } : {}),
       ...(cachedSpent ? { cached: cachedSpent } : {}),
     };
@@ -813,7 +836,7 @@ export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.paren
 // asked, and the summary folded under it.
 export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], signal: AbortSignal): ReturnType<typeof compactConversation> {
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
-  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
+  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), maxTokens: answerCeilingFor(c, ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false), onNote: (line: string) => c.deps.pushLog(line) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   // The skills the history loaded are named after the summary: their text goes with it. The
   // person's loads are read from the kept history, where their mark is (the model's view drops it).

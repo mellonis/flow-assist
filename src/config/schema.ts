@@ -61,18 +61,23 @@ export const hostConfigSchema = z.object({
     // What a role draws on (`src/assistant/model-roles.ts`):
     // `models.<id>.contextWindow` is one model's window — the API cannot be asked for it,
     // and the meter, the automatic compaction and the recall threshold measure against the
-    // window of the model a conversation runs; `roles.<name>` is the model id an agent
-    // file's `model:` or the subagent tool's `model` means here. `ai.contextWindow` is the
-    // window of a model the catalogue does not name (200000 otherwise).
-    models: z.record(z.string(), z.object({ contextWindow: z.number().int().positive() }).partial()).optional(),
+    // window of the model a conversation runs; `models.<id>.maxTokens` is that model's own
+    // answer ceiling; `roles.<name>` is the model id an agent file's `model:` or the
+    // subagent tool's `model` means here. `ai.contextWindow` is the window of a model the
+    // catalogue does not name (200000 otherwise).
+    models: z.record(z.string(), z.object({ contextWindow: z.number().int().positive(), maxTokens: z.number().int().positive() }).partial()).optional(),
     roles: z.record(z.string(), z.string()).optional(),
     tokenEnv: z.string().register(appliesOnRestart, {}).optional(),
     stream: z.boolean().optional(),
-    // The Anthropic wire only (`provider: 'anthropic'`, src/assistant/anthropic.ts):
-    // the ceiling on one answer, which that API requires (default 8192), and how the
-    // model is asked to think — `adaptive` (the current models) or a fixed
-    // `budgetTokens` (older ones; at least 1024). Unset: the model's own default.
+    // The ceiling on one answer, sent to the provider as `max_tokens` on both wires
+    // (`answerCeiling`, src/assistant/llm-endpoint.ts): this key over everything, else the
+    // model's own `models.<id>.maxTokens`, else the room its window leaves after what the
+    // conversation last sent (at most 32000, at least 1024).
     maxTokens: z.number().int().positive().optional(),
+    // How the model is asked to think (the Anthropic wire): `adaptive` — the current
+    // models' only thinking mode — or a fixed `budgetTokens` for older ones (at least
+    // 1024, and it counts against the ceiling). Unset: the request says nothing and the
+    // model's own default holds.
     thinking: z.object({ adaptive: z.boolean().optional(), budgetTokens: z.number().int().min(1024).optional() }).optional(),
     // The window of a model the catalogue does not name, in tokens — the API cannot be
     // asked for it. `models.<id>.contextWindow` is a named model's; the chat's `ctx N%`
