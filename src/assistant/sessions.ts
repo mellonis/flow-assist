@@ -447,7 +447,7 @@ export function loadSession(dir: string, id: string): Session | null {
       // Anything but the two modes that change what asks reads as `ask`, which is the
       // field's absence.
       autoMode: s.autoMode === 'reads' || s.autoMode === 'all' ? s.autoMode : undefined,
-      model: typeof s.model === 'string' && s.model ? s.model : undefined,
+      model: typeof s.model === 'string' && s.model.trim() ? s.model.trim() : undefined,
       project: projectRead(s.project),
       answeredAt: typeof s.answeredAt === 'string' ? s.answeredAt : '',
       seenAt: typeof s.seenAt === 'string' ? s.seenAt : '',

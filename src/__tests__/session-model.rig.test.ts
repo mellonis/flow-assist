@@ -65,3 +65,21 @@ test('a model a file holds that is not a string reads as no model', async () => 
   rig.open(id);
   expect(rig.conv.model).toBeUndefined();
 });
+
+test('a model a file holds as whitespace reads as no model', async () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { model: 'default-model' } });
+  await rig.conv.send('hello');
+  rig.conv.save();
+  const id = rig.conv.sessionId!;
+  rig.conv.releaseLock();
+  rig.conv.close('park');
+  // Whitespace names no model: the frame says none and the request runs ai.model, rather
+  // than a blank name carried through the file and onto every request for good.
+  const dir = homeIn(rig.sessionsDir!, id);
+  saveSession(dir, { ...loadSession(dir, id)!, model: '  ' } as unknown as Session);
+  rig.open(id);
+  expect(rig.conv.model).toBeUndefined();
+  await rig.conv.send('again');
+  expect(model.requests.at(-1)?.model).toBe('default-model');
+});

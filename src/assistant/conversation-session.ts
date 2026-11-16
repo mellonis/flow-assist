@@ -106,7 +106,8 @@ export function snapshotSession(c: Conversation): Session {
     images: [...c.images.values()], imageSeq: c.imageSeq,
     recall: saveRecallState(c.recall),
     ...(c.autoMode !== 'ask' ? { autoMode: c.autoMode } : {}), // `ask` is the absence of the field
-    ...(c.model ? { model: c.model } : {}), // the session runs it; absent — ai.model
+    // A named model is the session's choice; whitespace is no model at all, as on the read.
+    ...(typeof c.model === 'string' && c.model.trim() ? { model: c.model.trim() } : {}),
     closed: false, // written means in use — a resumed cleared session is open again
     project: c.sessionProject,
     ...(c.answeredAt ? { answeredAt: c.answeredAt } : {}),
