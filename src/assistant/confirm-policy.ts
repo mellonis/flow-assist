@@ -19,9 +19,9 @@ export function parkedAt(): number {
 }
 
 // What a write declined by `always-no` tells the model, by the reason the policy carries:
-// the task was started read-only (the decline is its kind, not the person's no), or it may
-// write but nobody here can confirm a write.
-export const READ_ONLY_TASK_DECLINE = 'This write was declined: this task was started read-only, so it may not write or run commands, whatever you try. The conversation that started it can start it again with write: true (each write then waits for the person\'s yes), or start an agent file, if the job must change something. Report what you found and what you would have changed.';
+// the task is read-only (the decline is its kind, not the person's no), or it may write but
+// nobody here can confirm a write.
+export const READ_ONLY_TASK_DECLINE = 'This write was declined: this task is read-only, so it may not write or run commands. If the job must change something, the conversation that started it can start it again with writes: ask (each write then waits for the person\'s yes) or an agent file. Report what you found and what you would have changed.';
 
 export const CANNOT_ASK_DECLINE = 'This write was declined: nobody can confirm a write here, so it did not run and nothing was changed. Report what you found and what you would have changed.';
 

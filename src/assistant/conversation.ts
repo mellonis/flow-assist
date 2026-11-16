@@ -38,7 +38,7 @@ import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
-import { agentsNowOf, askConfigChanges, compact, runTurn, skillsNowOf, turnShape } from './conversation-turn.js';
+import { agentsNowOf, askConfigChanges, compact, runTurn, skillsNowOf, turnShape, WRITE_TOOLS_WITHHELD } from './conversation-turn.js';
 import { runBackgroundShell, runShell } from './conversation-shell.js';
 
 export { NO_FILE };
@@ -1203,9 +1203,11 @@ export class Conversation {
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: policy.kind === 'ask',
       notify: () => {}, pushLog: () => {}, current: undefined,
       // What a child's own turn is not offered, a run a tool starts for it is not
-      // offered either: the names are added where nested runs inherit them.
+      // offered either: the names are added where nested runs inherit them. A child
+      // whose writes are `deny` is offered no write tools as well (`WRITE_TOOLS_WITHHELD`),
+      // whatever its groups hold.
       // The tool groups a child may use bind its own turns and the runs its tools start.
-      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: o?.allowGroups ? o.allowGroups.filter((g) => child.toolGroups!.includes(g)) : child.toolGroups } : {}) }),
+      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(writes === 'deny' ? WRITE_TOOLS_WITHHELD : []), ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: o?.allowGroups ? o.allowGroups.filter((g) => child.toolGroups!.includes(g)) : child.toolGroups } : {}) }),
     };
     const child = new Conversation(deps, { kind: spec.kind, policy });
     child.parent = this;

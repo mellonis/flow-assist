@@ -211,7 +211,8 @@ was left, or `ai.backgroundFollowUp` is off — goes on with its best assumption
 its result. Where the job merely leaves something open it makes an assumption without asking. Whatever would wait for your y/n (a command, a file change, a fetch off the
 allowlist) stops for your yes, asked as a subagent's is (see Subagents you start), and the task
 that waits does not hold one of the running places. A task the assistant starts read-only
-(`writes: 'deny'`) declines its writes and commands, and the decline tells it so, so it
+(`writes: 'deny'`) is offered no write tools and has any write behind another name declined,
+and the decline tells it so, so it
 reports what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
 `ai.maxTurnTokens` bounds it); one that runs out of them says so at the end of its result
 (`stopped after 12 rounds — last: …`). Long work with many commands, each waiting for your
@@ -483,12 +484,13 @@ subagent you start (docs/safety.md, "Asking less").
 `tools` narrows the groups of tools: the agent gets the `core` group and the groups the
 file lists, and nothing else (without `tools` every group is available). It does not make the agent read-only: the `core` group stays
 whole, with `memory` and `config_set`, which asks; and a group the file lists keeps
-its writing tools, each write asking you unless its auto mode answers, as for any subagent you start. A group named in the file that is not loaded is left out, and
+its writing tools — what a run does with them is `writes`, below. A group named in the file that is not loaded is left out, and
 a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
 
 `writes` is whether the work may change anything at all: `ask` (the default) waits for
-your y/n on every write and command, `deny` makes a read-only run (write tools and
-run_command are declined), and `allow` runs each write the auto mode with `shell.autoRun`
+your y/n on every write and command, `deny` makes a read-only run (the write tools and
+run_command are not offered at all, and a write behind another name is
+declined), and `allow` runs each write the auto mode with `shell.autoRun`
 answers — never `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and
 says each one in the log. Wherever the agent is started by name, the file's
 `writes` is what the work gets: its own `writes` argument does not move it. Only your

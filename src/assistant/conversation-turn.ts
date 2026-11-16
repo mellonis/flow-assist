@@ -70,6 +70,11 @@ export const SESSION_WITHHELD: readonly string[] = ['ask_parent'];
 // A child cannot put a question to anyone, so `ask_user` is not offered to it.
 export const TASK_WITHHELD: readonly string[] = ['ask_user', 'answer_child'];
 export const SUBAGENT_WITHHELD: readonly string[] = ['remind', 'ask_user'];
+// A child whose writes are `deny` is offered no write tools at all: these names join the
+// `withholdTools` `startChild` merges — the child's own turns and every run a tool starts
+// for it alike. Withholding is presentation, not the fence: the child's `always-no` policy
+// still declines a write a name outside this set hides.
+export const WRITE_TOOLS_WITHHELD: readonly string[] = ['write_file', 'edit_file', 'workspace_write', 'run_command', 'shell_kill'];
 const SHAPES: Record<ConversationKind, TurnShape> = {
   session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, answerChild: true, images: true, withholdTools: SESSION_WITHHELD },
   task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, taskCap: true, withholdTools: TASK_WITHHELD },

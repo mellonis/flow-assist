@@ -267,8 +267,11 @@ test('a `writes: \'deny\'` background task cannot run a command — it is read-o
   await settle(20);
   await wait(100);
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
-  const nested = model.requests[3]!.messages as Sent;
-  expect(String(nested.find((m) => m.role === 'tool')?.content)).toContain('declined');
+  const told = () => model.requests.flatMap((r) => (r.messages as Sent).filter((m) => m.role === 'tool')).map((m) => String(m.content)).join('\n');
+  // The read-only task is offered no write tools at all: its run_command call is
+  // answered as one to a tool that does not exist, and nothing runs.
+  expect(told()).toContain('Unknown tool: run_command');
+  expect(told()).not.toContain('declined');
   ui.app.unmount();
 });
 

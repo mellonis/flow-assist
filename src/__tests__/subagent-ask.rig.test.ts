@@ -9,6 +9,7 @@ import { scheduleChild } from '../assistant/child-schedule.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec, PendingConfirm } from '../assistant/conversation-types.ts';
+import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
@@ -263,8 +264,16 @@ test('a subagent\'s own auto mode `all` answers by `auto` and parks nothing', as
 
 test('a read-only child parks nothing: a model\'s subagent and a task decline, journaled `background`', async () => {
   const model = new ScriptedModel();
-  subScript(model, 'model job').script(write('m.txt'), [{ text: 'm' }]);
-  model.script(write('t.txt'), [{ text: 't' }]);
+  // Each read-only child attempts a hidden write tool (answered `Unknown tool`, never
+  // started) and then a write outside the hidden set, which its always-no policy
+  // declines with the pinned sentence.
+  const rounds = [
+    [{ tool: 'run_command', args: { command: 'echo x' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+    [{ text: 'm' }],
+  ];
+  subScript(model, 'model job').script(...rounds.map((r) => [...r] as never));
+  model.script(...rounds.map((r) => [...r] as never));
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const m = begin(rig, spec('model-sub', 'model job', { by: 'model', writes: 'deny' }));
   expect(await m.done).toMatchObject({ outcome: 'answer' });
@@ -280,6 +289,17 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   expect(made(rig, 'm.txt')).toBe(false);
   expect(made(rig, 't.txt')).toBe(false);
   expect(rig.conv.offered()).toBeNull();
+  for (const [label, rows] of [
+    ['model-sub', rig.subJournal('model-sub')],
+    ['plain', rig.journal().filter((e) => e.task === 'plain')],
+  ] as const) {
+    const of = (name: string) => rows.filter((e) => (e as { name?: string }).name === name);
+    // The hidden tool never starts: one `call` of outcome error and no confirm for it.
+    expect(of('run_command').filter((e) => e.t === 'confirm')).toEqual([]);
+    expect(of('run_command').filter((e) => e.t === 'call').map((e) => (e as { outcome?: string }).outcome)).toEqual(['error']);
+    // The un-hidden write is declined with the pinned sentence.
+    expect(String((of('config_set').find((e) => e.t === 'call') as { result?: string }).result)).toContain(READ_ONLY_TASK_DECLINE);
+  }
 });
 
 test('a task with `writes: \'ask\'` asks, tagged `task`; where the host cannot ask it declines', async () => {
@@ -382,7 +402,10 @@ test('the subagent tool with write: false or writes: \'deny\' declines a write: 
   for (const extra of [{ write: false }, { writes: 'deny' }]) {
     const model = new ScriptedModel();
     model.script([{ tool: 'subagent', args: { task: 'make u', label: 'uk', ...extra } }], [{ text: 'Started.' }]);
-    worker(model, 'make u').script(write('u.txt'), [{ text: 'could not' }]);
+    worker(model, 'make u').script(
+      [{ tool: 'run_command', args: { command: 'echo x > u.txt' } }],
+      [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+      [{ text: 'could not' }]);
     const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
     await rig.conv.send('make it');
     // Nothing is left to ask, so the answer carries no ask sentence either.
@@ -391,6 +414,11 @@ test('the subagent tool with write: false or writes: \'deny\' declines a write: 
     expect(rig.conv.offered()).toBeNull();
     expect(made(rig, 'u.txt')).toBe(false);
     expect(answers(rig, 'uk')).toMatchObject([{ answer: 'no', by: 'background' }]);
+    // The hidden write tool never starts (no confirm for it); the un-hidden write is
+    // declined with the pinned sentence.
+    const rows = rig.journal().filter((e) => e.task === 'uk');
+    expect(rows.filter((e) => e.t === 'confirm' && (e as { name?: string }).name === 'run_command')).toEqual([]);
+    expect(String((rows.find((e) => e.t === 'call' && (e as { name?: string }).name === 'config_set') as { result?: string } | undefined)?.result)).toContain(READ_ONLY_TASK_DECLINE);
     closeRigs();
   }
 });
@@ -426,13 +454,36 @@ test('a task that cannot ask cannot start one that can: the inner write is decli
   const model = new ScriptedModel();
   model.script([{ tool: 'subagent', args: { task: 'outer t', label: 'outer', writes: 'deny' } }], [{ text: 'Started.' }]);
   worker(model, 'outer t').script([{ tool: 'subagent', args: { task: 'inner t', label: 'inner', write: true } }], [{ text: 'outer done' }]);
-  worker(model, 'inner t').script(write('inner.txt'), [{ text: 'inner done' }]);
+  // The inner child's spec asks for writes (`write: true`), but its starter — a deny
+  // task — may not vouch, so the grant never happens and its policy is `always-no`.
+  // The deny task's hidden write tools ride to it (`deny` never lifts): its
+  // run_command call is answered `Unknown tool` and never starts, and a write outside
+  // the hidden set is declined with the cannot-ask sentence.
+  const innerScript = worker(model, 'inner t');
+  innerScript.script(
+    [{ tool: 'run_command', args: { command: 'echo x > inner.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+    [{ hold: true }, { text: 'inner done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   await rig.conv.send('go');
+  // Its last round is held, so the live inner node (or its hand-up to the session when
+  // the outer task ends first) can be caught whatever the interleaving.
+  const walk = (): Conversation[] => [...rig.conv.children].flatMap((c): Conversation[] => [c, ...[...c.children].flatMap((g) => [g, ...[...g.children]])]);
+  await rig.until(() => walk().some((c) => c.label === 'inner'));
+  const inner = walk().find((c) => c.label === 'inner')!;
+  expect(inner.policy.kind).toBe('always-no');
+  // Only then let the held round finish.
+  await rig.until(() => innerScript.held);
+  innerScript.release();
   await rig.until(() => answers(rig, 'inner').length > 0 && rig.registry.children.backgroundCount() === 0, 5_000);
   expect(answers(rig, 'inner')).toMatchObject([{ answer: 'no', by: 'background' }]);
   expect(rig.conv.offered()).toBeNull();
   expect(made(rig, 'inner.txt')).toBe(false);
+  const rows = rig.journal().filter((e) => e.task === 'inner');
+  expect(rows.filter((e) => e.t === 'confirm' && (e as { name?: string }).name === 'run_command')).toEqual([]);
+  const declined = String((rows.find((e) => e.t === 'call' && (e as { name?: string }).name === 'config_set') as { result?: string } | undefined)?.result);
+  expect(declined).toContain(CANNOT_ASK_DECLINE);
+  expect(declined).not.toContain('may ask the person');
 });
 
 test('a task that writes starts one that writes: the inner request is offered as outer › inner', async () => {

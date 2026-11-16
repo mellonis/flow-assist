@@ -3699,7 +3699,13 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   plus the groups it names; `readTools` in `agent.ts` withholds every other tool of the
   registry, judged again on each registry revision, so a group that loads later is held
   to the list. The `core` group is not narrowed: `memory`, `config_set` and the rest of it
-  stay. The list is applied in the child's `chatLLM` wrapper (`startChild`), which every
+  stay. A child whose writes are `deny` is offered no write tools at all —
+  `WRITE_TOOLS_WITHHELD` (`conversation-turn.ts`: `write_file`, `edit_file`,
+  `workspace_write`, `run_command`, `shell_kill`) joins the `withholdTools` the wrapper
+  merges, and every descendant's calls chain through the same wrapper, so everything
+  below a `deny` child is write-blind — `deny` never lifts — `core` is whole otherwise
+  and reads run as ever, while `always-no` still declines any write a name outside the
+  set hides. The list is applied in the child's `chatLLM` wrapper (`startChild`), which every
   turn of the child and every nested run a tool starts through `ctx.chatLLM` passes
   through; a call that already carries an `allowGroups` is intersected with it, so no
   list widens the one above it. A child started by a child inherits the starter's list,

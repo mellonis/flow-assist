@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../assistant/conversation.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import { agentHash } from '../assistant/agent-file.ts';
 import { agentTrustPath, recordAgentStart } from '../assistant/agent-trust.ts';
@@ -156,17 +157,23 @@ test('a named call\'s answer says what the file decides: no demotion note, the f
 test('a named agent with `writes: deny` is read-only whatever the call says', async () => {
   const { model, child, rig } = rigFor('GO-DD');
   project(rig, 'job', doc('writes: deny\n', 'GO-DD go'));
-  child.script([{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ hold: true }, { text: 'done' }]);
+  // The file's `deny` is what the child gets and the call grants nothing. Its hidden
+  // write tools are answered `Unknown tool` and never start; a write outside the set
+  // is declined by its policy with the pinned sentence — no y/n is offered, the file
+  // is not made, and the decline is journaled as the background's.
+  child.script(
+    [{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+    [{ hold: true }, { text: 'done' }]);
   const answer = await call(rig, model, { agent: 'job', writes: 'allow' });
-  // The file's `deny` is what the child gets and the call grants nothing: its writes are
-  // declined by its policy — no y/n is offered, the file is not made, and the decline is
-  // journaled as the background's.
   expect(answer).not.toContain('may ask the person');
   await rig.until(() => child.held);
   expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['always-no']);
   expect(rig.conv.offered()).toBeNull();
   expect(fs.existsSync(path.join(rig.root, 'denied.txt'))).toBe(false);
   expect(rig.journal().some((e) => e.t === 'confirm' && e.answer === 'no' && e.by === 'background')).toBe(true);
+  expect(rig.journal().filter((e) => e.t === 'confirm' && (e as { name?: string }).name === 'run_command')).toEqual([]);
+  expect(String((rig.journal().find((e) => e.t === 'call' && (e as { name?: string }).name === 'config_set') as { result?: string } | undefined)?.result)).toContain(READ_ONLY_TASK_DECLINE);
   child.release();
   await childDone(rig);
 });

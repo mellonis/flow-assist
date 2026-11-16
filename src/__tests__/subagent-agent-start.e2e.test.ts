@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../assistant/conversation.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { exportMarkdown, readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { agentHash } from '../assistant/agent-file.ts';
 import { recordAgentStart } from '../assistant/agent-trust.ts';
@@ -259,21 +260,25 @@ test('the agent file\'s writes are what a start of yours gets: a writes: deny ch
   const journalAll = () => listTree(dir).filter((n) => n.endsWith('.log.jsonl')).flatMap((n) => (readJournal(path.join(dir, n)) ?? []) as JournalEvent[]);
   const confirms = () => journalAll().filter((e) => e.t === 'confirm');
   child.script(
-    [{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ text: 'deny done' }],
+    [{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }], [{ text: 'deny done' }],
     [{ tool: 'run_command', args: { command: 'echo y > made.txt' } }], [{ text: 'allow done' }],
   );
-  // A read-only child: its write is declined by the policy — no y/n is offered, the file
-  // is not made, and the decline is journaled as the background's.
+  // A read-only child: its hidden write tool is answered `Unknown tool` and never
+  // starts; a write outside the hidden set is declined by the policy — no y/n is
+  // offered, the file is not made, and the decline is journaled as the background's.
   await ask(ui, '/subagent @denier');
-  await settleUntil(() => child.requests.length >= 2);
+  await settleUntil(() => child.requests.length >= 3);
   await settleUntil(() => frameOf(ui).includes('deny done'));
   expect(askUp(frameOf(ui))).toBe(false);
   expect(fs.existsSync(path.join(root, 'denied.txt'))).toBe(false);
   expect(confirms().filter((e) => e.answer === 'no' && e.by === 'background').length).toBe(1);
+  expect(confirms().filter((e) => e.name === 'run_command')).toEqual([]);
+  expect(String((journalAll().find((e) => e.t === 'call' && e.name === 'config_set') as { result?: string } | undefined)?.result)).toContain(READ_ONLY_TASK_DECLINE);
   // An allow child: the write runs with no y/n. (What an allow run says in the log is
   // pinned at the rig; here `L` would type into the chat's field.)
   await ask(ui, '/subagent @allower');
-  await settleUntil(() => child.requests.length >= 4);
+  await settleUntil(() => child.requests.length >= 5);
   await settleUntil(() => fs.existsSync(path.join(root, 'made.txt')));
   expect(askUp(frameOf(ui))).toBe(false);
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);

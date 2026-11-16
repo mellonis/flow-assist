@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec } from '../assistant/conversation-types.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { listTree } from './helpers/session-files';
@@ -101,13 +102,27 @@ test('a grandchild\'s line keeps its own label when it passes through its parent
   expect(call).toMatchObject({ task: 'inner', name: 'datetime' });
 });
 
-test('a write the child attempts is declined, journaled `confirm` by background with its task', async () => {
+test('a write tool is withheld from a read-only child: its call is answered `Unknown tool` and runs nothing', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, { ...spec('w', 'make a file'), writes: 'deny' });
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
+  const told = model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n');
+  expect(told).toContain('Unknown tool: run_command');
+  const tagged = rig.journal().filter((e) => e.task === 'w');
+  expect(tagged.map((e) => e.t)).toEqual(['call']);
+  expect(tagged[0]).toMatchObject({ name: 'run_command', outcome: 'error', task: 'w' });
+  expect(rig.conv.confirm).toBeNull();
+});
+
+test('a write behind a name no write tool hides is still declined, journaled `confirm` by background with its task', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }], [{ text: 'could not' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const { run } = startFrom(rig, { ...spec('w', 'set a flag'), writes: 'deny' });
+  await run();
   const tagged = rig.journal().filter((e) => e.task === 'w');
   expect(tagged.map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
   expect(tagged[1]).toMatchObject({ answer: 'no', by: 'background', task: 'w' });
@@ -235,13 +250,15 @@ test('a subagent keeps ai.maxRounds and ignores ai.taskRounds', async () => {
 
 test('a write declined in a task started read-only tells the model so', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
+  model.script([{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }], [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, { ...spec('w', 'make a file'), writes: 'deny' });
+  const { run } = startFrom(rig, { ...spec('w', 'set a flag'), writes: 'deny' });
   await run();
   const told = model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => String(m.content)).join('\n');
-  expect(told).toContain('started read-only');
-  expect(told).toContain('write: true');
+  expect(told).toContain(READ_ONLY_TASK_DECLINE);
+  expect(told).toContain('this task is read-only');
+  expect(told).toContain('writes: ask');
+  expect(told).not.toContain('write: true');
   expect(told).not.toContain('must explicitly confirm');
 });
 
