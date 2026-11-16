@@ -361,8 +361,25 @@ test('the subagent tool with write: true starts a task that may ask: its request
   expect(answers(rig, 'tk')).toMatchObject([{ answer: 'yes', by: 'person', task: 'tk' }]);
 });
 
-test('the subagent tool without write, or with write: false, declines a write: nothing is offered', async () => {
-  for (const extra of [{}, { write: false }]) {
+test('the subagent tool with a bare call is a worker: its write is offered under the label, and a yes runs it', async () => {
+  for (const extra of [{}, { writes: 'ask' }]) {
+    const model = new ScriptedModel();
+    model.script([{ tool: 'subagent', args: { task: 'make u', label: 'uk', ...extra } }], [{ text: 'Started.' }]);
+    worker(model, 'make u').script(write('u.txt'), [{ text: 'made' }]);
+    const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+    await rig.conv.send('make it');
+    await rig.until(() => rig.conv.offered() !== null, 5_000);
+    expect(rig.conv.offered()).toMatchObject({ path: ['uk'] });
+    rig.conv.offered()!.owner.answerConfirm(true);
+    await over(rig);
+    expect(made(rig, 'u.txt')).toBe(true);
+    expect(answers(rig, 'uk')).toMatchObject([{ answer: 'yes', by: 'person' }]);
+    closeRigs();
+  }
+});
+
+test('the subagent tool with write: false or writes: \'deny\' declines a write: nothing is offered', async () => {
+  for (const extra of [{ write: false }, { writes: 'deny' }]) {
     const model = new ScriptedModel();
     model.script([{ tool: 'subagent', args: { task: 'make u', label: 'uk', ...extra } }], [{ text: 'Started.' }]);
     worker(model, 'make u').script(write('u.txt'), [{ text: 'could not' }]);
@@ -401,11 +418,11 @@ test('the starting conversation\'s auto mode reaches a child that may write: the
   expect(answers(rig, 'inh')).toMatchObject([{ answer: 'yes', by: 'auto' }]);
 });
 
-// A task the model started without `write` calls the subagent tool itself and asks for a
+// A task the model started `writes: 'deny'` calls the subagent tool itself and asks for a
 // task that writes: session -> task -> task, through the real tool path.
 test('a task that cannot ask cannot start one that can: the inner write is declined and nothing is offered', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'subagent', args: { task: 'outer t', label: 'outer' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'outer t', label: 'outer', writes: 'deny' } }], [{ text: 'Started.' }]);
   worker(model, 'outer t').script([{ tool: 'subagent', args: { task: 'inner t', label: 'inner', write: true } }], [{ text: 'outer done' }]);
   worker(model, 'inner t').script(write('inner.txt'), [{ text: 'inner done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });

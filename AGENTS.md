@@ -2103,7 +2103,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
     records what was running.
   - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person` (their key), `auto`
     (the auto mode answered), `background` (a background task's run answered — the
-    `subagent` tool's task declines every write unless started with `write: true`), `stop` (Ctrl+C stopped the turn while it
+    `subagent` tool's task with `writes: 'deny'` declines every write, and so does one where
+    nobody can answer), `stop` (Ctrl+C stopped the turn while it
     was up) or `reset` (`/clear` or `/new` closed it). The call id reaches
     `confirmWrite` as `info.id`.
   - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
@@ -3415,10 +3416,11 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   `'ask'`): `deny` is `always-no` read-only and never lifts, `allow` runs each write the
   auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a
   plugin's `run_command` — and says it in the log, `ask` waits for the person's yes on each
-  (the `subagent` tool's
-  `write` argument starts a `task` with `writes: 'ask'`: `ai.taskRounds` rounds, the worker
-  prompt, its y/n offered to the session like a subagent's — `write` absent or false is
-  `writes: 'deny'`) — where the host's root can ask at all (`canAsk`; with nobody to ask the
+  (the `subagent` tool
+  starts a `task` with `writes: 'ask'` when the call does not name `writes: 'deny'`:
+  `ai.taskRounds` rounds, the worker
+  prompt, its y/n offered to the session like a subagent's — `writes` wins over the
+  deprecated `write`, `true` reading as `ask` and `false` as `deny`) — where the host's root can ask at all (`canAsk`; with nobody to ask the
   policy is `always-no` `cannot-ask`) and the starter may vouch: a session, or a child that
   asks itself or runs `allow`. A child that may not vouch cannot start one that may,
   whatever its spec says. A child that is not `deny` also starts in the auto mode of the
@@ -4660,7 +4662,8 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     model must not promise to act on results when they arrive, only say they will come
     into the chat and it will look at them then; and that when results arrived since
     its last answer, the next answer opens with what came back, a line per task. It also
-    says the task is read-only unless `write: true`, which makes each write ask the person. The
+    says the task writes and runs commands through the person's y/n (the session's auto
+    mode answers), and `writes: 'deny'` narrows it to a read-only task. The
     call's own answer says the same (`the result appears in the chat when it ends, and
     you see it on your next turn`), and so does `config_schema`'s note for
     `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in `hostConfigSchema`'s `ai`).

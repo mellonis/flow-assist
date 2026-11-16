@@ -209,11 +209,10 @@ as data another agent wrote, in a turn of its own, and answers it, asking you fi
 must. A task that gets no answer — the turn ends without one, the conversation closes or
 was left, or `ai.backgroundFollowUp` is off — goes on with its best assumption and names it in
 its result. Where the job merely leaves something open it makes an assumption without asking. Whatever would wait for your y/n (a command, a file change, a fetch off the
-allowlist) is declined, unless the assistant started the task with `write: true`: then each
-write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
-that waits does not hold one of the running places. A task started without `write: true` is
-read-only: its writes and commands are declined, and the decline tells it so, so it reports
-what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
+allowlist) stops for your yes, asked as a subagent's is (see Subagents you start), and the task
+that waits does not hold one of the running places. A task the assistant starts read-only
+(`writes: 'deny'`) declines its writes and commands, and the decline tells it so, so it
+reports what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
 `ai.maxTurnTokens` bounds it); one that runs out of them says so at the end of its result
 (`stopped after 12 rounds — last: …`). Long work with many commands, each waiting for your
 yes, is better done in the conversation itself, or by an agent file you start with
@@ -953,8 +952,8 @@ for its end and is killed at its timeout. The assistant then has three more tool
 **Limits.** `shell.maxBackground` (4) shells run at once in the whole process; a fifth is
 refused, with the list of the running ones. Each keeps its last `shell.jobChars` (64000)
 characters of output, as a ring: the oldest text goes first. A subagent you started can start
-shells too; a task can only when it was started with `write: true`, and then each
-command waits for your yes.
+shells too; a task's commands wait for your yes like the chat's do, and a task started
+`writes: 'deny'` starts none.
 
 **When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
 data, to the conversation that started it, in its next turn. You see a toast

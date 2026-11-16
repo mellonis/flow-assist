@@ -74,9 +74,10 @@ A path to the model that cannot ask you declines every write before it starts: t
 tool never runs, and the assistant is told that this run cannot ask you and that you
 can do it in the chat. Reads run as usual. That holds for:
 
-- a background task started without `write: true` — it declines every write and every
-  command, cannot fetch a host you have not listed (one started with `write: true` asks you
-  for each write instead), and the tool for asking you a question is not offered to
+- a background task that never asks — read-only (`writes: 'deny'`), or one nobody can
+  answer — it declines every write and every
+  command, cannot fetch a host you have not listed (a task that may ask waits
+  for your yes on each write instead), and the tool for asking you a question is not offered to
   it at all (a subagent is offered none either);
 - a plugin's own use of the model (`chatLLM`), in the chat or not — unless the plugin
   passes a confirmation of its own that asks you; a plugin in another language, over

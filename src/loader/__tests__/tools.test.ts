@@ -684,13 +684,18 @@ test('config_schema prints the marks beside a key, with the reason', async () =>
   expect(row('keys')).toMatch(/takes effect on restart/);
 });
 
-test('the subagent description names ai.taskRounds and says a read-only task cannot run commands', () => {
+test('the subagent description names ai.taskRounds, the worker default and the read-only case', () => {
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const fn = reg.tools.find((t) => t.function.name === 'subagent')!.function;
   expect(fn.description).toContain('up to `ai.taskRounds` tool rounds, 12 by default');
+  expect(fn.description).toContain('writes and runs commands through the person\'s y/n');
+  expect(fn.description).toContain('`writes: \'deny\'` makes it a read-only task');
   expect(fn.description).toMatch(/cannot run commands/);
   expect(fn.description).toContain('/subagent @name');
   expect(fn.description).not.toContain('up to 12 tool rounds');
+  const props = (fn.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+  expect(props.writes).toBeDefined();
+  expect(props.write).toBeDefined();
 });
 
 test('ai.taskRounds takes 0 for none and has a note naming its default', async () => {

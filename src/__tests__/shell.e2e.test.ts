@@ -222,11 +222,31 @@ test('Esc during a confirmed run_command stops the command with the answer', asy
   ui.app.unmount();
 });
 
-test('a background task cannot run a command — nobody is there to say yes', async () => {
+test("a background task's command waits for the person: the y/n is offered under its label", async () => {
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'subagent', args: { task: 'create a file' } }],
+    [{ text: 'Started it in the background.' }],
+    [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
+    [{ text: 'Made it.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('make a file in the background');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  // A bare call is a worker: its command waits for the person's yes, and nothing runs
+  // before it.
+  expect(ui.backend.lastFrame).toContain('create a file');
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('a `writes: \'deny\'` background task cannot run a command — it is read-only', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'subagent', args: { task: 'create a file', writes: 'deny' } }],
     [{ text: 'Started it in the background.' }],
     [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
     [{ text: 'Could not.' }],
@@ -545,7 +565,7 @@ test('a background run does not move the chat\'s directory', async () => {
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'subagent', args: { task: 'go elsewhere' } }],
+    [{ tool: 'subagent', args: { task: 'go elsewhere', writes: 'deny' } }],
     [{ text: 'Started.' }],
     [{ tool: 'run_command', args: { command: 'cd ..' } }],
     [{ text: 'Could not.' }],
