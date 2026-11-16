@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
 import { askShown, askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
-import { parkedAt, type ConfirmPolicy } from './confirm-policy.js';
+import { childPolicy, parkedAt, type ConfirmPolicy } from './confirm-policy.js';
 import { readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
 import { outputJournal, type JournalEvent } from './journal.js';
@@ -1167,9 +1167,10 @@ export class Conversation {
   // ── children
   // A child started from the turn journaled as `journalId`: a `task` (a background
   // task) or a `subagent` conversation with its own plan, shell (starting where this
-  // one's is), tool set and abort; no screens, no log lines, nobody to ask unless it may write
-  // (`spec.write`, or a subagent the person starts: then its y/n is parked in it and offered
-  // upward, `offered`), and no state file. A subagent keeps a journal file of its own where
+  // one's is), tool set and abort; no screens, no log lines, nobody to ask unless its
+  // writes capability is not `deny` (`spec.writes`, absent reads as `'ask'`: then its
+  // y/n is parked in it and offered upward, `offered`), and no state file. A subagent
+  // keeps a journal file of its own where
   // the session at the root has a home (`subJournalId`); the `subagent` start and end lines
   // about it, tagged `subagent: <label>`, go into the journal above it. A task, and a
   // subagent with no home to keep a file in, write their `call-start`, `confirm` and `call`
@@ -1187,25 +1188,26 @@ export class Conversation {
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
-    // A child that may write asks the person where the host has one; every other child
-    // declines. `canAsk` is the host's, read at the root: a child's own deps say false
-    // for a read-only child. A child that cannot ask cannot start one that can: only a
-    // session, or a child that asks itself, passes the right on.
+    // The child's writes capability decides what it may change (`childPolicy`); the
+    // starter vouches for the person's yes only where it could ask itself — a session,
+    // or a child that asks or runs `allow`. `canAsk` is the host's, read at the root: a
+    // child's own deps say false unless its policy asks. A child that may not vouch
+    // cannot start one that may; `deny` never lifts.
     let host: Conversation = this;
     while (host.parent) host = host.parent;
-    const starterAsks = !this.parent || this.policy.kind === 'ask';
-    const wantsWrites = spec.write === true || (spec.kind === 'subagent' && spec.by === 'person');
-    const asks = starterAsks && host.deps.canAsk !== false && wantsWrites;
+    const writes = spec.writes ?? 'ask';
+    const mayVouch = (!this.parent || this.policy.kind === 'ask' || this.policy.kind === 'allow-writes') && host.deps.canAsk !== false;
+    const policy = childPolicy(writes, mayVouch, (line) => this.deps.pushLog(`[bg] ${line}`));
     const deps: ConversationDeps = {
       ...this.deps,
-      sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: asks,
+      sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: policy.kind === 'ask',
       notify: () => {}, pushLog: () => {}, current: undefined,
       // What a child's own turn is not offered, a run a tool starts for it is not
       // offered either: the names are added where nested runs inherit them.
       // The tool groups a child may use bind its own turns and the runs its tools start.
       chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: o?.allowGroups ? o.allowGroups.filter((g) => child.toolGroups!.includes(g)) : child.toolGroups } : {}) }),
     };
-    const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no', reason: wantsWrites ? 'cannot-ask' : 'read-only' } });
+    const child = new Conversation(deps, { kind: spec.kind, policy });
     child.parent = this;
     child.depth = this.depth + 1;
     child.label = spec.label;
@@ -1214,6 +1216,9 @@ export class Conversation {
     // A child without a role of its own runs its parent's model, materialised here so a
     // task started by a subagent runs what that subagent runs.
     child.model = spec.model ?? this.effectiveModel();
+    // A child that may write starts in the auto mode of the conversation that started
+    // it (never saved — a child keeps no state file). A `deny` child starts at `ask`.
+    if (writes !== 'deny') child.setAutoMode(this.autoMode, false);
     // The allow-list is inherited: a child of a conversation that has one gets it, and the
     // intersection when it names its own.
     child.toolGroups = this.toolGroups && spec.toolGroups ? spec.toolGroups.filter((g) => this.toolGroups!.includes(g)) : (spec.toolGroups ?? this.toolGroups);

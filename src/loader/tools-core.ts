@@ -842,7 +842,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // An agent task may write under the person's y/n, as one started with `write: true`
         // does; whether it can ask is `startChild`'s rule.
         const writes = args.write === true || !!named;
-        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', writes: writes ? 'ask' : 'deny', ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;

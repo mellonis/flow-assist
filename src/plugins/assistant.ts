@@ -2154,12 +2154,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (!slots) { setError('/subagent: subagents are unavailable here'); return; }
                 // The start, for a prompt and for an agent file: the parent's own journal takes
                 // the child's lines (its session is made here when nobody has spoken,
-                // `keepPersonWork`). Its mode is set before the schedule's timer lets its
-                // first turn go: the starting conversation's mode is never the child's.
+                // `keepPersonWork`). A subagent the person starts may write under each
+                // write's y/n, and can raise its inherited auto mode before the
+                // schedule's timer lets its first turn go.
                 const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head' | 'model'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
-                    { kind: 'subagent', by: 'person', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
+                    { kind: 'subagent', by: 'person', writes: 'ask', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
                     0,
                     { startChild: (s) => conv.startChild(s, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
                   );

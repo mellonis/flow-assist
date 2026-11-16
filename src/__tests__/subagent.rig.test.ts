@@ -87,7 +87,7 @@ test('a model\'s subagent declines a write, journaled `confirm` by background, i
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model' }));
+  const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model', writes: 'deny' }));
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
   const own = rig.subJournal('w').filter((e) => ['call-start', 'confirm', 'call'].includes(e.t));

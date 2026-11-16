@@ -180,7 +180,7 @@ test('a grandchild handed up to the session asks, and the session offers it wher
   let notified = 0;
   rig.conv.on('asking', () => { heard.push('asking'); });
   (rig.conv.deps as { notify: () => void }).notify = () => { notified++; };
-  const outer = begin(rig, spec('outer', 'outer job', { by: 'model', write: true }));
+  const outer = begin(rig, spec('outer', 'outer job', { by: 'model', writes: 'ask' }));
   const inner = begin(rig, spec('inner', 'inner job'), outer.child);
   await rig.until(() => innerScript.held);
   await outer.done;
@@ -266,7 +266,7 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   subScript(model, 'model job').script(write('m.txt'), [{ text: 'm' }]);
   model.script(write('t.txt'), [{ text: 't' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const m = begin(rig, spec('model-sub', 'model job', { by: 'model' }));
+  const m = begin(rig, spec('model-sub', 'model job', { by: 'model', writes: 'deny' }));
   expect(await m.done).toMatchObject({ outcome: 'answer' });
   expect(answers(rig, 'model-sub')).toMatchObject([{ answer: 'no', by: 'background' }]);
   // The export draws that answer inside the subagent's fold.
@@ -274,7 +274,7 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   const md = exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId, child: (id) => files.get(id) ?? null });
   const fold = md.slice(md.indexOf('<summary>model-sub'));
   expect(fold).toContain('Asked y/n — answered no by');
-  const t = begin(rig, { kind: 'task', label: 'plain', prompt: 'write it', by: 'model' });
+  const t = begin(rig, { kind: 'task', label: 'plain', prompt: 'write it', by: 'model', writes: 'deny' });
   expect(await t.done).toMatchObject({ outcome: 'answer' });
   expect(answers(rig, 'plain')).toMatchObject([{ answer: 'no', by: 'background', task: 'plain' }]);
   expect(made(rig, 'm.txt')).toBe(false);
@@ -282,11 +282,11 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   expect(rig.conv.offered()).toBeNull();
 });
 
-test('a task with `write: true` asks, tagged `task`; where the host cannot ask it declines', async () => {
+test('a task with `writes: \'ask\'` asks, tagged `task`; where the host cannot ask it declines', async () => {
   const model = new ScriptedModel();
   model.script(write('w.txt'), [{ text: 'w' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const w = begin(rig, { kind: 'task', label: 'wr', prompt: 'write it', by: 'model', write: true });
+  const w = begin(rig, { kind: 'task', label: 'wr', prompt: 'write it', by: 'model', writes: 'ask' });
   await rig.until(() => rig.conv.offered() !== null);
   expect(rig.conv.offered()).toMatchObject({ owner: w.child, path: ['wr'] });
   w.child.answerConfirm(true);
@@ -388,17 +388,17 @@ test('a subagent\'s auto mode `all` still asks run_command while shell.autoRun i
   await done;
 });
 
-test('the starting conversation\'s auto mode never reaches a child', async () => {
+test('the starting conversation\'s auto mode reaches a child that may write: the write answers by `auto`', async () => {
   const model = new ScriptedModel();
-  subScript(model, 'inherit').script(write('in.txt'), [{ text: 'asked' }]);
+  subScript(model, 'inherit').script(write('in.txt'), [{ text: 'made it' }]);
   const rig = conversationRig(model, { shell: { autoRun: true }, ai: { backgroundFollowUp: false } });
   rig.conv.setAutoMode('all');
   const { child, done } = begin(rig, spec('inh', 'inherit'));
-  expect(child.autoMode).toBe('ask');
-  await rig.until(() => rig.conv.offered() !== null);
-  expect(made(rig, 'in.txt')).toBe(false);
-  rig.conv.offered()!.owner.answerConfirm(false);
-  await done;
+  expect(child.autoMode).toBe('all');
+  expect(await done).toMatchObject({ outcome: 'answer', text: 'made it' });
+  expect(rig.conv.offered()).toBeNull();
+  expect(made(rig, 'in.txt')).toBe(true);
+  expect(answers(rig, 'inh')).toMatchObject([{ answer: 'yes', by: 'auto' }]);
 });
 
 // A task the model started without `write` calls the subagent tool itself and asks for a

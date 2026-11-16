@@ -1410,9 +1410,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: a background task's conversation has the policy
     `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
-    so does a subagent the model starts (its lines are in its own journal, when it has one). A child that may write (`ChildSpec.write`, and
-    every subagent the person starts) has the policy `ask` instead, where the host has a
-    person at all (see "A conversation starts a child of its own");
+    so does a subagent the model starts (its lines are in its own journal, when it has one). A child with `writes` other than `'deny'` (`ChildSpec.writes`,
+    and every subagent the person starts) has the policy `ask` (`allow-writes` when it
+    is `'allow'`), where the host has a person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
@@ -1473,9 +1473,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   `src/assistant/shell.ts`) and passes it into `autoConfirms` — live, not restart-only,
   since it only loosens a pause the person already chose with `/auto all`, so a
   `:config set --session shell.autoRun true` holds for the next command. A
-  background task is
-  untouched: its conversation has the policy `always-no` (a child that may write
-  keeps its own mode, which starts at `ask`), and the chat's mode never reaches it; the person's own `!command` is untouched too. The decision lives in
+  background task keeps its own auto mode: it starts as the one of the conversation
+  that started it (a `writes: 'deny'` child at `ask`), and the chat's `/auto` never
+  changes it afterwards; the person's own `!command` is untouched too. The decision lives in
   the one place the chat already pauses — the `confirmWrite` closure — and it changes
   nothing about what `agentChat` asks about: a tool never skips its own write flag.
   What ran under the mode is still shown, the ✎ diff block and the tool trail as usual.
@@ -3410,13 +3410,17 @@ reducer filters as you type and submits on Enter, and here the line is the filte
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
-  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy `always-no` — or `ask`
-  for a subagent the person starts and for any spec with `write: true` (the `subagent` tool's
-  `write` argument starts a `task` with it: `ai.taskRounds` rounds, the worker prompt, its y/n
-  offered to the session like a subagent's — `write` absent or false is `always-no`), where the host's
-  root can ask at all (`canAsk`; with nobody to ask such a child declines) and the starter
-  can: a session, or a child that asks itself. A child that cannot ask cannot start one
-  that can, whatever its spec says. Its
+  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy
+  `childPolicy` makes from its writes capability (`ChildSpec.writes`, absent reads as
+  `'ask'`): `deny` is `always-no` read-only and never lifts, `allow` runs each write and
+  says it in the log, `ask` waits for the person's yes on each (the `subagent` tool's
+  `write` argument starts a `task` with `writes: 'ask'`: `ai.taskRounds` rounds, the worker
+  prompt, its y/n offered to the session like a subagent's — `write` absent or false is
+  `writes: 'deny'`) — where the host's root can ask at all (`canAsk`; with nobody to ask the
+  policy is `always-no` `cannot-ask`) and the starter may vouch: a session, or a child that
+  asks itself or runs `allow`. A child that may not vouch cannot start one that may,
+  whatever its spec says. A child that is not `deny` also starts in the auto mode of the
+  conversation that started it. Its
   deps are its parent's with no sessions directory, no screens, no redraw
   (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
   asks, and `ask_user` is not in a child's tool list. It keeps no state file. A task has no
@@ -3586,9 +3590,10 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   unique among the live children (`-2`, `-3`). `--with-context` hands `conv.summary` and
   nothing else — with none, nothing starts and the line says a `/compact` makes one;
   `--auto` sets the child's own auto mode to `all` (`setAutoMode`) on the child
-  `scheduleChild` returns, before the schedule's timer lets its first turn go — the
-  starting conversation's mode is never copied (`autoConfirms` reads the asking
-  conversation's own mode, and `shell.autoRun` applies as in a session). `/subagent` alone puts a note listing
+  `scheduleChild` returns, before the schedule's timer lets its first turn go —
+  overriding the mode the child starts with, the one of the conversation that started
+  it (`autoConfirms` reads the asking conversation's own mode, and `shell.autoRun`
+  applies as in a session). `/subagent` alone puts a note listing
   the conversation's running children of both kinds, numbered (`working`, `queued`, or
   `in <time>` for a delayed task), then the ended ones (`done`, `failed`, `stopped`, the
   duration, the tokens), or `no subagents here`; `/subagent stop <n|label>` takes the

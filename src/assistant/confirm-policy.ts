@@ -7,7 +7,7 @@ import { runMark, shellAutoRun } from './shell.js';
 import { sanitizeViewText } from './views.js';
 import { configSetLine } from '../config/commands.js';
 import { parseValue } from '../config/load.js';
-import type { PendingConfirm } from './conversation-types.js';
+import type { PendingConfirm, TaskWrites } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // When a y/n is parked: milliseconds since the epoch, raised by one when the clock has not
@@ -38,6 +38,17 @@ export type ConfirmPolicy =
 // nested run the call belongs to (`journalTo` follows it into a fork), and a background
 // task's or subagent's label, which tags its lines and makes its answers `by: 'background'`.
 export interface ConfirmScope { conv: Conversation; journalId: string; task?: string; subagent?: string }
+
+// A child's policy from its writes capability and its starter's word: `deny` is read-only
+// whatever the starter is — a denied child never gets writes back; `allow` runs each write
+// and says it, but only where the starter may vouch for the person's yes; anything a child
+// asks for without that vouch is a run with nobody to ask, which declines. `say` is where
+// `allow`'s writes are said as they run.
+export function childPolicy(writes: TaskWrites, mayVouch: boolean, say: (line: string) => void): ConfirmPolicy {
+  if (writes === 'deny') return { kind: 'always-no', reason: 'read-only' };
+  if (!mayVouch) return { kind: 'always-no', reason: 'cannot-ask' };
+  return writes === 'allow' ? { kind: 'allow-writes', say } : { kind: 'ask' };
+}
 
 // The `confirmWrite` a run is handed, or none. `none` returns nothing on purpose:
 // agentChat then declines every write before it starts, with no `onToolStart` and no

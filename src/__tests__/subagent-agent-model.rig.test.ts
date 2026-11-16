@@ -76,7 +76,7 @@ test('the model starts an agent by name: the filled prompt, the id as label, the
     expect(names).toContain('datetime');
     expect(names).not.toContain('other_look');
     expect(names).not.toContain('run_command');
-    expect(modes).toEqual(['reads']);
+    expect(modes).toEqual(['ask', 'reads']);
   } finally { spy.mockRestore(); }
 });
 
@@ -90,7 +90,7 @@ test('the id works without @, and agents.maxAuto raises the cap', async () => {
     await call(rig, model, { agent: 'job' });
     await rig.until(() => child.requests.length === 1);
     await childDone(rig);
-    expect(modes).toEqual(['all']);
+    expect(modes).toEqual(['ask', 'all']);
   } finally { spy.mockRestore(); }
 });
 

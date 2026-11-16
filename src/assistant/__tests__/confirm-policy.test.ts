@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { agentChat, type ChatRoundResult, type ToolRun } from '../agent.ts';
-import { confirmFor, type ConfirmPolicy } from '../confirm-policy.ts';
+import { childPolicy, confirmFor, writeLine, type ConfirmPolicy } from '../confirm-policy.ts';
 import { Conversation } from '../conversation.ts';
 import { readJournal } from '../journal.ts';
 import { journalPath } from '../sessions.ts';
@@ -147,4 +147,38 @@ test('caller: a plugin\'s yes runs any write, config_set included — nothing th
   expect(r.runs.map((x) => x.outcome)).toEqual(['applied']);
   expect(r.confirms).toMatchObject([{ name: 'config_set', answer: 'yes', by: 'plugin' }]);
   expect((r.config.ui as { verbs?: unknown }).verbs).toEqual(['Pondering']);
+});
+
+// ── the child's policy: what a child's writes capability becomes (childPolicy) ──
+
+test('a deny child is given always-no read-only, whatever its auto mode', () => {
+  const say = () => {};
+  expect(childPolicy('deny', true, say)).toEqual({ kind: 'always-no', reason: 'read-only' });
+  expect(childPolicy('deny', false, say)).toEqual({ kind: 'always-no', reason: 'read-only' });
+});
+
+test('an ask child that may vouch is given ask', () => {
+  expect(childPolicy('ask', true, () => {})).toEqual({ kind: 'ask' });
+});
+
+test('an allow child that may vouch is given allow-writes and its say', async () => {
+  const said: string[] = [];
+  const say = (line: string) => { said.push(line); };
+  const policy = childPolicy('allow', true, say);
+  expect(policy).toEqual({ kind: 'allow-writes', say });
+  // Through `confirmFor` every write it answers is true, and each is said once as
+  // `writeLine` — the host's own `run_command` and a plain tool alike (never a
+  // `config_set` or a plugin's `run_command`: `neverAutomatic` keeps those).
+  const confirm = confirmFor(policy, { conv: new Conversation(fakeDeps()), journalId: 'j' })!;
+  const one = { name: 'run_command', args: JSON.stringify({ command: 'echo one' }) };
+  const two = { name: 'edit_file', args: JSON.stringify({ path: 'x' }) };
+  expect(await confirm(one.name, one.args, { hostShell: true })).toBe(true);
+  expect(await confirm(two.name, two.args)).toBe(true);
+  expect(said).toEqual([writeLine(one.name, one.args), writeLine(two.name, two.args)]);
+});
+
+test('a task that may not vouch gets cannot-ask, whatever it asked for', () => {
+  const say = () => {};
+  expect(childPolicy('allow', false, say)).toEqual({ kind: 'always-no', reason: 'cannot-ask' });
+  expect(childPolicy('ask', false, say)).toEqual({ kind: 'always-no', reason: 'cannot-ask' });
 });
