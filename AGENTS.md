@@ -4122,13 +4122,14 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   command panel over the conversation's place whose rows are `modelRows(ai)`
   (`src/assistant/model-roles.ts`, pure): the reset `default (<ai.model>)`, then the
   roles in `ai.roles`' order, then the ids of `ai.models` no role names, each with its
-  window (`512k`), and the row whose `model` is the choice made is in the `ok` tone
-  (`default` while it runs `ai.model`; a role's row for an id that role maps to; a
-  pinned id no role names and the catalogue no longer lists has no row at all). The
-  cursor starts on the reset; ⏎ takes the row under it and closes the panel, Esc closes
-  it and changes nothing. A name the config
-  does not know is refused (`no model or role "nope" here (/model lists them)`), the line
-  stays as typed for a fix and nothing changes; a switch is one `note` row
+  window (`512k`), and every row whose `model` is the choice made carries its window in
+  the `ok` tone — the `default` row while it runs `ai.model`, and each role's row for an
+  id roles map to, so two rows can be marked; a pinned id no role names and the
+  catalogue no longer lists has no row at all. The cursor starts on the reset; ⏎ takes
+  the row under it and closes the panel, Esc closes it and changes nothing. A name the
+  config does not know is refused
+  (`no model or role "nope" here (/model lists them)`), the line stays as typed for a
+  fix and nothing changes; a switch is one `note` row
   (`model: deep → big-model`), saved with the session (a switch made before anything is
   said goes in with the first save), and the next turn's request carries it — the turn in
   flight sent its own already. The value completes in the field from the

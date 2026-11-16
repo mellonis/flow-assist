@@ -28,13 +28,13 @@ document; the product docs state it as ours.)
 
 - `/model` alone opens a panel over the conversation's place; `/model <name>` sets it
   directly. The panel lists what the config knows: `default (<ai.model>)` first, then the
-  roles — `deep → coder · 512k` — then the ids of `ai.models` no role names, each with its
+  roles — `deep → big-model · 512k` — then the ids of `ai.models` no role names, each with its
   window. The row the session runs now is marked.
 - `<name>` is a role or a model id **of the catalogue** (`ai.models`, plus
   `default`): the person's own vocabulary — unlike the `subagent` tool and an agent file's
   `model:`, nothing keeps them from naming an id. A name neither `ai.roles` nor `ai.models`
-  knows is refused with the list, so a typo never becomes a provider error at the first
-  request.
+  knows is refused with a pointer to the list (`no model or role "<name>" here (/model
+  lists them)`), so a typo never becomes a provider error at the first request.
 - The choice is the conversation's model: `Conversation.model`, so `effectiveModel()`, the
   window (`ctx N%`, `/context`, auto-compaction, recall) and every child's inheritance
   follow with no further changes. It is fixed for a turn in flight: the model reaches the
@@ -43,7 +43,7 @@ document; the product docs state it as ours.)
 - The selection is saved in the session file (`model`, with `summary`), and comes back with
   `/resume`, a picker open and a restart's continue. A session without the field runs
   `ai.model`, as every session does today.
-- The frame's title says the model after the name: `ƒ Flow Assist (coder)`.
+- The frame's title says the model after the name: `ƒ Flow Assist (big-model)`.
 - The switch is said in the chat — one `note` row — and `/model` alone changes nothing.
 
 ## Non-goals
@@ -77,8 +77,8 @@ runs one model, and `/compact` is part of that conversation.
 ## The how, as decided
 
 - The command joins `CHAT_COMMAND_DEFS` (`src/plugins/assistant.ts`) with `values` in its
-  function form (roles then ids then `default` — a list that follows the config), and is
-  kept in ↑ like `/notes`.
+  function form (`default` first, then the roles, then the ids — a list that follows the
+  config), and is kept in ↑ like `/notes`.
 - **`/model` bare opens the chat's command panel** (`PanelSpec` /
   `renderCommandPanel` — `/agents` and `/mcp`'s own machinery, which already stands in the
   conversation's place under the session picker's rules: it holds every key, Esc closes,
