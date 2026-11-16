@@ -36,3 +36,23 @@ test('llmConfigNotes names the ceiling it resolved', () => {
   expect(notes[0]).toMatch(/^ai\.thinking\.budgetTokens 40000 does not fit under the answer ceiling of 32000 with room for the answer — sent as 30976; raise ai\.maxTokens/);
   expect(notes[0]).not.toContain('8192');
 });
+
+test('answerCeiling reads ai.model when the call names no model', () => {
+  // Rule 3 (the window's room) then measures the model the config says the chat runs —
+  // floor(10000 × 0.99) − 0 − 1024.
+  expect(answerCeiling({ model: 'm', models: { m: { contextWindow: 10_000 } } })).toBe(8_876);
+});
+
+test('answerCeiling takes an ai that is not an object as an empty one', () => {
+  expect(answerCeiling(null, {})).toBe(32_000);
+  expect(answerCeiling('anthropic', { model: 'm' })).toBe(32_000);
+  expect(answerCeiling(undefined)).toBe(32_000);
+});
+
+test('answerCeiling counts a negative inputTokens as room, under the cap', () => {
+  // Nothing clamps `inputTokens`: a negative one only widens the room (and the cap or the
+  // floor still holds). A conversation never reports one; the resolved number is pinned.
+  const ai = { models: { m: { contextWindow: 20_000 } } };
+  expect(answerCeiling(ai, { model: 'm' })).toBe(18_776);
+  expect(answerCeiling(ai, { model: 'm', inputTokens: -10_000 })).toBe(28_776);
+});

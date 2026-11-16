@@ -36,8 +36,8 @@ test('the request carries the resolved ceiling', async () => {
 test('a provider refusing max_tokens by name is retried once without it', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'the first answer' }], [{ text: 'the second answer' }]);
-  // A host of its own: the fallback is remembered per process, and another test's
-  // refusal must not decide this one.
+  // A host of its own: the fallback is remembered per (base URL, model), and another
+  // test's refusal must not decide this one.
   const rig = conversationRig(model, { ai: { baseUrl: 'http://refuses-max-tokens.test' } });
   const scripted = globalThis.fetch;
   const sent: Body[] = [];

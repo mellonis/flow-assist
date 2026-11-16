@@ -2851,7 +2851,8 @@ thinking for the rest of the turn, so later rounds do not pay the 400 again.
 `ai.thinking`: `{adaptive: true}` → `{type:'adaptive', display:'summarized'}` (the
 current models' only mode; they omit the thinking text by default, and the fold would
 be empty); `{budgetTokens}` → a fixed budget for older models, LOWERED to leave the
-answer 1024 under `ai.maxTokens` when it does not fit (said once in the log) — the
+answer 1024 under the ceiling the request is handed (`answerCeiling`) when it does not
+fit (said once in the log, for the start-time reading) — the
 person's ceiling is kept, only one under 2048 is raised to 2048; unset → no `thinking` field at all (a current model then thinks by its
 own default, its text not shown — but its blocks still come and still go back). The
 scripted model has an Anthropic wire (`model.wire = 'anthropic'`) that REFUSES what the
@@ -4940,11 +4941,19 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   bulky content as stubs (see "What the model can do"). Its `config_schema` note
   (`KEY_DEFAULTS['ai.recall']`) says what a stub is and how to turn it off.
 - **`ai.models`, `ai.roles` and `ai.model`** (`src/assistant/model-roles.ts`) — models by
-  role, and a window per model. `ai.model` is a model id, never read as a role;
-  `ai.roles.<role>` is the model id a role means on this machine (the name an agent file's
-  `model:` or the `subagent` tool's `model` asks for); `ai.models.<id>.contextWindow` is
-  one model id's window. All three sit under `ai`, on the model's leash: no mark, only the
-  person sets them, `config set` treating them as any other key.
+  role, and a window and an answer ceiling per model. `ai.model` is a model id, never read
+  as a role; `ai.roles.<role>` is the model id a role means on this machine (the name an
+  agent file's `model:` or the `subagent` tool's `model` asks for);
+  `ai.models.<id>.contextWindow` is one model id's window and `.maxTokens` its answer
+  ceiling — the longest answer one request on it may get, sent as `max_tokens` on both
+  wires (`answerCeiling`, `src/assistant/llm-endpoint.ts`: `ai.maxTokens` over it, else
+  this entry, else the room the window leaves). All three sit under `ai`, on the model's
+  leash: no mark, only the person sets them, `config set` treating them as any other key.
+- **A derived ceiling shrinks as the window fills.** `answerCeiling` measures the room a
+  conversation has left, so the ceiling falls turn by turn, and `thinkingParams` raises or
+  lowers a fixed `ai.thinking.budgetTokens` to fit whatever ceiling it is handed — per
+  request, and silent: `llmConfigNotes` says a mismatch once, for the start-time reading
+  only.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 - **Roots: each consumer has its own key, and the host never reads a plugin's.** The
   host's shell (`!command`, `run_command`) is confined to `shell.roots` (`shellRoots`

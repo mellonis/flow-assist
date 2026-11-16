@@ -20,7 +20,8 @@ import type { ChatMessage, ChatRoundResult, TokenUsage } from './agent.js';
 import type { ContentPart } from './images.js';
 import { failedRequest, reach, readChunk, withRetry, LlmRequestError, type RetryOpts } from './llm-retry.js';
 import { llmErrorMessage } from './llm-error.js';
-import type { ThinkingConfig } from './llm-endpoint.js';
+import { CEILING_FALLBACK, type ThinkingConfig } from './llm-endpoint.js';
+import { ceilingRefused, rememberCeilingRefusal, retryFields, sendWithRefusals, type WireFields } from './wire-fields.js';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -389,22 +390,39 @@ const headers = (token: string): Record<string, string> => ({
 // `thinkingDropped`: the request went without its thinking (see `withoutThinking`),
 // and the loop drops it for the rest of the turn — or every later round pays the
 // same 400 first.
-async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
-  const send = (b: AnthropicRequest) => {
+//
+// `build` makes the body at a given ceiling: a provider that refuses the resolved one
+// by name is asked once at `CEILING_FALLBACK`, and the refusal is remembered for this
+// process per (base URL, model). The body is rebuilt rather than patched so a fixed
+// thinking budget fits under the lower ceiling too.
+async function post(build: (maxTokens: number) => AnthropicRequest, asked: number, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
+  let body = build(asked);
+  let sent = asked;
+  const send = (maxTokens: number) => {
+    body = build(maxTokens);
+    sent = maxTokens;
     const url = endpoint(o.baseUrl);
-    const init: RequestInit = { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) };
+    const init: RequestInit = { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(body) };
     return reach(() => fetch(url, init), o.signal);
   };
-  let res = await send(body);
+  const start: WireFields = { usage: false, ceiling: ceilingRefused('anthropic', o.baseUrl, o.model) ? 'fallback' : 'ask' };
+  const { res, body: text } = await sendWithRefusals(
+    start,
+    (fields) => send(fields.ceiling === 'fallback' ? CEILING_FALLBACK : asked),
+    (fields, failed, failure) => retryFields(fields, failed, failure, {
+      // Nothing lower to ask when the resolved ceiling already is the fallback.
+      ceiling: asked === CEILING_FALLBACK ? null : 'fallback',
+      remember: () => rememberCeilingRefusal('anthropic', o.baseUrl, o.model),
+    }),
+  );
   if (res.ok) return { res, thinkingDropped: false };
-  let text = await res.text().catch(() => '');
   // A thinking block the API will not take back (its history changed under it) is a
   // 400 naming the block; the API's own recovery is to send the history without any
   // thinking, once. The model answers without the reasoning those blocks carried.
   if (res.status === 400 && hasThinking(body) && /thinking|signature/i.test(text)) {
-    res = await send(withoutThinking(body, o.maxTokens ?? body.max_tokens));
-    if (res.ok) return { res, thinkingDropped: true };
-    text = await res.text().catch(() => '');
+    const retried = await reach(() => fetch(endpoint(o.baseUrl), { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(withoutThinking(body, sent)) }), o.signal);
+    if (retried.ok) return { res: retried, thinkingDropped: true };
+    throw failedRequest(retried, await retried.text().catch(() => ''), { model: o.model, idHeader: 'request-id' });
   }
   throw failedRequest(res, text, { model: o.model, idHeader: 'request-id' });
 }
@@ -422,8 +440,8 @@ async function anthropicRound(
   messages: ChatMessage[],
   o: AnthropicOpts & { tools?: ToolDef[]; onDelta?: (d: string) => void; onReasoning?: (d: string) => void; onToolCalls?: () => void },
 ): Promise<ChatRoundResult> {
-  const body = anthropicRequest(messages, { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, tools: o.tools, stream: true });
-  const { res, thinkingDropped } = await post(body, o);
+  const build = (maxTokens: number) => anthropicRequest(messages, { model: o.model, maxTokens, thinking: o.thinking, tools: o.tools, stream: true });
+  const { res, thinkingDropped } = await post(build, o.maxTokens ?? CEILING_FALLBACK, o);
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
   const requestId = res.headers.get('request-id');
@@ -491,8 +509,7 @@ export function summaryHistory(messages: ChatMessage[], o: { previous?: string; 
 // A compaction's one-shot: `summaryHistory`'s messages, not streamed, the answer's
 // text blocks.
 export async function anthropicCompact(messages: ChatMessage[], o: AnthropicOpts): Promise<string> {
-  const body = anthropicRequest(messages, { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
-  const { res } = await post(body, o);
+  const { res } = await post((maxTokens) => anthropicRequest(messages, { model: o.model, maxTokens, thinking: o.thinking, stream: false }), o.maxTokens ?? CEILING_FALLBACK, o);
   const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
   return (data?.content ?? []).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');
 }

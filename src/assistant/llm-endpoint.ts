@@ -43,6 +43,11 @@ export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 export const ANSWER_CEILING_MAX = 32_000;
 export const ANSWER_CEILING_MIN = 1_024;
 
+// The ceiling a provider that refuses the resolved one by name is asked for next: the
+// smallest output cap a current model is assumed to take. One retry only — a refusal of
+// this value stands, and both wires remember it for the process (`./wire-fields.ts`).
+export const CEILING_FALLBACK = 8_192;
+
 // Read as written by a person: `Anthropic` and ` anthropic ` are anthropic.
 export function providerOf(ai: unknown): Provider {
   const p = (ai as { provider?: unknown } | null | undefined)?.provider;

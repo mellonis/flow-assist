@@ -34,12 +34,20 @@ assistant may set or save".
   tools, the system prompt and the turn so far are cached between requests, the
   context meter counts the cached part, and the model's thinking shows in the chat as one
   `▸ thought` fold per round, where the model thought it (`^o` opens them all).
-  `ai.maxTokens` caps one answer (8192 by default; that API requires a cap, and
-  thinking counts against it). `config set ai.thinking '{"adaptive":true}'` asks the
-  model to think as much as it sees fit and shows a summary of it; a fixed
-  `'{"budgetTokens":4096}'` is for older models only (the current ones refuse it), and
-  a budget that leaves the answer less than 1024 tokens under `ai.maxTokens` is lowered
-  (the log says so at start).
+  `ai.maxTokens` caps one answer, and the ceiling is sent to the provider as
+  `max_tokens` on this wire, on the OpenAI-compatible one, and on the compaction
+  request. It resolves as `ai.maxTokens`, else the model's own
+  `ai.models.<id>.maxTokens`, else the room its window leaves after what the
+  conversation last sent —
+  `min(32 000, max(1 024, floor(window × 0.99) − input − 1 024))`.
+  A provider that refuses the field by name is asked once more without it (the
+  OpenAI-compatible wire) or at 8 192 (this one), and the refusal is remembered for
+  the run. Thinking counts against the ceiling:
+  `config set ai.thinking '{"adaptive":true}'` asks the model to think as much as it
+  sees fit and shows a summary of it; a fixed `'{"budgetTokens":4096}'` is for older
+  models only (the current ones refuse it), and a budget that leaves the answer less
+  than 1024 tokens under the ceiling is lowered (the log says so at start; a ceiling
+  that shrinks with the window lowers it silently later in the conversation).
   Unset, the model thinks as it does by default and its thinking is not shown.
 - **Environment**: the host reads `LLM_TOKEN` (or the variable named by
   `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider anthropic`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` /
@@ -89,6 +97,12 @@ flow-assist config set ai.models.big-model '{"contextWindow":512000}'
   otherwise). The window is what the context meter (`ctx N%`), the automatic compaction
   and the recall measure against: the window of the model the work runs, so a subagent on
   `deep` counts against its 512 000, not the chat's 200 000.
+- **`ai.models.<id>.maxTokens`**, in tokens, is that model's own answer ceiling: the
+  longest answer one request on it may get. `ai.maxTokens`, when set, is over everything;
+  with neither set, the ceiling is the room the model's window leaves. Name it for a
+  model whose output cap is smaller than the derived ceiling, and the provider is not
+  asked for more than it takes. Set both in one call:
+  `flow-assist config set ai.models.big-model '{"contextWindow":512000,"maxTokens":16000}'`.
 - **A model id with a dot** cannot be a key path — every config key is a dot path, so
   `config set ai.models.big-model.v2.contextWindow 512000` reads `big-model` and `v2` as
   two keys and is refused (`unknown key`). Set the whole catalogue in one call instead:

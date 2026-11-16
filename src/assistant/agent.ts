@@ -25,6 +25,7 @@ import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { failedRequest, reach, readChunk, withRetry, type RetryOpts } from './llm-retry.js';
+import { ceilingRefused, rememberCeilingRefusal, retryFields, sendWithRefusals, type WireFields } from './wire-fields.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
@@ -384,9 +385,6 @@ function clip(s: unknown, n = 6000): string {
 // accumulated list.
 // Base URLs that refused `stream_options` — not asked again in this process.
 const noUsage = new Set<string>();
-// Base URLs that refused `max_tokens` by name — not asked again in this process. A
-// provider may know only `max_completion_tokens`, or no ceiling at all.
-const noMaxTokens = new Set<string>();
 
 // A message as the OpenAI wire takes it: the Anthropic round's kept blocks are not an
 // API field, and a strict server refuses a field it does not know.
@@ -502,42 +500,35 @@ async function openAiRound(
   }: RoundOpts,
 ): Promise<ChatRoundResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
-  // A streamed response carries token usage only when asked (`stream_options`). Most
-  // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
-  // refusal that NAMES the field is retried once without it, and that base URL is not
-  // asked again. Usage is a nicety; a chat that stops working over it is not.
-  //
-  // The ceiling on one answer goes the same way, as `max_tokens`: a server that answers
-  // 400 naming it is asked once without it, and not with it again in this process.
-  const post = (withUsage: boolean, withCeiling: boolean) => {
+  // A streamed response carries token usage only when asked (`stream_options`), and the
+  // answer's ceiling goes as `max_tokens`. Most OpenAI-compatible servers know both; one
+  // that does not answers 400 NAMING the field, and that field is dropped for a retry and
+  // not asked again in this process. The sequence is bounded (`sendWithRefusals`): a
+  // server that refuses both is asked three times, whichever it names first.
+  const post = (fields: WireFields) => {
     const url = `${baseUrl}/chat/completions`;
     const init: RequestInit = {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withCeiling ? { max_tokens: maxTokens } : {}), ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(fields.ceiling === 'ask' ? { max_tokens: maxTokens } : {}), ...(fields.usage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
     };
     return reach(() => fetch(url, init), signal);
   };
-  let askUsage = !noUsage.has(String(baseUrl));
-  let askCeiling = typeof maxTokens === 'number' && !noMaxTokens.has(String(baseUrl));
-  let res = await post(askUsage, askCeiling);
-  if (!res.ok) {
-    let body = await res.text().catch(() => '');
-    if (askUsage && res.status === 400 && /stream_options|include_usage/i.test(body)) {
-      noUsage.add(String(baseUrl));
-      askUsage = false;
-      res = await post(askUsage, askCeiling);
-      if (!res.ok) body = await res.text().catch(() => '');
-    }
-    if (askCeiling && res.status === 400 && /max_tokens|max_completion_tokens/i.test(body)) {
-      noMaxTokens.add(String(baseUrl));
-      askCeiling = false;
-      res = await post(askUsage, askCeiling);
-      if (!res.ok) body = await res.text().catch(() => '');
-    }
-    if (!res.ok) throw failedRequest(res, body, { model });
-  }
+  const start: WireFields = {
+    usage: !noUsage.has(String(baseUrl)),
+    ceiling: typeof maxTokens === 'number' && !ceilingRefused('openai', baseUrl, model) ? 'ask' : 'none',
+  };
+  const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
+    retryFields(fields, failed, text, {
+      ceiling: 'none',
+      remember: (refused) => {
+        if (refused === 'usage') noUsage.add(String(baseUrl));
+        else rememberCeilingRefusal('openai', baseUrl, model);
+      },
+    }),
+  );
+  if (!res.ok) throw failedRequest(res, body, { model });
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
   const decoder = new TextDecoder();
@@ -1402,29 +1393,23 @@ export async function compactConversation(
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
     const url = `${baseUrl}/chat/completions`;
-    // The ceiling on the handoff, as the chat's own requests carry it — and a provider
-    // that refuses the field by name gets the request once without it, remembered for
-    // this process alongside the chat's (`noMaxTokens`).
-    const post = (withCeiling: boolean) => {
+    // The handoff carries the ceiling the chat's own requests carry, and a provider that
+    // refuses the field by name gets the request once without it — the same sequence, and
+    // the same memory of what it refused.
+    const post = (fields: WireFields) => {
       const init: RequestInit = {
         method: 'POST',
         signal,
         headers: LLM_HEADERS(token as string),
-        body: JSON.stringify({ model, messages: sent, ...(withCeiling ? { max_tokens: maxTokens } : {}) }),
+        body: JSON.stringify({ model, messages: sent, ...(fields.ceiling === 'ask' ? { max_tokens: maxTokens } : {}) }),
       };
       return reach(() => fetch(url, init), signal);
     };
-    const askCeiling = typeof maxTokens === 'number' && !noMaxTokens.has(String(baseUrl));
-    let res = await post(askCeiling);
-    if (!res.ok) {
-      let body = await res.text().catch(() => '');
-      if (askCeiling && res.status === 400 && /max_tokens|max_completion_tokens/i.test(body)) {
-        noMaxTokens.add(String(baseUrl));
-        res = await post(false);
-        if (!res.ok) body = await res.text().catch(() => '');
-      }
-      if (!res.ok) throw failedRequest(res, body, { model });
-    }
+    const start: WireFields = { usage: false, ceiling: typeof maxTokens === 'number' && !ceilingRefused('openai', baseUrl, model) ? 'ask' : 'none' };
+    const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
+      retryFields(fields, failed, text, { ceiling: 'none', remember: () => rememberCeilingRefusal('openai', baseUrl, model) }),
+    );
+    if (!res.ok) throw failedRequest(res, body, { model });
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data?.choices?.[0]?.message?.content ?? '';
   });

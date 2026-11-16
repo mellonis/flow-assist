@@ -370,3 +370,34 @@ test('an attached image goes as a base64 image block', async () => {
   ]);
   expect(ui.backend.lastFrame).toContain('A screenshot.');
 });
+
+test('a provider refusing the resolved ceiling is asked once at 8192, and remembers it per model', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'the first answer' }], [{ text: 'the second answer' }]);
+  // A model id of its own: the refusal is remembered per (base URL, model), and the
+  // tests that check 32000 keep their own.
+  const ui = await boot(model, { model: 'small-cap-model' });
+  const scripted = globalThis.fetch;
+  const sentBodies: Sent[] = [];
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Sent;
+    sentBodies.push(req);
+    if (req.max_tokens !== 8_192) {
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: `max_tokens: ${req.max_tokens} > 8192, which is the maximum allowed number of output tokens for small-cap-model` } }), { status: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_too_big' } });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  try {
+    await ask(ui, 'first?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the first answer'));
+    // The resolved ceiling first, then the one retry at the fallback — never a third.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([32_000, 8_192]);
+
+    await ask(ui, 'second?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the second answer'));
+    // Remembered for this process: the next request starts at the fallback, asked once.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([32_000, 8_192, 8_192]);
+  } finally {
+    globalThis.fetch = scripted;
+  }
+});

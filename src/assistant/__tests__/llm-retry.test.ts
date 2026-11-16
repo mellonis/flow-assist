@@ -431,6 +431,54 @@ test('compaction does not repeat a refusal, nor an abort', async () => {
   expect(calls).toHaveLength(1);
 });
 
+// A 400 naming the ceiling, as a server without the field answers.
+const noCeiling = () => new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } }), { status: 400 });
+const handoffAnswer = () => Response.json({ choices: [{ message: { content: HANDOFF } }] });
+
+test('compaction carries the ceiling, drops it on a refusal, and remembers it with the chat\'s', async () => {
+  serve(noCeiling(), handoffAnswer());
+  const host = { ...OPENAI, baseUrl: 'http://compact-ceiling.test' };
+  const r = await compactConversation(history, { ...host, maxTokens: 32_000 });
+  expect(r.summary).toBe(HANDOFF);
+  expect(calls).toHaveLength(2);
+  expect(calls[0]!.body.max_tokens).toBe(32_000);
+  expect('max_tokens' in calls[1]!.body).toBe(false);
+
+  // One refusal, remembered for the process: the next compaction of the same host and
+  // model starts without the field.
+  calls = [];
+  serve(handoffAnswer());
+  await compactConversation(history, { ...host, maxTokens: 32_000 });
+  expect(calls).toHaveLength(1);
+  expect('max_tokens' in calls[0]!.body).toBe(false);
+});
+
+test('a provider refusing both fields is asked three times at most, whichever it names first', async () => {
+  serve(noCeiling(), new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'stream_options' is not supported with this model." } }), { status: 400 }), openAiAnswer('done'));
+  const answer = await chat({ baseUrl: 'http://both-fields.test', maxTokens: 32_000 });
+  expect(answer.content).toBe('done');
+  expect(calls).toHaveLength(3);
+  expect(calls[0]!.body).toMatchObject({ stream_options: { include_usage: true }, max_tokens: 32_000 });
+  // The ceiling goes first this time; the usage field is still dropped in the second
+  // retry, rather than being missed because its turn had passed.
+  expect(calls[1]!.body).toMatchObject({ stream_options: { include_usage: true } });
+  expect('max_tokens' in calls[1]!.body).toBe(false);
+  expect('stream_options' in calls[2]!.body).toBe(false);
+  expect('max_tokens' in calls[2]!.body).toBe(false);
+
+  // And the other order: the usage field refused first, the ceiling on the retry.
+  calls = [];
+  serve(new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'stream_options' is not supported with this model." } }), { status: 400 }), noCeiling(), openAiAnswer('done again'));
+  const reversed = await chat({ baseUrl: 'http://both-fields-reversed.test', maxTokens: 32_000 });
+  expect(reversed.content).toBe('done again');
+  expect(calls).toHaveLength(3);
+  expect(calls[0]!.body).toMatchObject({ stream_options: { include_usage: true }, max_tokens: 32_000 });
+  expect(calls[1]!.body).toMatchObject({ max_tokens: 32_000 });
+  expect('stream_options' in calls[1]!.body).toBe(false);
+  expect('max_tokens' in calls[2]!.body).toBe(false);
+  expect('stream_options' in calls[2]!.body).toBe(false);
+});
+
 // ─── the settings ─────────────────────────────────────────────────────────────
 
 test('ai.retries and ai.retryDelay reach the requests, 10 and 3 when unset or unusable', () => {
