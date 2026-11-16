@@ -231,6 +231,13 @@ function splitDiff(diff: string): Map<string, string> {
 
 const GIT_DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD', '--'];
 
+// A path handed to git as a pathspec, read as the one file or directory it names. A
+// plain pathspec takes `*` and `?` as wildcards (brackets are literal to git), so a root
+// or a file called `w*` would name every sibling that the star matches — the batch then
+// diffs more of the tree than the section holds, and a per-file call after a failed batch
+// would draw a sibling's hunks under this file's row.
+const literalPath = (rel: string): string => (rel === '.' ? '.' : `:(literal)${rel}`);
+
 // Whether HEAD names a commit. A repository with nothing committed has no HEAD, and
 // `git diff HEAD` would fail on it; its files are all untracked and are diffed from
 // empty text anyway.
@@ -278,7 +285,7 @@ async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A
   }
   if (pastReadSize(path.resolve(top, entry.path), root)) return { added: 0, removed: 0, hunks: '', note: 'too large' };
   const own = segments.get(entry.path);
-  const diff = own ?? (await runGit(top, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', 'HEAD', '--', entry.path])).toString('utf8');
+  const diff = own ?? (await runGit(top, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', 'HEAD', '--', literalPath(entry.path)])).toString('utf8');
   const seg = segmentOf(diff);
   return { added: seg.added, removed: seg.removed, hunks: seg.hunks, ...(seg.binary ? { note: 'binary' as const } : {}) };
 }
@@ -309,7 +316,7 @@ async function headSection(root: string, top: string, tops: string[]): Promise<D
   const scope = within(root, top) ? path.relative(top, root) || '.' : '.';
   let segments = new Map<string, string>();
   if (head) {
-    try { segments = splitDiff((await runGit(top, [...GIT_DIFF_ARGS, scope])).toString('utf8')); } catch { /* per file, below */ }
+    try { segments = splitDiff((await runGit(top, [...GIT_DIFF_ARGS, literalPath(scope)])).toString('utf8')); } catch { /* per file, below */ }
   }
   const files: FileDiff[] = [];
   for (const { entry, abs } of changed) {
