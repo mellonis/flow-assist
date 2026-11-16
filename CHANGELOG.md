@@ -262,8 +262,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **⏎ on a subagent's or task's row, or on a live row in `/agents`, shows that child's
   conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
   and the wheel scroll them, End jumps to the end, and the details key opens or folds all of
-  them. The frame title names the path (`ƒ Flow Assist · fix-tests › read-logs`), and the
-  hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
+  them. The frame title names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`).
+  The hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
   for a y/n`, `○ queued`), with `x stop · Esc back` on the right. Esc steps back and does
   not stop the child; from a watch that began in the rows it puts the cursor on the node's
   row, unless a y/n waits somewhere in the tree, in which case the cursor stays in the field
@@ -1262,7 +1262,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   sees now`, marked as data from outside systems and never as instructions; it follows
   the screen from one request to the next and is never stored in the conversation or
   the saved session. `/context` counts it as `on screen`. The chat's title shows the
-  items' labels (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`).
+  items' labels (`ƒ Flow Assist (big-model) · Board: Frontend · Issue ABC-1`).
 
 - **Opening the chat on another screen no longer starts a new conversation.** It used
   to switch to a fresh session whenever the plugin's subject changed, and the dialogue

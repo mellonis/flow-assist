@@ -492,7 +492,7 @@ is yours to carry between machines, and the model ids are each machine's own.
 `config set ai.roles.fast small-model` says what a role runs on here (docs/config.md,
 "Models and roles"). Without a `model:` line — and for a subagent or task that names no
 role — the work runs the model of the conversation that started it: the chat's (what
-`/model` chose for that session, or `ai.model`; see "The model this conversation runs"),
+`/model` chose for that session, or `ai.model`; see The model this conversation runs),
 or for a task a subagent starts, that subagent's.
 
 A role your machine does not define is not an error: the work runs on that same model and
@@ -810,11 +810,11 @@ open decisions, the facts learned — and a `── compacted ──` row marks 
 screen keeps everything, and the summary opens under the row. The chat does it by
 itself before a request would pass 80% of the window the conversation measures against
 (`ai.autoCompact.threshold`, 0.5–0.95 of that window — the window of the model the
-conversation runs, so `/model` moves it too; the model's own, docs/config.md, "Models and
-roles"), between two requests so no tool call is parted from
-its result, and marks the row `auto`; `config set ai.autoCompact.enabled false` leaves
-it to `/compact`. Compacting a history bigger than the model's window fails at the
-provider — see "The model this conversation runs", the one edge.
+conversation runs, so `/model` moves it too; docs/config.md, "Models and roles"), between
+two requests so no tool call is parted from its result, and marks the row `auto`;
+`config set ai.autoCompact.enabled false` leaves it to `/compact`. Compacting a history
+bigger than the model's window fails at the provider — see The one edge, under The model
+this conversation runs.
 
 ## Limits of a turn
 
