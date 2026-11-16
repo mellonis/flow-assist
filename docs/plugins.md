@@ -1168,8 +1168,9 @@ give up that host's own attempts until some other host's restart revives the ser
     whole list at most 6000 — items that do not fit are left out from the end and
     replaced by one `… N more` item. Escape sequences and control characters are
     stripped from both. Say what matters first.
-  - **The chat's title** is the labels, joined with ` · ` and cut to the frame:
-    `ƒ Flow Assist · Board: Frontend · Issue ABC-1`.
+  - **The chat's title** is the labels, joined with ` · ` and cut to the frame, after the
+    chat's name and the model the conversation runs:
+    `ƒ Flow Assist (big-model) · Board: Frontend · Issue ABC-1`.
   - **It is data.** A title, a description, a comment — someone else wrote them, and the
     model is told not to follow them. Put there what helps answer the person (what is
     selected, what the filter is, the first lines of what is open), not secrets.

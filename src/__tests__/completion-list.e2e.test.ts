@@ -179,9 +179,9 @@ test('the list keeps its place while typing narrows it, and a count says where t
   const big = await bootApp(new ScriptedModel(), 100, 30);
   await big.press('F');
   await big.type('/');
-  expect(big.backend.lastFrame).toContain('1/23');
+  expect(big.backend.lastFrame).toContain('1/24');
   await big.press('up');
-  expect(big.backend.lastFrame).toContain('23/23');
+  expect(big.backend.lastFrame).toContain('24/24');
   expect(big.backend.lastFrame).toMatch(/exit +close the chat/);
   expect(big.backend.lastFrame).not.toMatch(/compact +fold/);
   big.app.unmount();
@@ -201,11 +201,11 @@ test('a row is cut to the width, its detail first', async () => {
 test('a single candidate still completes inline with Tab, with no list', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 28);
   await ui.press('F');
-  await ui.type('/mod');
-  expect(ui.backend.lastFrame).not.toContain('the chat\'s layout');
-  expect(fieldRow(ui)).toContain('› /mode');
+  await ui.type('/not');
+  expect(ui.backend.lastFrame).not.toContain('how the steps between tool calls are drawn');
+  expect(fieldRow(ui)).toContain('› /notes');
   await ui.press('tab');
-  expect(fieldRow(ui)).toContain('› /mode');
+  expect(fieldRow(ui)).toContain('› /notes');
   ui.app.unmount();
 });
 

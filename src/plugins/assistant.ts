@@ -51,7 +51,7 @@ import { migrateMemoryJson, removeFact, writeIndex } from '../assistant/memory-s
 import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
-import { CONTEXT_WARN_AT, cacheLine, contextBadge } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, cacheLine, contextBadge, short } from '../assistant/context-meter.js';
 import { recallLine } from '../assistant/recall.js';
 import { contextTitle, type ContextItem } from '../assistant/screen-context.js';
 import {
@@ -76,7 +76,7 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
-import { roleStart } from '../assistant/model-roles.js';
+import { modelChoice, modelRows, roleStart } from '../assistant/model-roles.js';
 import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
@@ -121,6 +121,7 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'auto', description: 'what runs without asking', values: ['reads', 'all', 'off'] },
   { name: 'notes', description: 'how the steps between tool calls are drawn', values: NOTES_MODES },
   { name: 'mode', description: 'the chat\'s layout', values: CHAT_MODES },
+  { name: 'model', description: 'the model this conversation runs' },
   { name: 'log', description: 'share the tail of the host log' },
   { name: 'exit', description: 'close the chat' },
 ];
@@ -775,7 +776,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const chatCommandDefs: ChatCommandDef[] = [
             ...CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
               ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
-              : c.name === 'subagent' || c.name === 'sub'
+              : c.name === 'model'
+                // What the config knows, read when the field is drawn: the reset, the
+                // roles, then the catalogue's ids — each labelled as `/model` says it.
+                ? { ...c, values: () => modelRows(conv.deps.config().ai).map((r) => ({ value: r.name, label: r.label })) }
+                : c.name === 'subagent' || c.name === 'sub'
                 // Only the first word completes, and only an agent: `@` and its names.
                 ? { ...c, complete: (before: string[]) => (before.length ? [] : agentCompletions(agentsFound())) }
                 : c.name === 'skill'
@@ -1633,6 +1638,49 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return;
                 }
                 setMode(v as ChatMode);
+                return;
+              }
+              case 'model': {
+                // Whose model this conversation runs. The config defines the names; the
+                // choice is the session's and is saved with it, never written back to the
+                // config. `/model <name>` takes one, the bare command opens the panel; both
+                // go through ONE set path (`set`), so the note, the save and the field are
+                // the same.
+                const ai = conv.deps.config().ai;
+                const set = (asked: string): boolean => {
+                  const got = modelChoice(ai, asked);
+                  // A typo leaves the line as typed, as /auto, /notes and /mode do.
+                  if ('error' in got) { setError(got.error); return false; }
+                  setField('');
+                  conv.model = got.model ?? undefined; // `null` — back to ai.model
+                  conv.save();
+                  const row = modelRows(ai).find((r) => r.name === asked.trim());
+                  conv.pushNote(`model: ${row?.label ?? asked.trim()}`);
+                  host.notify();
+                  return true;
+                };
+                const name = arg.trim();
+                if (!name) {
+                  // The panel over the conversation's place (`/agents`, `/mcp`): what the
+                  // config knows — the reset, the roles and the catalogue's ids — with the
+                  // row the session runs marked. The mark is the CHOICE the session names:
+                  // `default` while it runs ai.model, a role's row for an id that role maps
+                  // to. `return` takes the row under the cursor and closes.
+                  setField('');
+                  openPanel({
+                    title: 'Model',
+                    rows: () => modelRows(ai).map((r) => ({
+                      id: r.name,
+                      text: r.label,
+                      detail: r.window ? short(r.window) : undefined,
+                      tone: r.model === (conv.model ?? null) ? 'ok' : undefined,
+                    })),
+                    keys: [{ key: 'return', label: 'use', run: (id) => { if (id !== null && set(id)) setPanel(null); return undefined; } }],
+                  });
+                  host.notify();
+                  return;
+                }
+                set(name);
                 return;
               }
               case 'log': {
@@ -3007,6 +3055,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queueWaits: queued.length && conv.inTurn ? conv.queueWait(queued, queued.length - 1) : null,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
+            // The model this conversation runs, after the chat's own name; the subject —
+            // or the watch's path, or the pager's block — follows it after ` · `.
+            model: conv.effectiveModel(),
             elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).

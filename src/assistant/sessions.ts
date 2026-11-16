@@ -18,7 +18,8 @@
 // `/compact` left, the plan and the last usage reading. They are three views of one
 // conversation (`/compact` moves the history into the summary), so they are saved
 // together or not at all — and the directory the conversation's shell commands were
-// left in, and the tools the model has loaded (the history calls them). Not saved: an answer being written, a pending y/n or
+// left in, the tools the model has loaded (the history calls them), and the model it
+// runs. Not saved: an answer being written, a pending y/n or
 // question, queued messages — restored, they would resolve into nothing.
 //
 // An image the person attached is saved as a ref — its path, hash, type and size
@@ -76,6 +77,7 @@ export interface Session {
   messages: Record<string, unknown>[]; // the screen
   api: Record<string, unknown>[];      // the model's history
   summary: string;
+  model?: string;                       // the model id this session runs; absent — ai.model
   // `id` is `t3`, or a number in an older file, which `Plan.load` reads as `t3`.
   plan: { id: number | string; text: string; status: string }[];
   usage: TokenUsage | null;
@@ -445,6 +447,7 @@ export function loadSession(dir: string, id: string): Session | null {
       // Anything but the two modes that change what asks reads as `ask`, which is the
       // field's absence.
       autoMode: s.autoMode === 'reads' || s.autoMode === 'all' ? s.autoMode : undefined,
+      model: typeof s.model === 'string' && s.model.trim() ? s.model.trim() : undefined,
       project: projectRead(s.project),
       answeredAt: typeof s.answeredAt === 'string' ? s.answeredAt : '',
       seenAt: typeof s.seenAt === 'string' ? s.seenAt : '',

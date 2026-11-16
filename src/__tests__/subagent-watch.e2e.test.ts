@@ -27,7 +27,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const KEYS = '↑↓ move · x stop · Esc back';
 const inRows = (ui: UI) => frameOf(ui).includes(KEYS);
 // The breadcrumb is in the frame's title only while a child is watched.
-const watching = (ui: UI) => frameOf(ui).includes('╭─ ƒ Flow Assist · ');
+const watching = (ui: UI) => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · ');
 const PAGE_UP = { name: 'pageup' };
 
 // A guest that keeps the runtime's host, to read what the chat publishes to plugins.
@@ -95,7 +95,7 @@ test('⏎ on a row shows the child\'s conversation with the breadcrumb, not the 
   expect(frameOf(ui)).toContain('/subagent WATA do it');
   await watchFromRows(ui);
   expect(watching(ui)).toBe(true);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · wata-do-it');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · wata-do-it');
   expect(frameOf(ui)).toContain('› WATA do it');
   expect(frameOf(ui)).not.toContain('/subagent WATA do it');
   expect(frameOf(ui)).toMatch(/⚙ \S.*x stop · Esc back/);
@@ -145,7 +145,7 @@ test('a watch started from /agents (⏎ closes the panel); an ended row says the
   await ui.press('down');
   await ui.press('return');
   await settle(4);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · bbb-go');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · bbb-go');
   expect(frameOf(ui)).not.toContain('Flow Assist · Agents');
   await ui.press('escape');
   await settle(4);
@@ -250,7 +250,7 @@ test('x asks in the hint row; n and Esc drop the question and the watch stays; y
   await ui.press('x');
   await ui.press('escape');
   expect(frameOf(ui)).not.toContain('stop wata-do-it?');
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · wata-do-it');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · wata-do-it');
   // A y with no question stops nothing.
   await ui.press('y');
   await settle(4);
@@ -259,7 +259,7 @@ test('x asks in the hint row; n and Esc drop the question and the watch stays; y
   await ui.press('y');
   await settleUntil(() => frameOf(ui).includes('ended: stopped'));
   expect(frameOf(ui)).toContain('ended: stopped');
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · wata-do-it');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · wata-do-it');
   await ui.press('escape');
   await settle(4);
   expect(frameOf(ui)).toContain('◆ wata-do-it stopped:');
@@ -373,7 +373,7 @@ test('a grandchild\'s breadcrumb has two labels', async () => {
   await ui.press('down');
   await ui.press('return');
   await settle(4);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · outer-go › inner');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · outer-go › inner');
   expect(frameOf(ui)).toContain('› INNER work');
   inner!.release();
   await settleUntil(() => inner!.held);
@@ -490,7 +490,7 @@ test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on 
   ui.backend.press(COLLAPSE);
   await settle();
   expect(watching(ui)).toBe(true);
-  expect(frameOf(ui)).toContain('Flow Assist · watg-do-it');
+  expect(frameOf(ui)).toContain('Flow Assist (scripted) · watg-do-it');
   ui.backend.press(COLLAPSE);
   await settle();
   a!.release();
@@ -622,7 +622,7 @@ test('a sibling\'s request is one notice line in the watch and no key answers it
   await ui.press('down');
   await ui.press('return');
   await settle(4);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · quiet-go');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · quiet-go');
   a!.release();
   await settleUntil(() => frameOf(ui).includes('waits for a y/n'));
   expect(frameOf(ui)).toContain('⏸ side-go waits for a y/n — Esc to answer');
@@ -686,7 +686,7 @@ test('a grandchild\'s request is drawn while its parent is watched, labelled wit
   await settleUntil(() => outer!.held);
   await settleUntil(() => frameOf(ui).includes('outr-go'));
   await watchFromRows(ui);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · outr-go');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · outr-go');
   outer!.release();
   await settleUntil(() => inner!.held);
   inner!.release();
@@ -912,7 +912,7 @@ test('x, y on a watched node that has not begun ends the watch on `ended: stoppe
   for (let i = 0; i < 4; i++) await ui.press('down');
   await ui.press('return');
   await settle(4);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · qdd-go');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · qdd-go');
   expect(frameOf(ui)).toContain('○ queued');
   await ui.press('x');
   await ui.press('y');
@@ -942,15 +942,15 @@ test('the breadcrumb follows a task that hands its child up while the child is w
   await ui.press('down');
   await ui.press('return');
   await settle(4);
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · outq-go › innq');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · outq-go › innq');
   outer!.release();
   await settleUntil(() => !frameOf(ui).includes('outq-go ›'));
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · innq ');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · innq ');
   inner!.release();
   await settleUntil(() => inner!.held);
   inner!.release();
   await settleUntil(() => frameOf(ui).includes('ended: done'));
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · innq ');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · innq ');
   ui.app.unmount();
 });
 
@@ -1041,7 +1041,7 @@ test('in /agents ⏎ under a stop question starts no watch', async () => {
   expect(frameOf(ui)).toContain('stop pqb-go? y yes · n no');
   await ui.press('return');
   await settle(4);
-  // The panel's own title also opens `╭─ ƒ Flow Assist · `: the watch's hint row is what tells.
+  // The panel's own title also opens `╭─ ƒ Flow Assist`: the watch's hint row is what tells.
   expect(frameOf(ui)).not.toContain('Esc back');
   expect(frameOf(ui)).toContain('Flow Assist · Agents');
   expect(frameOf(ui)).toContain('stop pqb-go? y yes · n no');

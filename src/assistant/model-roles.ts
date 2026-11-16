@@ -49,3 +49,56 @@ export function roleStart(ai: unknown, role: unknown): { model?: string; note?: 
   const model = roleModel(ai, key);
   return model ? { model } : { note: `role "${key}" is not defined (ai.roles) — using the conversation's model` };
 }
+
+// A name `/model` offers. `name` is what the person types (`default`, a role, or a
+// catalogue id); `model` the id it runs — null for the reset, which puts the session back
+// on `ai.model`; `label` what the chat and the panel read; `window` what the conversation
+// would measure against.
+export type ModelRow = { name: string; model: string | null; label: string; window?: number };
+
+// The word that takes a session back to `ai.model`. Reserved: no role or id shadows it.
+const RESET = 'default';
+
+// The keys of a record in `config.ai`, or none: a hand-edited file may say anything.
+const keysOf = (v: unknown): string[] => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v) : []);
+
+// Every name `/model` offers, in the order the panel draws it: the reset, then the roles
+// (`ai.roles`, in the order its keys come), then the ids of `ai.models` no role names. A
+// role and an id of the same name are one row — the role's — so a name means one thing.
+// Pure: `ai` in, rows out.
+export function modelRows(ai: unknown): ModelRow[] {
+  const cfg = asAi(ai);
+  const base = baseModel(ai);
+  const rows: ModelRow[] = [{ name: RESET, model: null, label: base ? `${RESET} (${base})` : RESET, window: modelWindow(ai, base) }];
+  const named = new Set([RESET]);
+  const mapped = new Set<string>();
+  for (const role of keysOf(cfg.roles)) {
+    const key = name(role);
+    const model = key ? roleModel(ai, key) : undefined;
+    if (!key || !model || named.has(key)) continue;
+    named.add(key);
+    mapped.add(model);
+    rows.push({ name: key, model, label: `${key} → ${model}`, window: modelWindow(ai, model) });
+  }
+  for (const id of keysOf(cfg.models)) {
+    const key = name(id);
+    if (!key || named.has(key) || mapped.has(key)) continue;
+    named.add(key);
+    rows.push({ name: key, model: key, label: key, window: modelWindow(ai, key) });
+  }
+  return rows;
+}
+
+// What a typed name chooses: the reset, the id a role runs, or an id of the catalogue —
+// an id a role maps to is still an id the person may name. Anything else is the line that
+// sends them to the list.
+export function modelChoice(ai: unknown, asked: unknown): { model: string | null } | { error: string } {
+  const key = typeof asked === 'string' ? asked.trim() : '';
+  if (key === RESET) return { model: null };
+  const role = roleModel(ai, key);
+  if (role) return { model: role };
+  const catalogue = new Set(keysOf(asAi(ai).models).map(name).filter((id): id is string => !!id));
+  if (catalogue.has(key)) return { model: key };
+  const shown = typeof asked === 'string' ? key : String(asked ?? '');
+  return { error: `no model or role "${shown}" here (/model lists them)` };
+}

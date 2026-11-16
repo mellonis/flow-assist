@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat can run a model of its own — `/model`.** `/model deep` puts this conversation
+  on the model your `ai.roles` says `deep` is, and an id of `ai.models` works too; `/model`
+  alone opens a panel over the conversation listing everything your config can name, each
+  with the window it holds and the one you are on marked, and ⏎ takes the row under the
+  cursor. The choice belongs to the session: it is saved with it, comes back with
+  `/resume`, from the sessions picker and after a restart, and `config set ai.model` leaves
+  it where it is — `/model default` is how a session goes back to following `ai.model`.
+  The frame's title says which model the chat is on (`ƒ Flow Assist (big-model)`), and a
+  subagent or task you start runs it too unless its role says otherwise. Nothing of this
+  reaches your config: `/model` is yours, as `ai` is.
+
 - **Work can run on a model of its own: roles, and a window per model.** An agent file's
   `model:` line and the `subagent` tool's `model` argument name a role — `fast`, `deep`, a
   name you choose — and `ai.roles` says what each runs on this machine, so one file works
@@ -251,8 +262,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **⏎ on a subagent's or task's row, or on a live row in `/agents`, shows that child's
   conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
   and the wheel scroll them, End jumps to the end, and the details key opens or folds all of
-  them. The frame title names the path (`ƒ Flow Assist · fix-tests › read-logs`), and the
-  hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
+  them. The frame title names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`).
+  The hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
   for a y/n`, `○ queued`), with `x stop · Esc back` on the right. Esc steps back and does
   not stop the child; from a watch that began in the rows it puts the cursor on the node's
   row, unless a y/n waits somewhere in the tree, in which case the cursor stays in the field
@@ -1251,7 +1262,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   sees now`, marked as data from outside systems and never as instructions; it follows
   the screen from one request to the next and is never stored in the conversation or
   the saved session. `/context` counts it as `on screen`. The chat's title shows the
-  items' labels (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`).
+  items' labels (`ƒ Flow Assist (big-model) · Board: Frontend · Issue ABC-1`).
 
 - **Opening the chat on another screen no longer starts a new conversation.** It used
   to switch to a fresh session whenever the plugin's subject changed, and the dialogue
