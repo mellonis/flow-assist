@@ -184,7 +184,7 @@ test('the screen changing does not start a new session: the conversation continu
   state.items = [ISSUE];
   await ui.press('F');
   const frame = ui.backend.lastFrame;
-  expect(title(frame)).toContain('Flow Assist · Issue ABC-1');
+  expect(title(frame)).toContain('Flow Assist (scripted) · Issue ABC-1');
   expect(frame).toContain('About the board.');
   expect(frame).not.toContain('A new session');
   await ui.type('and this?');
@@ -200,7 +200,7 @@ test("the chat's title is the items' labels, cut to the frame", async () => {
   const state = fresh({ items: [BOARD, ISSUE] });
   const ui = await bootApp(new ScriptedModel(), 100, 28, guest(state));
   await ui.press('F');
-  expect(title(ui.backend.lastFrame)).toContain('Flow Assist · Board: Frontend · Issue ABC-1');
+  expect(title(ui.backend.lastFrame)).toContain('Flow Assist (scripted) · Board: Frontend · Issue ABC-1');
   // The plugin is asked with its OWN pair — the host part its services live on.
   expect((state.seen.at(-1) as { host?: { pluginToken?: unknown } } | undefined)?.host?.pluginToken).toBeDefined();
   // A title longer than the frame stays on the border, cut.
@@ -225,7 +225,7 @@ test('a legacy chatSubject plugin still names its subject — in the title and a
   model.script([{ text: 'About DOC-7.' }]);
   const ui = await bootApp(model, 100, 28, guest(fresh({ subject: 'DOC-7' })));
   await ui.press('F');
-  expect(title(ui.backend.lastFrame)).toContain('Flow Assist · DOC-7');
+  expect(title(ui.backend.lastFrame)).toContain('Flow Assist (scripted) · DOC-7');
   await ui.type('hi');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 1);

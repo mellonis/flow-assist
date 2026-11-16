@@ -183,7 +183,7 @@ for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as co
     // not drawn while the pager is up.
     const frame = ui.backend.lastFrame;
     expect(corner(frame)).toEqual(panel);
-    expect(frame.split('\n')[panel.row]).toContain('Flow Assist · seq 1 300');
+    expect(frame.split('\n')[panel.row]).toContain('Flow Assist (scripted) · seq 1 300');
     expect(frame).toContain('│ 101');
     expect(frame).not.toContain('Done counting.');
     expect(before).toContain('new line');
@@ -236,7 +236,7 @@ test('with the chat taking the whole terminal, the pager fills it — the chat\'
   await click(ui, rowOf(ui, 'seq 1 300 ·'), before.split('\n')[rowOf(ui, 'seq 1 300 ·')]!.indexOf('seq 1 300') + 2);
   expect(pagerUp(ui)).toBe(true);
   const lines = ui.backend.lastFrame.split('\n');
-  expect(lines[0]!.startsWith('╭─ ƒ Flow Assist · seq 1 300')).toBe(true);
+  expect(lines[0]!.startsWith('╭─ ƒ Flow Assist (scripted) · seq 1 300')).toBe(true);
   expect(lines[0]!.trimEnd()).toHaveLength(cols);
   await ui.press('escape');
   expect(ui.backend.lastFrame).toBe(before);
@@ -322,7 +322,7 @@ test('a long reasoning opens in the pager titled by its own header, reads to its
   expect(pagerUp(ui)).toBe(true);
   // In the chat's own window, where the conversation was, titled by the block.
   expect(corner(ui.backend.lastFrame)).toEqual(window);
-  expect(ui.backend.lastFrame.split('\n')[window.row]).toContain('Flow Assist · thought');
+  expect(ui.backend.lastFrame.split('\n')[window.row]).toContain('Flow Assist (scripted) · thought');
   expect(ui.backend.lastFrame).toContain('thought 1');
   expect(ui.backend.lastFrame).not.toContain('thought 60');
   for (let i = 0; i < 20; i++) await ui.press('pagedown');

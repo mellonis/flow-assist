@@ -1,7 +1,9 @@
 // `/model <name>`: the model THIS conversation runs, chosen from what the config knows —
 // the reset, the roles and the catalogue's ids — never written back to the config. It is
 // fixed for a turn in flight (the model reaches a request once per turn), saved with the
-// session, and said in the chat as one note row.
+// session, and said in the chat as one note row. `/model` alone opens a panel over the
+// conversation's place, with the row the session runs marked; the frame's title names the
+// model after the chat's own name.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -66,6 +68,19 @@ const boot = async (model: ScriptedModel, sessions?: string) => {
   await ui.press('F');
   return ui;
 };
+// The panel the bare command opens, waited for rather than counted in ticks.
+const openModelPanel = async (ui: UI) => {
+  await command(ui, '/model');
+  await settleUntil(() => ui.backend.lastFrame.includes('Flow Assist · Model'));
+};
+const panelRows = (ui: UI) => ui.backend.lastFrame.split('\n');
+const rowAt = (ui: UI, text: string) => panelRows(ui).findIndex((l) => l.includes(text));
+// The colour of a row's detail — the window — where the panel draws its `tone`: `ok`
+// marks the choice the session runs.
+const detailFg = (ui: UI, row: string, detail: string) => {
+  const y = rowAt(ui, row);
+  return (ui.backend.lastBuffer!.get(panelRows(ui)[y]!.indexOf(detail), y).style as { fg?: string }).fg;
+};
 
 test('/model deep names a role, says it once, and the next request carries its model', async () => {
   const model = new ScriptedModel();
@@ -113,15 +128,109 @@ test('a catalogue id no role maps to is a name of its own, and the session file 
   ui.app.unmount();
 });
 
-// `/model` alone says where things stand in the vocabulary `/model` takes — the row the
-// conversation runs — and sends nothing.
-test('/model alone says the row the conversation runs, and sends no request', async () => {
+// `/model` alone opens the panel the config fills: the reset first, then the roles in the
+// order `ai.roles` names them, then the ids no role names — each with its window — and
+// the row the session runs marked. It sends nothing and changes nothing.
+test('/model opens the panel: default, the roles and the ids, each with its window', async () => {
   const model = new ScriptedModel();
   const ui = await boot(model);
-  await command(ui, '/model');
-  await noteOnce(ui, 'model: default (default-model) · /model <name> to change');
+  await openModelPanel(ui);
+  const at = (t: string) => rowAt(ui, t);
+  expect(at('default (default-model)')).toBeGreaterThan(-1);
+  expect(at('default (default-model)')).toBeLessThan(at('fast → small-model'));
+  expect(at('fast → small-model')).toBeLessThan(at('deep → big-model'));
+  expect(at('deep → big-model')).toBeLessThan(at('other-model')); // an id no role names
+  expect(panelRows(ui)[at('default (default-model)')]).toContain('262k');
+  expect(panelRows(ui)[at('fast → small-model')]).toContain('256k');
+  expect(panelRows(ui)[at('deep → big-model')]).toContain('512k');
+  expect(panelRows(ui)[at('other-model')]).toContain('128k');
+  // The mark: the session runs ai.model, so the reset's row is the choice it is on — its
+  // window in the panel's `ok` tone, the others dim.
+  expect(detailFg(ui, 'default (default-model)', '262k')).toBe('green');
+  expect(detailFg(ui, 'other-model', '128k')).not.toBe('green');
+  await ui.press('escape');
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist · Model');
   expect(model.requests).toHaveLength(0);
   ui.app.unmount();
+});
+
+// `return` takes the row under the cursor through the set path `/model <name>` takes: the
+// same field, the same save, the same note — one local function, no second copy.
+test('return on a row sets it as /model <name> does, and closes the panel', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'one' }], [{ text: 'two' }]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
+  const ui = await boot(model, dir);
+  await ask(model, ui, 'first');
+  await openModelPanel(ui);
+  await press(ui, { name: 'down' }); // fast → small-model
+  await press(ui, { name: 'down' }); // deep → big-model
+  await ui.press('return');
+  await noteOnce(ui, 'model: deep → big-model');
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist · Model');
+  expect(stateFile(dir).read().model).toBe('big-model');
+  await ask(model, ui, 'second');
+  expect(model.requests.at(-1)?.model).toBe('big-model');
+  ui.app.unmount();
+});
+
+// Esc closes the panel and changes nothing: no note, no save, no request.
+test('esc closes the panel, and nothing of the session moves', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'one' }], [{ text: 'two' }]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
+  const ui = await boot(model, dir);
+  await ask(model, ui, 'first');
+  await openModelPanel(ui);
+  await press(ui, { name: 'down' });
+  await ui.press('escape');
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist · Model');
+  expect(said(ui, 'model: ')).toBe(0);
+  expect(Object.hasOwn(stateFile(dir).read(), 'model')).toBe(false);
+  expect(model.requests).toHaveLength(1);
+  await ask(model, ui, 'second');
+  expect(model.requests.at(-1)?.model).toBe('default-model');
+  ui.app.unmount();
+});
+
+// A name a role maps to marks the ROLE's row: the mark is the choice the session names,
+// not what it resolves to.
+test('a mapped id marks the role\'s row in the panel', async () => {
+  const model = new ScriptedModel();
+  const ui = await boot(model);
+  await command(ui, '/model big-model');
+  await noteOnce(ui, 'model: big-model');
+  await openModelPanel(ui);
+  expect(detailFg(ui, 'deep → big-model', '512k')).toBe('green');
+  expect(detailFg(ui, 'default (default-model)', '262k')).not.toBe('green');
+  await ui.press('escape');
+  await settle();
+  ui.app.unmount();
+});
+
+// The frame names the model after the chat's own name, whatever the session runs.
+test('the frame\'s title names the model the conversation runs, cut to one row', async () => {
+  const model = new ScriptedModel();
+  const ui = await boot(model);
+  expect(ui.backend.lastFrame).toContain('ƒ Flow Assist (default-model)');
+  await command(ui, '/model deep');
+  await noteOnce(ui, 'model: deep → big-model');
+  expect(ui.backend.lastFrame).toContain('ƒ Flow Assist (big-model)');
+  ui.app.unmount();
+  // A name too long for the frame is cut on the border, never wrapped onto a row of its own.
+  const long = 'model-with-a-name-far-too-long-to-fit-any-frame-this-host-ever-draws-for-a-person-to-read';
+  const ai = { ...AI, models: { ...AI.models, [long]: { contextWindow: 1000 } } };
+  const narrow = await bootApp(new ScriptedModel(), 100, 30, undefined, { ai });
+  await narrow.press('F');
+  await command(narrow, `/model ${long}`);
+  await settleUntil(() => narrow.backend.lastFrame.includes('ƒ Flow Assist (model-with'));
+  const titled = narrow.backend.lastFrame.split('\n').filter((l) => l.includes('Flow Assist'));
+  expect(titled).toHaveLength(1);
+  expect(titled[0]).toContain('…');
+  expect(narrow.backend.lastFrame).not.toContain(long);
+  narrow.app.unmount();
 });
 
 // The reset is a CLEAR, not a pin: `default` leaves the session with no model of its own,

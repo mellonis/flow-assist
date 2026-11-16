@@ -1702,6 +1702,7 @@ export function renderChatModal({
   picker = null,
   pickerOwn = 'idle',
   panel = null,
+  model,
   tree = null,
   hover = false,
   onPickRow,
@@ -1715,6 +1716,9 @@ export function renderChatModal({
   // A click on a row of the session picker or a command panel: the cursor goes there,
   // as ↑/↓ would take it — the index among the rows the list shows.
   onPickRow?: (index: number) => void;
+  // The model this conversation runs, named after the chat's own name in the frame's
+  // title (none — no model is known, and the title is the bare name).
+  model?: string;
   // The block open in the pager, drawn in the conversation's place (null — none).
   pager?: PagerView | null;
   // The child being watched, drawn in the conversation's place (null — none).
@@ -1886,6 +1890,9 @@ export function renderChatModal({
   const treeKeys = treeShown.length > 0 && tree!.cursor !== null;
   const planShape = planFit(boxH - 4, besides + treeBlock, room.planFull);
   const oneLine = planShape === 'line' ? planLine(planList) : null;
+  // The chat's own name, with the model it runs after it; what is on screen follows
+  // after ` · `, and the whole title is cut to the border, never wrapped.
+  const chatName = `${ASSISTANT_MARK} Flow Assist${model ? ` (${model})` : ''}`;
 
   return h(
     Box,
@@ -1901,11 +1908,11 @@ export function renderChatModal({
         color: m.text,
         borderBackgroundColor: m.borderBg,
         borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
-        // What is on screen, after the name — cut to the border, never wrapped.
-        // With the pager up, what it holds.
-        borderTitle: watch ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${watch.path.join(' › ')}`, Math.max(0, boxW - 4))
-          : pager ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${pager.title}`, Math.max(0, boxW - 4))
-          : subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
+        // What is on screen, after the name and the model — cut to the border, never
+        // wrapped. With the pager up, what it holds.
+        borderTitle: cutStep(watch ? `${chatName} · ${watch.path.join(' › ')}`
+          : pager ? `${chatName} · ${pager.title}`
+          : subject ? `${chatName} · ${subject}` : chatName, Math.max(0, boxW - 4)),
         width: boxW,
         height: boxH,
         padding: 1,

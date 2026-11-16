@@ -51,7 +51,7 @@ import { migrateMemoryJson, removeFact, writeIndex } from '../assistant/memory-s
 import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
-import { CONTEXT_WARN_AT, cacheLine, contextBadge } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, cacheLine, contextBadge, short } from '../assistant/context-meter.js';
 import { recallLine } from '../assistant/recall.js';
 import { contextTitle, type ContextItem } from '../assistant/screen-context.js';
 import {
@@ -1643,29 +1643,44 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'model': {
                 // Whose model this conversation runs. The config defines the names; the
                 // choice is the session's and is saved with it, never written back to the
-                // config.
-                const name = arg.trim();
+                // config. `/model <name>` takes one, the bare command opens the panel; both
+                // go through ONE set path (`set`), so the note, the save and the field are
+                // the same.
                 const ai = conv.deps.config().ai;
-                if (!name) {
-                  // Said where things stand — in the chat, as a note (display only, like
-                  // /memory's list): a toast is drawn under a chat that covers the whole
-                  // terminal. The state is said in the vocabulary /model takes: the row
-                  // the conversation runs, else the id itself.
+                const set = (asked: string): boolean => {
+                  const got = modelChoice(ai, asked);
+                  // A typo leaves the line as typed, as /auto, /notes and /mode do.
+                  if ('error' in got) { setError(got.error); return false; }
                   setField('');
-                  const row = modelRows(ai).find((r) => r.model === (conv.model ?? null));
-                  conv.pushNote(`model: ${row?.label ?? conv.effectiveModel() ?? 'the provider\'s default'} · /model <name> to change`);
+                  conv.model = got.model ?? undefined; // `null` — back to ai.model
+                  conv.save();
+                  const row = modelRows(ai).find((r) => r.name === asked.trim());
+                  conv.pushNote(`model: ${row?.label ?? asked.trim()}`);
+                  host.notify();
+                  return true;
+                };
+                const name = arg.trim();
+                if (!name) {
+                  // The panel over the conversation's place (`/agents`, `/mcp`): what the
+                  // config knows — the reset, the roles and the catalogue's ids — with the
+                  // row the session runs marked. The mark is the CHOICE the session names:
+                  // `default` while it runs ai.model, a role's row for an id that role maps
+                  // to. `return` takes the row under the cursor and closes.
+                  setField('');
+                  openPanel({
+                    title: 'Model',
+                    rows: () => modelRows(ai).map((r) => ({
+                      id: r.name,
+                      text: r.label,
+                      detail: r.window ? short(r.window) : undefined,
+                      tone: r.model === (conv.model ?? null) ? 'ok' : undefined,
+                    })),
+                    keys: [{ key: 'return', label: 'use', run: (id) => { if (id !== null && set(id)) setPanel(null); return undefined; } }],
+                  });
                   host.notify();
                   return;
                 }
-                const got = modelChoice(ai, name);
-                // A typo leaves the line as typed, as /auto, /notes and /mode do.
-                if ('error' in got) { setError(got.error); return; }
-                setField('');
-                conv.model = got.model ?? undefined; // `null` — back to ai.model
-                conv.save();
-                const row = modelRows(ai).find((r) => r.name === name);
-                conv.pushNote(`model: ${row?.label ?? name}`);
-                host.notify();
+                set(name);
                 return;
               }
               case 'log': {
@@ -3040,6 +3055,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queueWaits: queued.length && conv.inTurn ? conv.queueWait(queued, queued.length - 1) : null,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
+            // The model this conversation runs, after the chat's own name; the subject —
+            // or the watch's path, or the pager's block — follows it after ` · `.
+            model: conv.effectiveModel(),
             elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).

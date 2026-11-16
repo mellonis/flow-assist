@@ -206,10 +206,10 @@ test('the watch of the subagent draws its question and its keys answer it', asyn
   await settleUntil(() => frameOf(ui).includes('⚙ qwatch-do-it'));
   await ui.press('down');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('╭─ ƒ Flow Assist · '));
+  await settleUntil(() => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · '));
   a!.release();
   await settleUntil(() => frameOf(ui).includes(title('qwatch-do-it')));
-  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · ');
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · ');
   expect(frameOf(ui)).toContain('Esc dismiss');
   await ui.type('z');
   await settle(4);
