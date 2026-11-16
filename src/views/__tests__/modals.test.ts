@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askStart } from '../../assistant/ask.js';
@@ -1027,6 +1027,7 @@ async function diffFrame(props: {
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   palette?: Record<string, string | undefined>;
+  loading?: boolean;
 }) {
   const backend = new TestBackend(80, 24);
   const handle = await render(h(renderDiffPanel, { ...props, wrap: 74, bg: 'black' }), backend);
@@ -1150,4 +1151,92 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   expect(drag).not.toContain('1');
   expect(drag).toContain('-gone');
   drawn.handle.unmount();
+});
+
+test('a panel with nothing to show yet says it is capturing, then that the tree is clean', async () => {
+  const capturing = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
+  expect(capturing.frame).toContain('capturing baseline…');
+  expect(capturing.frame).not.toContain('no changes');
+  capturing.handle.unmount();
+});
+
+// ─── /diff: the split ─────────────────────────────────────────────────────────
+// Wide enough for two halves, the panel stands beside the conversation and the field
+// strip runs below both; narrower, the panel is the column's last block, under the
+// field. The panel's rows and its ↑/↓ order come from ONE walk (`diffPanelBody`), which
+// is what keeps a drawn row and the cursor's index from disagreeing.
+const splitSections: DiffSection[] = [{
+  root: '/r', baseline: 'head', label: 'vs HEAD',
+  files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+}];
+const splitPanel = { sections: splitSections, collapsed: new Set<string>(), cursor: diffFileKey('/r', 'a.txt') };
+
+test('the panel stands beside the conversation in a wide chat', async () => {
+  const wide = new TestBackend(160, 40);
+  const w = await render(h(renderChatModal, { ...baseChat, width: 160, height: 40, messages: [{ role: 'user', content: 'hello' }], diffPanel: splitPanel }), wide);
+  const lines = (wide.lastFrame ?? '').split('\n');
+  const row = (t: string) => {
+    const y = lines.findIndex((l) => l.includes(t));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return { y, x: lines[y]!.indexOf(t) };
+  };
+  const header = row('diff · 1 files');
+  // A column of its own, right of the conversation's text, with the hunks as rows.
+  expect(header.x).toBeGreaterThan(60);
+  expect(row('› hello').x).toBeLessThan(40);
+  expect(lines.filter((l) => l.includes('+two'))).toHaveLength(1);
+  // The field keeps its place below both halves.
+  expect(row('⏎ send').y).toBeGreaterThan(header.y);
+  w.unmount();
+});
+
+test('the panel is the column\'s last block under the field in a narrow chat', async () => {
+  // Two halves would leave each less than the panel's least: one column, and the panel
+  // is its last block — below the field, never beside it.
+  const narrow = new TestBackend(80, 24);
+  const n = await render(h(renderChatModal, { ...baseChat, diffPanel: splitPanel }), narrow);
+  const nlines = (narrow.lastFrame ?? '').split('\n');
+  const nheader = nlines.findIndex((l) => l.includes('diff · 1 files'));
+  expect(nheader).toBeGreaterThan(nlines.findIndex((l) => l.includes('⏎ send')));
+  expect(nlines[nheader]!).not.toContain('›');
+  // The panel's frame closes under the last of its rows: it is the chat's own bottom.
+  expect(nlines[nheader - 1]).toContain('╭');
+  n.unmount();
+});
+
+test('a chat with no panel draws the same with or without the prop', async () => {
+  const draw = async (extra: Record<string, unknown>) => {
+    const backend = new TestBackend(100, 28);
+    const handle = await render(h(renderChatModal, {
+      ...baseChat, width: 100, height: 28, messages: [{ role: 'user', content: 'hello' }],
+      todo: [{ id: 't1', text: 'a step', status: 'pending' }], ...extra,
+    }), backend);
+    const frame = backend.lastFrame ?? '';
+    handle.unmount();
+    return frame;
+  };
+  expect(await draw({ diffPanel: null })).toBe(await draw({}));
+});
+
+test('the body is one walk: the files ↑/↓ move among, in the drawn order, and the cursor row', () => {
+  const sections: DiffSection[] = [{
+    ...splitSections[0]!,
+    files: [
+      splitSections[0]!.files[0]!,
+      { status: 'A', path: 'b.txt', added: 1, removed: 0, hunks: '@@ -0,0 +1 @@\n+new' },
+    ],
+  }];
+  const a = diffFileKey('/r', 'a.txt');
+  const b = diffFileKey('/r', 'b.txt');
+  expect(diffPanelFileKeys(sections)).toEqual([a, b]);
+  // The header is the first row; with the first file folded the second sits under it.
+  const body = diffPanelBody({ sections, collapsed: new Set([a]), cursor: b, wrap: 40 });
+  expect(body.cursorRow).toBe(2);
+  // Every file is expanded by default: the folded one stops at its row, the other
+  // draws its hunks under it.
+  expect(body.rows.map((r) => (r as { key: string | null }).key)).toEqual(['s0', 'f0-0', 'f0-1', 'h0-1-0']);
+  // A refresh that finds no such file: nothing to scroll to, the rows still drawn.
+  const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40 });
+  expect(gone.cursorRow).toBe(-1);
+  expect(gone.rows).toHaveLength(4);
 });

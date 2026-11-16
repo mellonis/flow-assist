@@ -37,6 +37,7 @@ import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
+import { diffPanelLayout } from '../runtime/panel-layout.js';
 import type { CompletionList } from '../config/commandline.js';
 import { redactSecrets } from '../assistant/secrets.js';
 import {
@@ -1575,6 +1576,12 @@ export interface ChatRoomInput {
   watch?: WatchView | null;
   picker?: PickerState | null;
   panel?: CommandPanelView | null;
+  // `/diff`: the panel's data (null — closed). Where the split stands is measured from
+  // the same numbers the render uses, so the keys cannot act on a panel that is not drawn.
+  diffPanel?: DiffPanelView | null;
+  // How many rows the tree draws, as `renderChatModal` had them from `treeBudget`: both
+  // the plan's shape and the split's height give way to them.
+  treeRows?: number;
   // Only the completion list's height is read: its rows sit in the field's place.
   completion?: { list?: { height: number } | null } | null;
 }
@@ -1586,7 +1593,7 @@ export interface ChatRoomInput {
 // the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, a watched
 // child, the picker or a command panel takes the column, and the tree is not drawn.
 export function chatRoom(p: ChatRoomInput) {
-  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null } = p;
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null, diffPanel = null, treeRows = 0 } = p;
   const fullscreen = p.fullscreen ?? false;
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = chatBoxHeight(height, fullscreen);
@@ -1619,7 +1626,16 @@ export function chatRoom(p: ChatRoomInput) {
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
   const hidden = !!(pager || watch || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
-  return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, hidden };
+  // The tree's block takes its rows and the gap above them.
+  const treeBlock = treeRows > 0 ? 1 + treeRows : 0;
+  const planShape = planFit(boxH - 4, besides + treeBlock, planFull);
+  // `/diff`'s split. The rows it may use are the content less the strip that stays full
+  // width below it — the error, the hint row, the queue line and the field's place (each
+  // with its gap), and the plan and the tree as they are drawn — less the one gap the
+  // split's own row brings. `fieldRows: 0`: the field is in that strip, not the split's.
+  const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0) + treeBlock;
+  const split = diffPanel ? diffPanelLayout({ width: boxW - 4, height: Math.max(0, boxH - 4 - stripRows - 1), fieldRows: 0, minChatRows: 4 }) : null;
+  return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, planShape, split, hidden };
 }
 
 // The conversation list keeps at least this many rows before any tree row is drawn.
@@ -1703,6 +1719,7 @@ export function renderChatModal({
   picker = null,
   pickerOwn = 'idle',
   panel = null,
+  diffPanel = null,
   model,
   tree = null,
   hover = false,
@@ -1856,13 +1873,23 @@ export function renderChatModal({
   pickerOwn?: OwnStatus;
   // A plugin command's panel, drawn in the conversation's place (null — none).
   panel?: CommandPanelView | null;
+  // `/diff`: the working tree in a panel of its own — beside the conversation, or below
+  // the field strip on a terminal too narrow for two halves (null — closed).
+  diffPanel?: DiffPanelView | null;
 }) {
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
   // it, and the picker comes back once it is answered. So for a plugin's panel.
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
   if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
-  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion });
+  const props = { width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion, diffPanel };
+  const base = chatRoom(props);
+  // The tree under the field: what budget leaves it, and the rows that block takes with
+  // its gap — the plan gives way to it only after the list's four rows are safe.
+  const treeShown = tree && !base.hidden ? tree.rows.slice(0, treeBudget({ boxH: base.boxH, besides: base.besides, planFull: base.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
+  // One measure with the tree counted: the plan's shape and `/diff`'s split both give way
+  // to its rows.
+  const room = treeShown.length ? chatRoom({ ...props, treeRows: treeShown.length }) : base;
   const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
@@ -1883,17 +1910,78 @@ export function renderChatModal({
   const ghost = atEnd ? completion?.ghost ?? '' : '';
   const label = atEnd ? completion?.label ?? '' : '';
   const others = atEnd ? completion?.others ?? [] : [];
-  // The tree under the field: what budget leaves it, and the rows that block takes with
-  // its gap — the plan gives way to it only after the list's four rows are safe.
-  const treeShown = tree && !room.hidden ? tree.rows.slice(0, treeBudget({ boxH, besides, planFull: room.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
-  const treeBlock = treeShown.length ? 1 + treeShown.length : 0;
   // The cursor is in the rows: the hint row names their keys.
   const treeKeys = treeShown.length > 0 && tree!.cursor !== null;
-  const planShape = planFit(boxH - 4, besides + treeBlock, room.planFull);
+  const planShape = room.planShape;
   const oneLine = planShape === 'line' ? planLine(planList) : null;
   // The chat's own name, with the model it runs after it; what is on screen follows
   // after ` · `, and the whole title is cut to the border, never wrapped.
   const chatName = `${ASSISTANT_MARK} Flow Assist${model ? ` (${model})` : ''}`;
+  // `/diff`'s split: where the panel stands. A panel the layout gave no rows
+  // (`diff.height === 0`) is not drawn — it stays open and comes back when room does.
+  const split = room.split;
+  const diffShown = !!split && (split.mode === 'side' || split.diff.height > 0);
+  // Side by side the conversation's rows are laid out at its half, less the list's
+  // scrollbar; the field strip below keeps the chat's full width. The panel's rows are
+  // cut to its own box less the border, the padding and the body's scrollbar.
+  const chatHalf = split && split.mode === 'side' ? Math.max(20, split.chat.width - 2) : wrap;
+  const panelWrap = split && split.mode === 'side' ? Math.max(10, split.diff.width - 6) : Math.max(10, boxW - 10);
+  const panelBox = diffPanel && split && diffShown
+    ? h(Box, {
+        width: split.mode === 'side' ? split.diff.width : '100%',
+        height: split.mode === 'side' ? '100%' : split.diff.height,
+        flexShrink: 0,
+      },
+        renderDiffPanel({
+          sections: diffPanel.sections,
+          collapsed: diffPanel.collapsed,
+          cursor: diffPanel.cursor,
+          loading: diffPanel.loading,
+          wrap: panelWrap,
+          bg: m.bg,
+          palette: m,
+          // The body hears PgUp/PgDn and the wheel while the chat has the keyboard and
+          // nothing stands in the conversation's place.
+          scroll: { isActive: !!focused && !pager && !watch && !room.hidden },
+        }))
+    : null;
+  // The conversation and whatever stands in its place, in a column of their own: the
+  // split stands beside them, and the pager keeps their half. One parent whether or not
+  // the panel is open — a list moved to another parent is mounted anew, and `/diff`
+  // would then lose the conversation's place on every toggle.
+  const chatColumn = h(Box, { key: 'chat-column', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+    // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and the
+    // wheel are the pager's, and the conversation stays where it was left. With `/diff`
+    // drawn they are the panel's body's.
+    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
+    // The pager, in the conversation's place: the block's rows at the conversation's
+    // width, with a scroll of their own.
+    pager
+      ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
+          // Its keys and the wheel only while the chat has the keyboard.
+          isActive: focused,
+          items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
+          keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
+          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap: chatHalf, detailsKey }),
+        }))
+      : null,
+    // A watched child, in the same place: its rows follow the end while the list rests
+    // there, and PgUp/PgDn and the wheel are the list's own. The session's list stays
+    // mounted under it, hidden.
+    watch
+      ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
+          isActive: focused,
+          anchor: 'bottom',
+          ref: (box: ScrollBoxHandle | null) => { if (watch.toEnd) watch.toEnd.current = box ? () => box.scrollToEnd() : null; },
+          items: watch.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
+          keyOf: (_row: ChatRow, i: number) => `watch-${i}`,
+          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap: chatHalf, detailsKey }),
+        }))
+      : null,
+  );
+  // The row both halves stand in, or the column alone: it takes what the strip below
+  // leaves, and never a height of its own.
+  const chatRow = h(Box, { key: 'chat-row', flexDirection: 'row', gap: 1, flexGrow: 1, flexShrink: 1, width: '100%' }, chatColumn, split?.mode === 'side' ? panelBox : null);
 
   return h(
     Box,
@@ -1925,33 +2013,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
-      // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
-      // The pager, in the conversation's place: the block's rows at the conversation's
-      // width, with a scroll of their own.
-      pager
-        ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
-            // Its keys and the wheel only while the chat has the keyboard.
-            isActive: focused,
-            items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
-            keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
-            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, detailsKey }),
-          }))
-        : null,
-      // A watched child, in the same place: its rows follow the end while the list rests
-      // there, and PgUp/PgDn and the wheel are the list's own. The session's list stays
-      // mounted under it, hidden.
-      watch
-        ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
-            isActive: focused,
-            anchor: 'bottom',
-            ref: (box: ScrollBoxHandle | null) => { if (watch.toEnd) watch.toEnd.current = box ? () => box.scrollToEnd() : null; },
-            items: watch.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
-            keyOf: (_row: ChatRow, i: number) => `watch-${i}`,
-            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, detailsKey }),
-          }))
-        : null,
+      chatRow,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -2011,6 +2073,10 @@ export function renderChatModal({
               // field's own row says what ⏎ does there, this one the other keys.
               : bangLevel && shellCwd
               ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
+              // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
+              // names them instead of the history it does not walk here.
+              : diffShown && !input
+              ? `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
@@ -2141,6 +2207,10 @@ export function renderChatModal({
             ...(asking ? { color: m.warn, bold: true } : at ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
           }, asking ? cutStep(tree!.ask!, wrap) : r.text);
         })) : null,
+      // `/diff` on a terminal too narrow to stand beside the conversation: the panel
+      // takes its rows below the field strip, the column above keeps the rest. Its last
+      // row is the frame's own bottom, so it is the last child.
+      split?.mode === 'stacked' ? panelBox : null,
     ),
   );
 }
@@ -2470,21 +2540,46 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
 //
 // Pure: the chat hands over what `workingTreeDiff` answered, what the person folded and
 // which file the cursor is on; nothing here reads the tree, the clock or the config.
-export function renderDiffPanel(p: {
+//
+// What the chat hands over for `/diff`: the sections of the walk, the files the person
+// folded and the file the cursor is on — both keyed `diffFileKey(root, path)` — and
+// whether a walk is still running.
+export interface DiffPanelView {
   sections: DiffSection[];
-  // Folded files, and the cursor, keyed `diffFileKey(root, path)`: a relative path
-  // repeats across roots, so each section's row folds and lights on its own.
+  collapsed: ReadonlySet<string>;
+  cursor: string | null;
+  loading?: boolean;
+}
+
+// The files the panel shows, in the order ↑/↓ walk them: root by root, as drawn.
+export function diffPanelFileKeys(sections: DiffSection[]): string[] {
+  const keys: string[] = [];
+  for (const s of sections) for (const f of s.files) keys.push(diffFileKey(s.root, f.path));
+  return keys;
+}
+
+// The panel's ONE walk: the rows it draws, and which row the cursor's file is on (-1 —
+// that file is not drawn, as a refresh that took it away leaves it). The drawn rows, the
+// panel's list and the chat's keys all read this, so a row and a key cannot disagree.
+export function diffPanelBody(p: {
+  sections: DiffSection[];
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   wrap: number; // the panel's inner width
-  bg: string | undefined;
+  loading?: boolean;
   palette?: Record<string, string | undefined>;
-}) {
+}): { rows: ReactNode[]; cursorRow: number } {
   const m = p.palette ?? {};
   const inner = Math.max(10, p.wrap || 10);
   const rows: ReactNode[] = [];
+  let cursorRow = -1;
   const total = p.sections.reduce((n, s) => n + s.files.length, 0);
-  if (!total) rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false }, 'no changes in the working tree'));
+  if (!total) {
+    // A walk still running says so; a tree with nothing in it says that.
+    rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false },
+      p.loading ? 'capturing baseline…' : 'no changes in the working tree'));
+    return { rows, cursorRow };
+  }
   p.sections.forEach((s, si) => {
     if (!s.files.length) return;
     // A section's header sums its own files: two roots are two answers, never one.
@@ -2500,6 +2595,7 @@ export function renderDiffPanel(p: {
       // The tail of the path is the part that says where one is, so it is what a cut keeps.
       const room = Math.max(8, inner - cellWidth(lead) - cellWidth(counts) - 1);
       const lit = p.cursor === key ? { color: m.accent } : {};
+      if (p.cursor === key) cursorRow = rows.length;
       rows.push(h(Box, { key: `f${si}-${fi}`, flexDirection: 'row', flexShrink: 0 },
         h(Text, { wrap: 'truncate' }, lead),
         h(Text, { ...lit, wrap: 'truncate' }, cutLeft(f.path, room)),
@@ -2528,7 +2624,81 @@ export function renderDiffPanel(p: {
       });
     });
   });
-  return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, backgroundColor: p.bg }, rows);
+  return { rows, cursorRow };
+}
+
+// The panel's body as the chat draws it: a list that scrolls (only the rows near the
+// viewport are laid out) and keeps the cursor's file in view as ↑/↓ move it. It scrolls
+// only when the cursor MOVED — a refresh that finds the file where it was must not pull
+// the panel back to it.
+function DiffBody({ rows, cursorRow, isActive }: {
+  rows: ReactNode[];
+  cursorRow: number;
+  isActive: boolean;
+}) {
+  const box = useRef<ScrollBoxHandle>(null);
+  const metrics = useRef<ScrollMetrics | null>(null);
+  // The row the list was last scrolled to, and the one the next measure must scroll to.
+  const seen = useRef(-2);
+  const pending = useRef(-1);
+  if (cursorRow >= 0 && cursorRow !== seen.current) pending.current = cursorRow;
+  const carry = () => {
+    const x = metrics.current;
+    const row = pending.current;
+    if (!x || row < 0) return;
+    pending.current = -1;
+    seen.current = row;
+    // One row of the block stays visible at either edge, so ↑/↓ never land on a row that
+    // is off screen.
+    const want = row < x.scrollTop ? row
+      : row >= x.scrollTop + x.viewportHeight ? row - x.viewportHeight + 1
+      : x.scrollTop;
+    const top = Math.max(0, Math.min(x.maxScrollTop, want));
+    if (top !== x.scrollTop) box.current?.scrollTo(top);
+  };
+  return h(ScrollList<ReactNode>, {
+    ref: box,
+    isActive,
+    items: rows,
+    rowHeight: 1,
+    scrollbar: true,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexDirection: 'column',
+    keyOf: (row: ReactNode, i: number) => {
+      const k = row && typeof row === 'object' && 'key' in row ? (row as { key?: unknown }).key : null;
+      return k == null ? `diff-${i}` : String(k);
+    },
+    renderItem: (row: ReactNode) => row,
+    onMetrics: (x: ScrollMetrics) => { metrics.current = x; carry(); },
+  });
+}
+
+// The panel's box. Without `scroll` every row is laid out at the box's natural height —
+// what a panel with room for everything wants; the chat hands `scroll` over, and the box
+// fills the height it is given and scrolls its body.
+export function renderDiffPanel(p: {
+  sections: DiffSection[];
+  // Folded files, and the cursor, keyed `diffFileKey(root, path)`: a relative path
+  // repeats across roots, so each section's row folds and lights on its own.
+  collapsed: ReadonlySet<string>;
+  cursor: string | null;
+  wrap: number; // the panel's inner width
+  bg: string | undefined;
+  palette?: Record<string, string | undefined>;
+  loading?: boolean;
+  scroll?: { isActive: boolean } | null;
+}) {
+  const { rows, cursorRow } = diffPanelBody(p);
+  return h(Box, {
+    flexDirection: 'column',
+    width: '100%',
+    // The chat gives the box a height; the body takes what the border leaves.
+    ...(p.scroll ? { height: '100%' as const } : {}),
+    border: 'round',
+    paddingX: 1,
+    backgroundColor: p.bg,
+  }, p.scroll ? h(DiffBody, { rows, cursorRow, isActive: p.scroll.isActive }) : rows);
 }
 
 // The question's free-text row: its prompt, indented under the options, and the width
