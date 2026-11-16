@@ -316,6 +316,10 @@ const workspaceTree = () => {
 test('/diff outside git says there is no repository', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-plain-')));
   fs.writeFileSync(path.join(root, 'note.txt'), 'hello\n');
+  // A repository nested under the folder does not make the folder one: `git status`
+  // says "not a git repository" here, and so does the panel — the nested tree is not
+  // answered for.
+  scratchRepo(path.join(root, 'repoA'), 'alpha.txt', 'alpha-change');
   const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
   await ui.press('F');
   await ui.type('/diff');
@@ -327,6 +331,7 @@ test('/diff outside git says there is no repository', async () => {
   expect(frame).not.toContain('no changes in the working tree');
   expect(frame).not.toContain('vs snapshot');
   expect(frame).not.toContain('diff ·');
+  expect(frame).not.toContain('+alpha-change');
   ui.app.unmount();
 });
 

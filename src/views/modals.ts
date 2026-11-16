@@ -1938,6 +1938,7 @@ export function renderChatModal({
           cursor: diffPanel.cursor,
           loading: diffPanel.loading,
           gitless: diffPanel.gitless,
+          failed: diffPanel.failed,
           wrap: panelWrap,
           bg: m.bg,
           palette: m,
@@ -2548,14 +2549,15 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
 // which file the cursor is on; nothing here reads the tree, the clock or the config.
 //
 // What the chat hands over for `/diff`: the sections of the walk, the files the person
-// folded and the file the cursor is on — both keyed `diffFileKey(root, path)` — and
-// whether a walk is still running.
+// folded and the file the cursor is on — both keyed `diffFileKey(root, path)` — whether
+// a walk is still running, and the two honest nothings (`gitless`, `failed`).
 export interface DiffPanelView {
   sections: DiffSection[];
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   loading?: boolean;
-  gitless?: boolean;
+  gitless: boolean;
+  failed: boolean;
 }
 
 // The files the panel shows, in the order ↑/↓ walk them: root by root, as drawn.
@@ -2574,7 +2576,8 @@ export function diffPanelBody(p: {
   cursor: string | null;
   wrap: number; // the panel's inner width
   loading?: boolean;
-  gitless?: boolean;
+  gitless: boolean;
+  failed: boolean;
   palette?: Record<string, string | undefined>;
 }): { rows: ReactNode[]; cursorRow: number } {
   const m = p.palette ?? {};
@@ -2583,11 +2586,14 @@ export function diffPanelBody(p: {
   let cursorRow = -1;
   const total = p.sections.reduce((n, s) => n + s.files.length, 0);
   if (!total) {
-    // A walk still running says what it is doing; a tree with nothing changed in a
-    // repository says that; a place with no repository at all says so — the three are
-    // different answers to the one empty panel.
+    // A walk still running says what it is doing; a place with no repository at all
+    // says so; a repository git could not read says that — never `no changes in the
+    // working tree`, which is a claim only a clean tree read to the end may make.
     rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false },
-      p.loading ? 'reading the working tree…' : p.gitless ? 'not a git repository' : 'no changes in the working tree'));
+      p.loading ? 'reading the working tree…'
+        : p.failed ? 'git could not read the working tree'
+        : p.gitless ? 'not a git repository'
+        : 'no changes in the working tree'));
     return { rows, cursorRow };
   }
   p.sections.forEach((s, si) => {
@@ -2636,6 +2642,12 @@ export function diffPanelBody(p: {
       });
     });
   });
+  // What one top could not be read is said where what was read draws: a partial tree
+  // shown as the whole one is the dishonesty this line is here for.
+  if (p.failed) {
+    rows.push(h(Text, { key: 'failed', dim: true, wrap: 'truncate', selectable: false },
+      cutStep('git could not read part of the working tree', inner)));
+  }
   return { rows, cursorRow };
 }
 
@@ -2696,7 +2708,8 @@ export function renderDiffPanel(p: {
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   wrap: number; // the panel's inner width
-  gitless?: boolean;
+  gitless: boolean;
+  failed: boolean;
   bg: string | undefined;
   palette?: Record<string, string | undefined>;
   loading?: boolean;

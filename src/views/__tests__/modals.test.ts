@@ -1029,9 +1029,16 @@ async function diffFrame(props: {
   palette?: Record<string, string | undefined>;
   loading?: boolean;
   gitless?: boolean;
+  failed?: boolean;
 }) {
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderDiffPanel, { ...props, wrap: 74, bg: 'black' }), backend);
+  const handle = await render(h(renderDiffPanel, {
+    ...props,
+    gitless: props.gitless ?? false,
+    failed: props.failed ?? false,
+    wrap: 74,
+    bg: 'black',
+  }), backend);
   const frame = backend.lastFrame ?? '';
   return { frame, handle, backend };
 }
@@ -1090,9 +1097,30 @@ test('the diff panel distinguishes no repository from a clean tree, and says wha
   expect(none.frame).not.toContain('no changes in the working tree');
   none.handle.unmount();
 
+  // git that failed is its own answer: not "not a git repository" — a repository was
+  // found — and never "no changes in the working tree", which would be a claim.
+  const failed = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, failed: true });
+  expect(failed.frame).toContain('git could not read the working tree');
+  expect(failed.frame).not.toContain('no changes in the working tree');
+  expect(failed.frame).not.toContain('not a git repository');
+  failed.handle.unmount();
+
   const loading = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
   expect(loading.frame).toContain('reading the working tree…');
   loading.handle.unmount();
+});
+
+// What one top could not read is still said where other sections draw: a walk that
+// silently dropped a broken top would show a partial tree as the whole one.
+test('a walk that read only part of the tree says so under the sections', async () => {
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, failed: true });
+  expect(drawn.frame).toContain('diff · 1 file');
+  expect(drawn.frame).toContain('git could not read part of the working tree');
+  drawn.handle.unmount();
 });
 
 test('a file the panel cannot show says why, in its row and under it when open', async () => {
@@ -1183,7 +1211,7 @@ test('a hunk longer than the chat\'s 80-line cap is drawn whole', async () => {
     files: [{ status: 'M', path: 'big.txt', added: 100, removed: 0, hunks: `@@ -0,0 +1,100 @@\n${added}` }],
   };
   const backend = new TestBackend(80, 130);
-  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: null, wrap: 74, bg: 'black' }), backend);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: null, wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
   const frame = backend.lastFrame ?? '';
   // Every added line is a row of its own: the last one is drawn and nothing is counted
   // away, which a cap on the rows would do.
@@ -1202,7 +1230,7 @@ test('the cursor file\'s row is drawn inverse, and a reader without colour still
     ],
   };
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: diffFileKey('/r', 'b.txt'), wrap: 74, bg: 'black' }), backend);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: diffFileKey('/r', 'b.txt'), wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
   const lines = (backend.lastFrame ?? '').split('\n');
   const y = (t: string) => {
     const at = lines.findIndex((l) => l.includes(t));
@@ -1252,7 +1280,7 @@ const splitSections: DiffSection[] = [{
   root: '/r',
   files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
 }];
-const splitPanel = { sections: splitSections, collapsed: new Set<string>(), cursor: diffFileKey('/r', 'a.txt') };
+const splitPanel = { sections: splitSections, collapsed: new Set<string>(), cursor: diffFileKey('/r', 'a.txt'), gitless: false, failed: false };
 
 test('the panel stands beside the conversation in a wide chat', async () => {
   const wide = new TestBackend(160, 40);
@@ -1322,13 +1350,13 @@ test('the body is one walk: the files ↑/↓ move among, in the drawn order, an
   const b = diffFileKey('/r', 'b.txt');
   expect(diffPanelFileKeys(sections)).toEqual([a, b]);
   // The header is the first row; with the first file folded the second sits under it.
-  const body = diffPanelBody({ sections, collapsed: new Set([a]), cursor: b, wrap: 40 });
+  const body = diffPanelBody({ sections, collapsed: new Set([a]), cursor: b, wrap: 40, gitless: false, failed: false });
   expect(body.cursorRow).toBe(2);
   // Every file is expanded by default: the folded one stops at its row, the other
   // draws its hunks under it.
   expect(body.rows.map((r) => (r as { key: string | null }).key)).toEqual(['s0', 'f0-0', 'f0-1', 'h0-1-0']);
   // A refresh that finds no such file: nothing to scroll to, the rows still drawn.
-  const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40 });
+  const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40, gitless: false, failed: false });
   expect(gone.cursorRow).toBe(-1);
   expect(gone.rows).toHaveLength(4);
 });

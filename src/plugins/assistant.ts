@@ -459,11 +459,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const diffCursorRef = ui.useRef<string | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<string | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
-          // Whether the scope holds no repository at all: the empty panel's answer is
+          // Whether the scope stands outside git entirely: the empty panel's answer is
           // `not a git repository`, not `no changes in the working tree`.
           const [diffGitless, setDiffGitless] = ui.useState(false);
+          // Whether git could not read a top the walk found: the panel says so rather
+          // than draw what it did read as the whole tree.
+          const [diffFailed, setDiffFailed] = ui.useState(false);
           // Whether the walk this open started has landed. Only a panel with nothing on
-          // screen yet says it is capturing: a 1 s refresh of a tree already shown lands
+          // screen yet says a walk is running: a 1 s refresh of a tree already shown lands
           // the same rows, and flipping the line back and forth each second reads as work.
           const diffLoadedRef = ui.useRef(false);
           // Whether the panel is drawn at all this render: `chatRoom` gives it no rows when
@@ -1132,7 +1135,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const seq = ++diffWalked.current;
             if (!diffLoadedRef.current) setDiffLoading(true);
             try {
-              const { sections: raw, gitless } = await workingTreeDiff([diffScope()]);
+              const { sections: raw, gitless, failed } = await workingTreeDiff([diffScope()]);
               if (seq !== diffWalked.current || !diffOpenRef.current) return;
               // A diff is text a token may sit in — a config, a script, a log — so it is
               // redacted before it reaches the state the panel draws from.
@@ -1145,6 +1148,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               diffSectionsRef.current = sections;
               setDiffSections(sections);
               setDiffGitless(gitless);
+              setDiffFailed(failed);
               if (cursor !== at) { diffCursorRef.current = cursor; setDiffCursor(cursor); }
               diffLoadedRef.current = true;
               setDiffLoading(false);
@@ -1179,6 +1183,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             diffSectionsRef.current = [];
             setDiffSections([]);
             setDiffGitless(false);
+            setDiffFailed(false);
             diffCursorRef.current = null;
             setDiffCursor(null);
             // What a walk in flight answers is dropped: the panel was closed under it.
@@ -3224,7 +3229,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
             // and the files the person folded.
-            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless } : null,
+            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless, failed: diffFailed } : null,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),

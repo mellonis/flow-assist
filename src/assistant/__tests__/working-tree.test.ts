@@ -79,11 +79,40 @@ test('without git the walk answers gitless and holds no section', async () => {
   expect(res.sections).toEqual([]);
 });
 
+// A folder that merely HOLDS repositories is not a repository itself. `git status`
+// says "not a git repository" there and so does the panel: the nested tops are
+// sections of their own only where the scope already stands in a repository.
+test('a plain folder holding repositories is gitless, whatever is nested under it', async () => {
+  const root = tmpRoot();
+  const repo = path.join(root, 'repoA');
+  makeRepo(repo, { 'a.txt': 'one\n' });
+  write(repo, 'a.txt', 'two\n');
+  const res = await workingTreeDiff([root]);
+  expect(res.gitless).toBe(true);
+  expect(res.failed).toBe(false);
+  expect(res.sections).toEqual([]);
+});
+
 test('a repository with nothing changed is not gitless and holds no section', async () => {
   const root = tmpRoot();
   makeRepo(root);
   const res = await workingTreeDiff([root]);
   expect(res.gitless).toBe(false);
+  expect(res.failed).toBe(false);
+  expect(res.sections).toEqual([]);
+});
+
+// git is missing, or a top it is asked about is broken — a `.git` that is no
+// repository, `index.lock` left behind, a corrupt index. That is neither a clean tree
+// nor a missing repository: the walk answers `failed`, and the panel says git could
+// not read it rather than claim there is nothing to show.
+test('a top git cannot read answers failed, never a clean tree', async () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, '.git'));
+  write(root, 'a.txt', 'one\n');
+  const res = await workingTreeDiff([root]);
+  expect(res.gitless).toBe(false);
+  expect(res.failed).toBe(true);
   expect(res.sections).toEqual([]);
 });
 
@@ -230,13 +259,13 @@ test('a repo holding a nested repo: the folder is never an added file of the out
 
 test('a nested repository is a section of its own, and its paths are relative to the root', async () => {
   const root = tmpRoot();
+  makeRepo(root, { 'notes.txt': 'kept by the outer repository\n' });
   makeRepo(path.join(root, 'sub', 'app'), { 'x.txt': 'one\n' });
   write(path.join(root, 'sub', 'app'), 'x.txt', 'two\n');
-  write(root, 'notes.txt', 'a plain file outside any repository\n');
 
   const { sections } = await workingTreeDiff([root]);
-  // The plain file outside the repository is drawn by nobody: outside git no
-  // baseline means anything, so only the nested repository's section is here.
+  // The outer repository changed nothing of its own, so only the nested repository's
+  // section is here; its paths are relative to the root the panel was given.
   expect(sections).toHaveLength(1);
   expect(sections[0]!.root).toBe(real(root));
   expect(sections[0]!.files.map((f) => f.path)).toEqual(['sub/app/x.txt']);
@@ -245,6 +274,9 @@ test('a nested repository is a section of its own, and its paths are relative to
 
 test('two repositories under one root come in walk order, each in its own section', async () => {
   const root = tmpRoot();
+  // The root is a repository itself — outside git nothing is walked at all (the rule
+  // the plain-folder test above pins). It changes nothing of its own.
+  makeRepo(root, { 'r.txt': 'one\n' });
   makeRepo(path.join(root, 'b-repo'), { 'b.txt': 'one\n' });
   makeRepo(path.join(root, 'a-repo'), { 'a.txt': 'one\n' });
   write(path.join(root, 'a-repo'), 'a.txt', 'two\n');
@@ -271,13 +303,20 @@ test('a root inside a repository belongs to that repository, and shows only its 
 });
 
 test('a root that is not there yields nothing and never throws', async () => {
-  expect((await workingTreeDiff([path.join(tmpRoot(), 'missing')])).sections).toEqual([]);
+  const res = await workingTreeDiff([path.join(tmpRoot(), 'missing')]);
+  expect(res.sections).toEqual([]);
+  // A directory that is not there is no repository either: nothing was read and
+  // nothing failed.
+  expect(res.gitless).toBe(true);
+  expect(res.failed).toBe(false);
 });
 
-// ── the cap, the store's integrity, and yielding ────────────────────────────
+// ── yielding ────────────────────────────────────────────────────────────────
 
 test('a long walk yields to the event loop', async () => {
   const root = tmpRoot();
+  // Outside git nothing is walked, so the work under test needs a repository to walk.
+  makeRepo(root, { 'seed.txt': 'seed\n' });
   const names = Array.from({ length: 250 }, (_, i) => `f${String(i).padStart(3, '0')}.txt`);
   for (const name of names) write(root, name, 'one\n');
 

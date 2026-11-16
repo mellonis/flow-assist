@@ -763,9 +763,12 @@ from one repository to the next as you `cd`; the folders beside it along `shell.
 never in it, and a repository wider than `shell.roots` still shows whole: the fence is
 where the assistant may read and write, and this is your own screen. Outside git there is
 no "before" that would mean anything, so the panel says
-`not a git repository` and draws nothing. A repository nested under it is a section of its
+`not a git repository` and draws nothing — and a folder that merely *holds* repositories
+is outside git too: `git status` refuses there, and so does the panel. A repository nested
+**inside** the repository you are in is a section of its
 own, drawn after the section of the repository it stands under; sibling sections come in
-walk order. `.gitignore` decides what git shows, a file over 2 MB and a binary file are
+walk order. A repository git cannot read is named as that — never shown as a clean tree.
+`.gitignore` decides what git shows, a file over 2 MB and a binary file are
 named and not drawn. It refreshes while the panel is up, and only then.
 
 It is a view and nothing more: nothing on it reaches the model, the session or the

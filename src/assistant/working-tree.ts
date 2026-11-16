@@ -9,14 +9,16 @@
 // and imports no React. Every path it reads from a root is held to that root by REAL
 // path, so a link in a clone cannot carry the panel out of the person's work.
 //
-// One baseline only: a git top — the root itself, a repository above it, or one nested
-// under it — is diffed against HEAD; a nested repository beats anything else for its
-// own paths. Outside git there is no baseline that would mean anything, so a root no
-// git top claims contributes nothing and the walk says `gitless`: the panel's
-// `not a git repository` is that answer, never an invented comparison.
+// One baseline only: a git top — the scope itself, a repository above it, or one
+// nested under it — is diffed against HEAD; a nested repository beats anything else
+// for its own paths. Outside git there is no baseline that would mean anything: the
+// scope must stand in a repository for anything to be walked at all, so a plain folder
+// that merely holds repositories answers `gitless` — `git status` refuses there, and
+// so does the panel. A scope inside a repository gets a section per top it holds.
 //
 // A git that is missing, or that fails on one top, never throws out of here: that top
-// contributes no section.
+// contributes no section and the walk answers `failed`, so a tree that could not be
+// read is never shown as a clean one.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -39,12 +41,15 @@ export interface DiffSection {
   files: FileDiff[];
 }
 
-// What a walk answers: the sections it drew — one per git top, HEAD the baseline — and
-// whether no root holds a repository at all. An empty `sections` is a clean tree when
-// `gitless` is false and "not a git repository" when it is true.
+// What a walk answers: the sections it drew — one per git top, HEAD the baseline —
+// and the two honest nothings. `gitless`: the scope is outside git entirely, so the
+// panel says `not a git repository`; `failed`: a top was found and git could not read
+// it, so the panel says that — neither ever reads as `no changes in the working tree`
+// unless a repository was read and was clean.
 export interface WorkingTreeDiff {
   sections: DiffSection[];
   gitless: boolean;
+  failed: boolean;
 }
 
 // What the panel keys its cursor and its opened blocks by. A bare path repeats across
@@ -341,20 +346,26 @@ async function headSection(root: string, top: string, tops: string[]): Promise<D
   return { root, files };
 }
 
-// What a root is made of: its git tops. The walk is a readdir tree, sorted so the
-// section order is the same on every look; a link is never followed, `.git` and
-// `node_modules` are never entered, a nested repository is a top of its own and is not
-// looked into, and the search stops `MAX_TOP_DEPTH` directories below the root. A
-// repository at or above the root claims every path under it, so the walk only adds
-// tops under it. The walk yields the loop every `WALK_YIELD_EVERY` entries, so a
-// refresh a second apart never holds a frame.
+// What a root is made of: its git tops. The scope must itself stand in a repository —
+// `git status` refuses outside one, and so does the walk — so a top above the root is
+// what everything hangs off. The walk is a readdir tree, sorted so the section order is
+// the same on every look; a link is never followed, `.git` and `node_modules` are never
+// entered, a nested repository is a top of its own and is not looked into, and the
+// search stops `MAX_TOP_DEPTH` directories below the root. A repository at or above the
+// root claims every path under it, so the walk only adds tops under it. The walk yields
+// the loop every `WALK_YIELD_EVERY` entries, so a refresh a second apart never holds a
+// frame.
 const WALK_YIELD_EVERY = 100;
 const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 async function scanRoot(root: string): Promise<string[]> {
   const tops: string[] = [];
   const fromAbove = gitRootOf(root);
-  if (fromAbove) tops.push(fromAbove);
+  // Outside git there is nothing to walk: a repository nested under a plain folder is
+  // not answered for — its differences from its own HEAD are not this scope's working
+  // tree, and `git status` in the folder says "not a git repository".
+  if (!fromAbove) return tops;
+  tops.push(fromAbove);
   // `.git` as a directory is a repository and as a file a worktree; either way the
   // entry's presence makes a top. It is asked with `stat`, so a link is read as what it
   // leads to: one that leads nowhere names no repository. An entry that cannot be
@@ -383,11 +394,13 @@ async function scanRoot(root: string): Promise<string[]> {
 
 // Every change under `roots`, a root at a time in the order given: its git tops in walk
 // order. Sections are never merged across roots — two checkouts of one repository are
-// two answers. `gitless` says no root holds a repository at all, which is what an empty
-// `sections` then means: `not a git repository`, never a clean tree.
+// two answers. `gitless` says the scope is outside git, which is what an empty
+// `sections` then means: `not a git repository`, never a clean tree; `failed` says a
+// top was found and git could not read it, which is never a clean tree either.
 export async function workingTreeDiff(roots: string[]): Promise<WorkingTreeDiff> {
   const sections: DiffSection[] = [];
   let gitless = true;
+  let failed = false;
   for (const given of roots) {
     try {
       const root = realOf(given);
@@ -399,10 +412,12 @@ export async function workingTreeDiff(roots: string[]): Promise<WorkingTreeDiff>
           if (section) sections.push(section);
         } catch {
           // git is not installed, or it failed on this top: the top contributes no
-          // section and the walk goes on.
+          // section and the walk goes on — saying so, rather than drawing the rest as
+          // the whole tree.
+          failed = true;
         }
       }
     } catch { /* a root that cannot be read contributes nothing */ }
   }
-  return { sections, gitless };
+  return { sections, gitless, failed };
 }
