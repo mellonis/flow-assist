@@ -169,9 +169,9 @@ test('a session with no model runs ai.model, and the request carries no model ke
 
 test('a model the catalogue does not name still runs, on the window ai.contextWindow stands for', async () => {
   const rig = await conversationRig(model, { ai: { model: 'default-model', contextWindow: 90000 } });
-  rig.conv.model = 'gone-model';
+  rig.conv.model = 'unlisted-model';
   await rig.conv.send('hello');
-  expect(model.requests.at(-1)?.model).toBe('gone-model');
+  expect(model.requests.at(-1)?.model).toBe('unlisted-model');
   expect(rig.conv.contextWindow()).toBe(90000);
 });
 ```
@@ -266,7 +266,9 @@ case 'model': {
 
   `baseModel` and `effectiveModel()` are already there. The note is the row's own label:
   `model: big-model` for an id, `model: deep → big-model` for a role, `model: default
-  (default-model)` for the reset.
+  (default-model)` for the reset. The bare branch's comment describes what the code does
+  now ("said where things stand") — the plan's `Task 3 …` line is a marker for the next
+  task and must not be written into the code.
 
 - [ ] **Step 5: The end-to-end tests** in `src/__tests__/model-switch.e2e.test.ts`, on the
   scripted model and `bootApp`'s `ai`: typing `/model deep` says `model: deep → big-model`
@@ -300,9 +302,11 @@ case 'model': {
 - [ ] **Step 2: Run to see them fail.**
 
 - [ ] **Step 3: Implement.** The bare `/model` branch calls
-  `openPanel({ title: 'Model', rows: () => modelRows(ai).map((r) => ({ id: r.name, text: r.label, detail: r.window ? short(r.window) : undefined, tone: r.model === conv.effectiveModel() ? 'ok' : undefined })), keys: [{ key: 'return', label: 'use', run: onPick }] })`
-  — `short` is `src/assistant/context-meter.ts`'s, `onPick` the same set path `/model <name>`
-  takes (share it as one local function the case's branch calls, not a copy). The frame's
+  `openPanel({ title: 'Model', rows: () => modelRows(ai).map((r) => ({ id: r.name, text: r.label, detail: r.window ? short(r.window) : undefined, tone: r.model === (conv.model ?? null) ? 'ok' : undefined })), keys: [{ key: 'return', label: 'use', run: onPick }] })`
+  — the marked row is the one the person's choice names (`default` when the session runs
+  `ai.model`), `short` is `src/assistant/context-meter.ts`'s, `onPick` the same set path
+  `/model <name>` takes (share it as one local function the case's branch calls, not a
+  copy). The frame's
   title: `renderChatModal` gains `model` and every branch of `borderTitle` becomes
   `` `${ASSISTANT_MARK} Flow Assist${model ? ` (${model})` : ''}` `` with its ` · …` tail
   after it; the chat passes `conv.effectiveModel()`.
