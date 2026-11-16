@@ -62,10 +62,38 @@ test('/diff opens the split panel on the tree\'s changes, folds a file and close
   await ui.press('return');
   expect(ui.backend.lastFrame).not.toContain('+changed');
   expect(ui.backend.lastFrame).toContain('diff · 1 files');
-  // Esc closes it and the chat is one column again; the field is left as it was.
+  // The command toggles it too: `/diff` on an open panel closes it, as Esc does.
+  await ui.type('/diff');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  // Reopened, Esc is the other way out and the panel is gone again.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 files'));
   await ui.press('escape');
   expect(ui.backend.lastFrame).not.toContain('diff ·');
   expect(ui.backend.lastFrame).toContain('⏎ send');
+  ui.app.unmount();
+});
+
+test('/clear and the sessions key each close the panel with the conversation', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  // A session of its own closes it with the conversation it showed.
+  await openDiff(ui);
+  await ui.type('/clear');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  // The picker takes the conversation's place, and the panel with it.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 files'));
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
   ui.app.unmount();
 });
 
@@ -93,16 +121,23 @@ test('a y/n arriving while the panel is open wins the keys and does not close it
   // The write reaches the panel with no key of its own: the walk after the command's
   // round finds the file it appended to and the one it added.
   await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'));
-  // The panel's keys act again: ⏎ folds the file the cursor is on. The other file stays
-  // open, and a refresh of its own keeps the fold where the person put it.
+  // The panel's keys act again: ↓ moves to the second file and ⏎ folds it, leaving the
+  // first open — and a refresh of its own keeps the fold where the person put it.
+  await ui.press('down');
   await ui.press('return');
-  expect(ui.backend.lastFrame).not.toContain('+changed');
-  expect(ui.backend.lastFrame).toContain('+new');
+  expect(ui.backend.lastFrame).not.toContain('+new');
+  expect(ui.backend.lastFrame).toContain('+changed');
   await wait(1200);
   await settle(4);
   expect(ui.backend.lastFrame).toContain('diff · 2 files');
+  expect(ui.backend.lastFrame).not.toContain('+new');
+  expect(ui.backend.lastFrame).toContain('+changed');
+  // ↑ walks back: folding the first too leaves no hunk of either file.
+  await ui.press('up');
+  await ui.press('return');
   expect(ui.backend.lastFrame).not.toContain('+changed');
-  expect(ui.backend.lastFrame).toContain('+new');
+  expect(ui.backend.lastFrame).not.toContain('+new');
+  expect(ui.backend.lastFrame).toContain('diff · 2 files');
   // Nothing of the panel reaches the model: it is a display, not a message.
   for (const req of model.requests) expect(JSON.stringify(req.messages)).not.toContain('diff ·');
   await ui.press('escape');

@@ -2074,9 +2074,12 @@ export function renderChatModal({
               : bangLevel && shellCwd
               ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
               // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
-              // names them instead of the history it does not walk here.
+              // names them instead of the history it does not walk here. With the field
+              // offering `⏎ continue` after a limit, ⏎ is the field's and is not a fold.
               : diffShown && !input
-              ? `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`
+              ? (continueOffer
+                ? `${CAP.upDown} file · ${CAP.esc} close`
+                : `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`)
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },

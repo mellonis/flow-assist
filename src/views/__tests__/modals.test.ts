@@ -1173,7 +1173,7 @@ const splitPanel = { sections: splitSections, collapsed: new Set<string>(), curs
 
 test('the panel stands beside the conversation in a wide chat', async () => {
   const wide = new TestBackend(160, 40);
-  const w = await render(h(renderChatModal, { ...baseChat, width: 160, height: 40, messages: [{ role: 'user', content: 'hello' }], diffPanel: splitPanel }), wide);
+  const w = await render(h(renderChatModal, { ...baseChat, width: 160, height: 40, messages: [{ role: 'user', content: 'hello' }], diffPanel: splitPanel, contextBadge: 'ctx 12%' }), wide);
   const lines = (wide.lastFrame ?? '').split('\n');
   const row = (t: string) => {
     const y = lines.findIndex((l) => l.includes(t));
@@ -1185,8 +1185,14 @@ test('the panel stands beside the conversation in a wide chat', async () => {
   expect(header.x).toBeGreaterThan(60);
   expect(row('› hello').x).toBeLessThan(40);
   expect(lines.filter((l) => l.includes('+two'))).toHaveLength(1);
-  // The field keeps its place below both halves.
+  // The field keeps its place below both halves: the strip runs full width under them —
+  // its hint crosses the split's width — and its rows start under the panel's bottom.
   expect(row('⏎ send').y).toBeGreaterThan(header.y);
+  const bottom = lines.findIndex((l, i) => i >= header.y && l.includes('╰'));
+  expect(bottom).toBeGreaterThan(header.y);
+  expect(row('⏎ send').y).toBeGreaterThan(bottom);
+  const hint = row('ctx');
+  expect(hint.x).toBeGreaterThan(header.x);
   w.unmount();
 });
 
@@ -1199,8 +1205,11 @@ test('the panel is the column\'s last block under the field in a narrow chat', a
   const nheader = nlines.findIndex((l) => l.includes('diff · 1 files'));
   expect(nheader).toBeGreaterThan(nlines.findIndex((l) => l.includes('⏎ send')));
   expect(nlines[nheader]!).not.toContain('›');
-  // The panel's frame closes under the last of its rows: it is the chat's own bottom.
-  expect(nlines[nheader - 1]).toContain('╭');
+  // The panel is the column's last block: its bottom border closes the frame, and nothing
+  // of the chat — the field's row, the person's message, its own header — is drawn under it.
+  const bottom = nlines.findIndex((l, i) => i >= nheader && l.includes('╰'));
+  expect(bottom).toBeGreaterThan(nheader);
+  expect(nlines.slice(bottom + 1).every((l) => !/⏎ send|›|diff ·/.test(l))).toBe(true);
   n.unmount();
 });
 

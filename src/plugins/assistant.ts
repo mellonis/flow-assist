@@ -1105,7 +1105,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The roots the working tree is read from: the shell's own, or — with none
           // configured — where the shell starts, the `shellCwd` precedent.
           const diffRoots = () => {
-            const roots = shellRoots(host.config as never);
+            const roots = shellRoots(host.config as Parameters<typeof shellRoots>[0]);
             return roots.length ? roots : [startDir()];
           };
           // One walk of the tree. A walk that is still running takes no second one: the
@@ -1157,6 +1157,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffOpenState(false);
             setDiffLoading(false);
             if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; }
+            // The tree a closed panel showed is not the tree the next one opens on (a session
+            // switch changes the roots): it goes with the panel, and the walk the next open
+            // starts says `capturing baseline…` until it lands. The folds stay — a file the
+            // person folded stays folded where they put it (ruling 27).
+            diffSectionsRef.current = [];
+            setDiffSections([]);
+            diffCursorRef.current = null;
+            setDiffCursor(null);
             // What a walk in flight answers is dropped: the panel was closed under it.
             diffWalked.current++;
             host.notify();
@@ -1194,12 +1202,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // A tree that changes while the panel is open is read again: once a second, so a
           // write lands in the panel as it happens, and after every round of a turn.
+          // A panel nobody can see costs no git call: collapsed in panel mode or closed in
+          // window/full, the chat is not drawn and the interval rests. The 300 ms refresh a
+          // turn's events ask for still keeps it warm, and opening or expanding the chat
+          // starts the interval again.
           ui.useEffect(() => {
-            if (!diffOpen) return;
+            if (!diffOpen || !open) return;
             const t = setInterval(() => refreshDiff(), 1000);
             (t as unknown as { unref?: () => void }).unref?.();
             return () => clearInterval(t);
-          }, [diffOpen]);
+          }, [diffOpen, open]);
+          // The debounce is not an effect's: it must not fire into a component that is gone.
+          ui.useEffect(() => () => { if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; } }, []);
           viewFx.current = {
             // A subagent below this conversation parked a y/n or had it answered: what is
             // offered changed, and nothing in this conversation's own snapshot says so.
@@ -2785,12 +2799,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // Esc while something runs also stops it, on the first press (the rule the
               // completion list's Esc follows above): the panel is a display and the stop
               // is the person's, so the key goes on to the stop below and the panel stays.
+              // ↑/↓ and ⏎ are consumed while the panel is drawn even when it has no file to
+              // move to: the panel owns them, and falling through would walk the history
+              // under a panel that says `↑↓ file`.
               if (diffOpenRef.current) {
                 if (key.name === 'escape' && !conv.canStop()) { closeDiff(); return true; }
                 if (diffShownRef.current && fieldEmpty() && !key.ctrl && !key.meta) {
                   if (key.name === 'up') { moveDiffCursor(-1); return true; }
                   if (key.name === 'down') { moveDiffCursor(1); return true; }
-                  if (key.name === 'return') { toggleDiffFile(); return true; }
+                  // The offer is the host's recovery from a limit and outranks a fold: the
+                  // field's own row says `⏎ continue`, so ⏎ is the field's then.
+                  if (key.name === 'return' && !conv.continueOffer) { toggleDiffFile(); return true; }
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
