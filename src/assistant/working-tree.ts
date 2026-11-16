@@ -300,7 +300,17 @@ async function headSection(root: string, top: string, tops: string[]): Promise<D
     .filter(({ abs }) => !isDirectory(abs));
   if (!changed.length) return null;
   const head = await hasHead(top);
-  const segments = head ? splitDiff((await runGit(top, GIT_DIFF_ARGS)).toString('utf8')) : new Map<string, string>();
+  // The batch is scoped to the root's part of the tree — a root deep inside a large
+  // repository would otherwise diff that entire repository on every refresh, and a top
+  // nested under the root is wholly the root's part — and it is what makes a
+  // modification cheap: one git call for the tree instead of one per file. Its failure
+  // is not the section's either: `oneFile` diffs a file with no segment on its own, so
+  // one failed batch costs per-file calls, never the section's hunks.
+  const scope = within(root, top) ? path.relative(top, root) || '.' : '.';
+  let segments = new Map<string, string>();
+  if (head) {
+    try { segments = splitDiff((await runGit(top, [...GIT_DIFF_ARGS, scope])).toString('utf8')); } catch { /* per file, below */ }
+  }
   const files: FileDiff[] = [];
   for (const { entry, abs } of changed) {
     const status = statusOf(entry.code);
@@ -320,29 +330,37 @@ interface RootScan {
 // a link is never followed, `.git` and `node_modules` are never entered, a nested
 // repository is a top of its own and is not looked into, and the search stops
 // `MAX_TOP_DEPTH` directories below the root. A repository at or above the root
-// claims every path under it, so no file is collected then.
-function scanRoot(root: string): RootScan {
+// claims every path under it, so no file is collected then. The walk yields the loop
+// every `SNAPSHOT_YIELD_EVERY` entries, so a refresh a second apart never holds a frame.
+async function scanRoot(root: string): Promise<RootScan> {
   const tops: string[] = [];
   const files: string[] = [];
   const fromAbove = gitRootOf(root);
   if (fromAbove) tops.push(fromAbove);
   const claimed = fromAbove !== null;
-  const walk = (dir: string, depth: number): void => {
+  // `.git` as a directory is a repository and as a file a worktree; either way the
+  // entry's presence makes a top, and an entry that cannot be looked at is none.
+  const isTop = async (abs: string): Promise<boolean> => {
+    try { await fs.promises.lstat(path.join(abs, '.git')); return true; } catch { return false; }
+  };
+  let examined = 0;
+  const walk = async (dir: string, depth: number): Promise<void> => {
     let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
+      if (++examined % SNAPSHOT_YIELD_EVERY === 0) await yieldToLoop();
       if (SKIPPED.has(e.name)) continue;
       const abs = path.join(dir, e.name);
       if (e.isDirectory()) {
-        if (fs.existsSync(path.join(abs, '.git'))) { tops.push(abs); continue; }
-        if (depth < MAX_TOP_DEPTH) walk(abs, depth + 1);
+        if (await isTop(abs)) { tops.push(abs); continue; }
+        if (depth < MAX_TOP_DEPTH) await walk(abs, depth + 1);
         continue;
       }
       if (!claimed) files.push(path.relative(root, abs).split(path.sep).join('/'));
     }
   };
-  walk(root, 0);
+  await walk(root, 0);
   return { tops, files };
 }
 
@@ -437,9 +455,10 @@ async function blobText(dir: string, hash: string): Promise<TextRead> {
 // One root's baseline: every regular file the walk meets, hashed, up to
 // `snapshotMaxFiles`. A link is never followed — its target may be somebody else's
 // file — and a file over `MAX_FILE_BYTES` is left out of the index: the diff names it
-// without reading it and cannot show it. A capture that stopped at the cap records
-// `truncated`, and the diff then draws no addition for a path the index does not
-// name: the cap cannot tell a new file from one it left out.
+// without reading it and cannot show it. A capture that stopped at the cap, or could
+// not read a directory, records `truncated`, and the diff then draws no addition for a
+// path the index does not name: an incomplete baseline cannot tell a new file from one
+// it left out.
 async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex | null> {
   const files: Record<string, string> = Object.create(null);
   const cap = snapshotMaxFiles;
@@ -449,7 +468,15 @@ async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex
   const walk = async (d: string): Promise<void> => {
     if (count >= cap) return;
     let entries: fs.Dirent[];
-    try { entries = await fs.promises.readdir(d, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(d, { withFileTypes: true }); } catch (e) {
+      // A directory that is there and could not be read holds files the baseline never
+      // saw, and an index that did not record them would draw them as additions that
+      // were always there. One that vanished between two listings — `ENOENT`, or a path
+      // that is no longer a directory — lost the baseline nothing.
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') truncated = true;
+      return;
+    }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
       // An entry reached with the cap full is a file the baseline will not hold.
@@ -467,9 +494,25 @@ async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex
       try { bytes = await fs.promises.readFile(abs); } catch { continue; }
       const hash = hex(bytes);
       const blob = path.join(dir, hash);
+      // A blob is published whole: its bytes go to a temp name in the store's own
+      // directory, and only a complete file ever appears under the hash. A reader that
+      // indexed a half-written blob would keep that hash for good.
+      const tmp = path.join(dir, `.blob-${process.pid}-${crypto.randomUUID()}.tmp`);
       try {
-        if (!fs.existsSync(blob)) await fs.promises.writeFile(blob, bytes, { mode: 0o600 });
-      } catch { continue; }
+        await fs.promises.writeFile(tmp, bytes, { mode: 0o600, flag: 'wx' });
+        try {
+          await fs.promises.link(tmp, blob);
+        } catch (e) {
+          const code = (e as NodeJS.ErrnoException).code;
+          // A store on a filesystem without hard links: a rename publishes the complete
+          // file just as well, and the bytes behind a hash are always the same bytes.
+          if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'ENOTSUP') throw e;
+          if (code !== 'EEXIST') await fs.promises.rename(tmp, blob);
+        }
+      } catch { continue; } finally {
+        // The temp name never outlives the attempt, whatever it ended in.
+        await fs.promises.unlink(tmp).catch(() => {});
+      }
       files[path.relative(root, abs).split(path.sep).join('/')] = hash;
       count++;
     }
@@ -567,10 +610,13 @@ async function snapshotSection(root: string, scan: RootScan): Promise<DiffSectio
   // A top at or above the root claims every path under it, so this section can never
   // hold one; capturing would only hash a repository for nobody.
   if (scan.tops.some((t) => within(root, t))) return null;
-  if (!(await ensureSnapshot(root))) return null;
   const dir = snapshotDir(root);
-  const index = readIndex(dir, root);
-  if (!index) return null;
+  let index = readIndex(dir, root);
+  if (!index) {
+    if (!(await ensureSnapshot(root))) return null;
+    index = readIndex(dir, root);
+    if (!index) return null;
+  }
   const own = (rel: string): boolean => {
     const abs = path.resolve(root, rel);
     return scan.tops.some((t) => within(abs, t));
@@ -602,7 +648,7 @@ async function snapshotSection(root: string, scan: RootScan): Promise<DiffSectio
 async function rootSections(given: string): Promise<DiffSection[]> {
   const out: DiffSection[] = [];
   const root = realOf(given);
-  const scan = scanRoot(root);
+  const scan = await scanRoot(root);
   for (const top of scan.tops) {
     try {
       const section = await headSection(root, top, scan.tops);

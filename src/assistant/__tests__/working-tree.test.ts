@@ -437,6 +437,28 @@ test('a capture that stops at the cap never draws what it left out as an additio
   }
 });
 
+test('a directory the capture could not read leaves the baseline incomplete', async () => {
+  const root = tmpRoot();
+  write(root, 'kept.txt', 'one\n');
+  write(root, 'locked/inside.txt', 'there before the baseline\n');
+  const locked = path.join(root, 'locked');
+  fs.chmodSync(locked, 0o000);
+  try {
+    let blocked = true;
+    try { fs.readdirSync(locked); blocked = false; } catch { /* unreadable here */ }
+    // A process that reads through the mode (the superuser) cannot meet the rule.
+    if (!blocked) return;
+    await ensureSnapshot(root);
+  } finally {
+    fs.chmodSync(locked, 0o700);
+  }
+  // The capture says what it could not see.
+  expect(JSON.parse(fs.readFileSync(path.join(storeDir(root), 'index.json'), 'utf8')).truncated).toBe(true);
+  // Readable again, the directory's files are not drawn as additions that were there
+  // all along: a baseline that could not see them vouches for none it does not index.
+  expect(await workingTreeDiff([root])).toEqual([]);
+});
+
 test('an index that says its capture was truncated draws no addition it cannot vouch for', async () => {
   const root = tmpRoot();
   write(root, 'kept.txt', 'one\n');
