@@ -4127,13 +4127,12 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   id roles map to, so two rows can be marked; a pinned id no role names and the
   catalogue no longer lists has no row at all. The cursor starts on the reset; ⏎ takes
   the row under it and closes the panel, Esc closes it and changes nothing. A name the
-  config does not know is refused
-  (`no model or role "nope" here (/model lists them)`), the line stays as typed for a
-  fix and nothing changes; a switch is one `note` row
+  config does not know is refused (`no model or role "nope" here (/model lists them)`),
+  the line stays as typed for a fix and nothing changes; a switch is one `note` row
   (`model: deep → big-model`), saved with the session (a switch made before anything is
   said goes in with the first save), and the next turn's request carries it — the turn in
-  flight sent its own already. The value completes in the field from the
-  same rows, labelled as the panel draws them. While a command panel is up the frame's
+  flight sent its own already. The value completes in the field from the same rows,
+  labelled as the panel draws them. While a command panel is up the frame's
   heading is the panel's (`ƒ Flow Assist · Model`), with no model.
 - A **paste** is one key, `{ name: 'paste', text }` (flowtty's bracketed paste): it
   goes in at the caret with its line breaks kept. It is never decoded into keys, so
