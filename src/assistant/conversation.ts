@@ -1274,7 +1274,9 @@ export class Conversation {
     // waited landed as rows just ahead of it; with no message, a follow-up on the inbox.
     const afterAnswer = (ok: boolean): void => {
       const next = child.takeQueued();
-      if (next !== null) child.resume?.(next, { readResult: child.landInboxAhead() });
+      // A message that sat in its queue reaches it framed as written while the turn that just
+      // ended ran (`frameSteered`, previous-turn variant); rows and journal keep the text.
+      if (next !== null) child.resume?.(next, { readResult: child.landInboxAhead(), options: { steered: true } });
       else if (!child.takeInbox(ok ? 'turn' : 'rows', true)) child.rest();
     };
     // The answer of a turn goes to `home` as this child's result: the first answer, and a
