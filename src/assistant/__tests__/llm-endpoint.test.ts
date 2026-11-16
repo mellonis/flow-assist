@@ -49,10 +49,10 @@ test('answerCeiling takes an ai that is not an object as an empty one', () => {
   expect(answerCeiling(undefined)).toBe(32_000);
 });
 
-test('answerCeiling counts a negative inputTokens as room, under the cap', () => {
-  // Nothing clamps `inputTokens`: a negative one only widens the room (and the cap or the
-  // floor still holds). A conversation never reports one; the resolved number is pinned.
+test('answerCeiling reads a negative inputTokens as no measurement', () => {
+  // A negative figure means "nothing measured", as an omitted one does: the room is the
+  // whole window's, never more than the window could hold.
   const ai = { models: { m: { contextWindow: 20_000 } } };
   expect(answerCeiling(ai, { model: 'm' })).toBe(18_776);
-  expect(answerCeiling(ai, { model: 'm', inputTokens: -10_000 })).toBe(28_776);
+  expect(answerCeiling(ai, { model: 'm', inputTokens: -10_000 })).toBe(18_776);
 });

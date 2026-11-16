@@ -69,7 +69,7 @@ export function answerCeiling(ai: unknown, opts: { model?: string; inputTokens?:
   const models = (a.models && typeof a.models === 'object' ? a.models : {}) as Record<string, { maxTokens?: unknown } | undefined>;
   const own = positive(model ? models[model]?.maxTokens : undefined);
   if (own) return own;
-  const room = Math.floor(modelWindow(a, model) * 0.99) - (opts.inputTokens ?? 0) - ANSWER_CEILING_MIN;
+  const room = Math.floor(modelWindow(a, model) * 0.99) - Math.max(0, opts.inputTokens ?? 0) - ANSWER_CEILING_MIN;
   return Math.min(ANSWER_CEILING_MAX, Math.max(ANSWER_CEILING_MIN, room));
 }
 
