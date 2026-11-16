@@ -748,8 +748,9 @@ field is empty.
 
 Each file is a row of its own with its status and how much it changed (`▾ M src/app.ts ·
 +12 −3`) and, under it, the whole hunk with the file's own line numbers; nothing is
-folded to begin with. `↑`/`↓` choose a file — the panel scrolls it into view — `⏎` folds
-one and opens it again, and a fold survives a refresh: a file you closed stays closed
+folded to begin with. `↑`/`↓` choose a file — the panel scrolls it into view — and a
+click on a file, or `⏎`, folds it and opens it again: click anywhere on its block, its
+row or one of its hunks. A fold survives a refresh: a file you closed stays closed
 while the tree changes around it. `Esc` closes the panel, and so does `/diff` again; a
 turn or a command that is still running takes the first `Esc` for its stop, and the panel
 stays. A y/n or a question is answered first — the panel waits under it and comes back.

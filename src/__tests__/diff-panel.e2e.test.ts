@@ -46,6 +46,21 @@ const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
 };
+// One commit, then TWO files changed since it: two blocks to fold independently.
+const scratchPair = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-pair-')));
+  git(root, 'init', '-q');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\n');
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\ntwo\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'init');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\nalpha-change\n');
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\nbeta-change\n');
+  return root;
+};
 
 test('/diff opens the split panel on the tree\'s changes, folds a file and closes', async () => {
   const root = scratchTree();
@@ -76,6 +91,46 @@ test('/diff opens the split panel on the tree\'s changes, folds a file and close
   expect(ui.backend.lastFrame).toContain('⏎ send');
   ui.app.unmount();
 });
+
+// A click folds the file under it — the affordance a person reaches for when a hint
+// row is not enough — as a click folds a block in the conversation. The drag that
+// starts on a hunk is flowtty's selection and never this: only press+release on one
+// cell is a click.
+test('a click on a file folds it and unfolds it, and the cursor follows the click', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'));
+  // The hint row names the click beside the key: a fold nobody guesses is a fold
+  // nobody uses.
+  expect(ui.backend.lastFrame).toContain('click');
+  const clickRow = async (name: string) => {
+    const lines = ui.backend.lastFrame.split('\n');
+    const y = lines.findIndex((l) => l.includes(name));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const x = lines[y]!.indexOf(name);
+    ui.backend.mouse('down', x, y);
+    ui.backend.mouse('up', x, y);
+    await settle(6);
+  };
+  // A click on the SECOND file folds it which ⏎ would not: it folds the cursor's file,
+  // and the cursor follows the click.
+  await clickRow('b.txt');
+  expect(ui.backend.lastFrame).not.toContain('+beta-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  // ⏎ now works on the file the click left the cursor on: it unfolds b, not a.
+  await ui.press('return');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  // And a click on a hunk row is the block's too: anywhere on the file, one fold.
+  await clickRow('+alpha-change');
+  expect(ui.backend.lastFrame).not.toContain('+alpha-change');
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  ui.app.unmount();
+}, 15_000);
 
 test('/clear and the sessions key each close the panel with the conversation', async () => {
   const root = scratchTree();

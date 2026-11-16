@@ -9,7 +9,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   conversation on the left, every file you have changed on the right, the field across the
   bottom — and stacks the panel under the field where the terminal is narrow. Each file
   shows its status, its `+N −M` and its whole diff with the file's own line numbers;
-  `↑`/`↓` choose one, `⏎` folds it, and a fold outlives a refresh while the tree changes
+  `↑`/`↓` choose one, a click or `⏎` folds it, and a fold outlives a refresh while the tree changes
   under it (a write by the turn, a command you ran, your own editor). It reads the
   repository the shell is in — its whole working tree, wherever in it the shell stands —
   and follows you as you `cd`, never the folders beside it along `shell.roots`. Each file

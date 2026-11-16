@@ -1215,15 +1215,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffCursor(next);
             host.notify();
           };
-          // ⏎ folds the file the cursor is on, or opens it again.
-          const toggleDiffFile = () => {
-            const at = diffCursorRef.current;
-            if (!at) return;
+          // A click on a file's block folds it — the fold a person reaches for without
+          // knowing a key — and puts the cursor on that file, so ↑/↓ walk on from where
+          // they are looking.
+          const foldDiffFile = (key: string) => {
+            diffCursorRef.current = key;
+            setDiffCursor(key);
             const next = new Set(diffCollapsedRef.current);
-            if (next.has(at)) next.delete(at); else next.add(at);
+            if (next.has(key)) next.delete(key); else next.add(key);
             diffCollapsedRef.current = next;
             setDiffCollapsed(next);
             host.notify();
+          };
+          // ⏎ folds the file the cursor is on, or opens it again.
+          const toggleDiffFile = () => {
+            const at = diffCursorRef.current;
+            if (at) foldDiffFile(at);
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
           // plugin has the field's strip and nothing left over, and a terminal too small
@@ -3229,7 +3236,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
             // and the files the person folded.
-            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless, failed: diffFailed } : null,
+            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless, failed: diffFailed, onFold: foldDiffFile } : null,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),
