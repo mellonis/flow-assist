@@ -106,6 +106,7 @@ export function snapshotSession(c: Conversation): Session {
     images: [...c.images.values()], imageSeq: c.imageSeq,
     recall: saveRecallState(c.recall),
     ...(c.autoMode !== 'ask' ? { autoMode: c.autoMode } : {}), // `ask` is the absence of the field
+    ...(c.model ? { model: c.model } : {}), // the session runs it; absent — ai.model
     closed: false, // written means in use — a resumed cleared session is open again
     project: c.sessionProject,
     ...(c.answeredAt ? { answeredAt: c.answeredAt } : {}),
@@ -348,6 +349,7 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
   c.resetImages(s.images ?? [], s.imageSeq ?? 0);
   c.recall = createRecallState(s.recall); // the ids are hashes: they still name the same items
   c.setAutoMode(s.autoMode ?? 'ask', false); // the mode the session was left in; the file already says it
+  c.model = s.model ?? undefined; // the model the session ran; absent — ai.model
   c.roundTools = false; // no round is being written
   c.usage = s.usage;
   c.prompts = s.prompts.slice();

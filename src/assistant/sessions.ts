@@ -76,6 +76,7 @@ export interface Session {
   messages: Record<string, unknown>[]; // the screen
   api: Record<string, unknown>[];      // the model's history
   summary: string;
+  model?: string;                       // the model id this session runs; absent — ai.model
   // `id` is `t3`, or a number in an older file, which `Plan.load` reads as `t3`.
   plan: { id: number | string; text: string; status: string }[];
   usage: TokenUsage | null;
@@ -445,6 +446,7 @@ export function loadSession(dir: string, id: string): Session | null {
       // Anything but the two modes that change what asks reads as `ask`, which is the
       // field's absence.
       autoMode: s.autoMode === 'reads' || s.autoMode === 'all' ? s.autoMode : undefined,
+      model: typeof s.model === 'string' && s.model ? s.model : undefined,
       project: projectRead(s.project),
       answeredAt: typeof s.answeredAt === 'string' ? s.answeredAt : '',
       seenAt: typeof s.seenAt === 'string' ? s.seenAt : '',
