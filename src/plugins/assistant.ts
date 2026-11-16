@@ -76,6 +76,7 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
+import { roleStart } from '../assistant/model-roles.js';
 import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
@@ -1873,7 +1874,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   title: 'Agents',
                   follow: true,
                   empty: 'no subagents here',
-                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending(), asked.endedShellsListed().map((j) => ({ id: j.id, command: j.command, state: j.statusText, ms: j.ms, lines: j.lines }))),
+                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending(), asked.endedShellsListed().map((j) => ({ id: j.id, command: j.command, state: j.statusText, ms: j.ms, lines: j.lines })), asked.effectiveModel()),
                   get keys() { return pending() !== null ? answerKeys : [...stopKeys, watchKey]; },
                 });
                 return;
@@ -1939,7 +1940,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // the child's lines (its session is made here when nobody has spoken,
                 // `keepPersonWork`). Its mode is set before the schedule's timer lets its
                 // first turn go: the starting conversation's mode is never the child's.
-                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head'>, mode: AutoMode | null, notes: string): boolean => {
+                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head' | 'model'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
                     { kind: 'subagent', by: 'person', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
@@ -1966,6 +1967,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (blocked) { setError(blocked); return; }
                   const groups = agentToolGroups(agent, new Set(chatToolGroupOf().values()));
                   const mode = agentAutoMode(agent.auto, maxAutoOf(conv.deps.config()));
+                  // The file's role names the model the child runs; one nothing defines is
+                  // a note, and the work starts on the conversation's model.
+                  const started = roleStart(conv.deps.config().ai, agent.model);
                   const typed = `/${cmd.trim()}`;
                   // The person's start is what trusts a file: their own file is recorded at
                   // the start, a project's after a y/n on its first start (or its change).
@@ -1985,7 +1989,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     const loaded = asks ? preloadSkills(agent.skills, id, skillsFound) : early;
                     if (!loaded.ok) { setError(`/subagent: ${loaded.message}`); return; }
                     // The file is recorded once the start took place: a refused start trusts nothing.
-                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), ...(loaded.skills.length ? { head: fillPrompt(agent, values) } : {}), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills)].filter(Boolean).join('\n'))) recordAgentStart(agent);
+                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), ...(loaded.skills.length ? { head: fillPrompt(agent, values) } : {}), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}), ...(started.model ? { model: started.model } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills), started.note ?? ''].filter(Boolean).join('\n'))) recordAgentStart(agent);
                   };
                   if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the

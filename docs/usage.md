@@ -361,7 +361,9 @@ counts. A subagent that waits while the line is empty draws its block in place o
 so the rows are away exactly then; `/agents` or `/subagent stop <name>` still reach it.
 
 **`/agents`** opens the whole tree where the conversation is: the live nodes in tree order
-with `<state> · <time spent>`, then the last twenty that ended (`done`, `failed`, `stopped`, `empty`,
+with `<state> · <time spent>`, and the model added when a node runs one that is not the
+chat's own (`idle · 1m 12s · small-model` — with a chat on no model of its own, every
+model is named), then the last twenty that ended (`done`, `failed`, `stopped`, `empty`,
 `limit`, the time and the tokens). ↑ and ↓ move, `x` asks the same question in place of the row and
 `y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. ⏎ on
 a live row closes the panel and shows that node's conversation; on an ended row it says there
@@ -439,6 +441,7 @@ description: Review a branch against the project's rules
 params: ticket, branch?
 tools: repo
 auto: reads
+model: deep
 ---
 Review the changes for {{ticket}} on branch {{branch}} (the current branch when empty).
 Read the diff, then answer with the findings, worst first. In a code block, braces such as
@@ -451,6 +454,8 @@ Read the diff, then answer with the findings, worst first. In a code block, brac
 - `tools` narrows the tool groups the agent may use (see What it may do).
 - `skills` names skills loaded into the agent's first message (see Skills, below).
 - `auto` is `ask`, `reads` or `all`; without it the agent asks.
+- `model` names the role the agent runs on, from your `ai.roles` (see Which model it
+  runs).
 - The prompt spells each parameter as `{{name}}`. A `{{name}}` that `params` does not declare is
   an error, and so is a declared parameter the prompt never uses. A value left out of an
   optional parameter is the empty text. Single braces are left alone.
@@ -480,13 +485,30 @@ whole, with `memory` and `config_set`, which asks; and a group the file lists ke
 its writing tools, each write asking you unless its auto mode answers, as for any subagent you start. A group named in the file that is not loaded is left out, and
 a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
 
+### Which model it runs
+
+`model:` names a **role** — `fast`, `deep`, a name you choose — never a model id: the file
+is yours to carry between machines, and the model ids are each machine's own.
+`config set ai.roles.fast small-model` says what a role runs on here (docs/config.md,
+"Models and roles"). Without a `model:` line — and for a subagent or task that names no
+role — the work runs the model of the conversation that started it: the chat's, or for a
+task a subagent starts, that subagent's.
+
+A role your machine does not define is not an error: the work runs on that same model and
+one note says so (`role "deep" is not defined (ai.roles) — using the conversation's
+model`).
+
+A model is what you pay for on every request the work makes, so ask for a role only when
+the job needs it: a cheap one for a read, `deep` for one with a big context to hold.
+
 ### Trust
 
 An agent file is somebody else's instructions, so what you have not started does not run on
 the assistant's word.
 
 - A **project file** asks at its first start, and again after its content changes: a y/n shows
-  the file's path, its description, the tool groups, the auto mode after the cap, the
+  the file's path, its description, the tool groups, the auto mode after the cap, the role
+  it runs on when the file names one (`model: deep (a role from ai.roles)`), the
   parameters and the size of the prompt. `y` starts the agent and remembers this content; `n` starts nothing.
 - **Your own file** is recorded at your start and asks nothing.
 - A **plugin's file** follows the plugin: a plugin that is installed, trusted and enabled
@@ -502,7 +524,10 @@ assistant runs records nothing.
 The system prompt lists the agents the assistant may start, up to twenty: those of the
 project and your own that you have started with their current content, and the plugins'. The
 `subagent` tool takes `agent` and `args` (an object of the parameters); its `task` is then
-only extra instructions, added after the prompt. The agent runs as a background task
+only extra instructions, added after the prompt. Its `model` takes a role from your
+`ai.roles` too, as the file's own `model:` line does — and the call's role wins over the
+file's; a plain task may name one the same way. A role your machine does not define runs
+the work on the conversation's model, with one note (see Which model it runs). The agent runs as a background task
 that may write, each write asking you unless its auto mode answers, and its result comes back to the assistant as
 any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
@@ -731,8 +756,9 @@ Bulky things — an image, a `!command`'s output, a large tool result — are se
 model in full in the turn they arrive in, and later as a one-line stub naming an id
 (`[! brew update — exit 0 · 24s · 120 lines — recall("out:7d41e0aa")]`) that the
 assistant reads again with its `recall` tool when it needs the content; the screen and
-the session keep everything. Stubbing happens in batches, once the context passes half
-the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), so the
+the session keep everything. Stubbing happens in batches, once the context passes
+`ai.recall.threshold` of the window the conversation measures against — half by default —
+or every ten turns (`ai.recall.everyTurns`), so the
 provider's prompt cache is missed rarely; `/context` says how many items are stubbed.
 `config set ai.recall.enabled false` sends everything in full every time.
 
@@ -742,8 +768,9 @@ provider's prompt cache is missed rarely; `/context` says how many items are stu
 done (commits, paths, commands that worked), what is in progress and its next step, the
 open decisions, the facts learned — and a `── compacted ──` row marks the place; the
 screen keeps everything, and the summary opens under the row. The chat does it by
-itself before a request would pass 80% of the window (`ai.autoCompact.threshold`,
-0.5–0.95 of `ai.contextWindow`), between two requests so no tool call is parted from
+itself before a request would pass 80% of the window the conversation measures against
+(`ai.autoCompact.threshold`, 0.5–0.95 of that window — the model's own, docs/config.md,
+"Models and roles"), between two requests so no tool call is parted from
 its result, and marks the row `auto`; `config set ai.autoCompact.enabled false` leaves
 it to `/compact`.
 

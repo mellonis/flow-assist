@@ -6,6 +6,7 @@ import { agentKey, agentTrusted, standingNow, type AgentStanding } from './agent
 import { fillPrompt, paramsText } from './agent-file.js';
 import { resolveAgent, type FoundAgent, type FoundAgents } from './agent-find.js';
 import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
+import { roleStart } from './model-roles.js';
 import type { AutoMode } from './auto.js';
 import type { AgentRef } from './conversation-types.js';
 import { uniqueLabel } from './subagent-command.js';
@@ -23,6 +24,9 @@ export interface AgentStarter {
   running?: () => ReadonlySet<string>;
   // The agent's `skills:` resolved now (agent-skills.ts); absent: no skill can be preloaded.
   preload?: (names: readonly string[], agentId: string) => Preload;
+  // `config.ai` as it stands: where a role is resolved to a model id. Absent: no
+  // catalogue, so a role is never defined here.
+  ai?: () => unknown;
 }
 
 export const AGENT_FOLLOW_UP = 'Additional instructions from the conversation that started you:';
@@ -30,11 +34,11 @@ export const AGENTS_LISTED_MAX = 20;
 
 export type AgentStartPlan =
   | { ok: false; message: string }
-  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; head: string; note: string };
+  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; head: string; note: string; model?: string; roleNote: string };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-export function planAgentStart(starter: AgentStarter, call: { agent: string; args: unknown; prompt: string }): AgentStartPlan {
+export function planAgentStart(starter: AgentStarter, call: { agent: string; args: unknown; prompt: string; model?: string }): AgentStartPlan {
   const hit = resolveAgent(call.agent, starter.found());
   if (!hit.ok) return { ok: false, message: `subagent: ${hit.message}` };
   const agent = hit.agent;
@@ -43,6 +47,9 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
     return { ok: false, message: `subagent: you are already running @${id} (or you were started below it) — do this work yourself instead of starting it again` };
   }
   if (!agentTrusted(agent)) return { ok: false, message: `subagent: @${id} is not trusted here — ask the person to start @${id} once` };
+  // The call's role wins over the file's; a role nothing defines is one note, and the
+  // agent runs on the conversation's model.
+  const started = roleStart(starter.ai?.() ?? {}, call.model?.trim() || agent.model);
   if (call.args !== undefined && !isMap(call.args)) return { ok: false, message: `subagent: args must be an object of parameter values for @${id}` };
   const given = (call.args ?? {}) as Record<string, unknown>;
   const declared = agent.params.map((p) => p.name);
@@ -72,6 +79,8 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
     absent: groups.absent,
     skills: loaded.skills,
     note: preloadNote(id, loaded.skills),
+    ...(started.model ? { model: started.model } : {}),
+    roleNote: started.note ?? '',
   };
 }
 

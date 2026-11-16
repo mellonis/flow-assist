@@ -42,7 +42,7 @@ const LATE = { type: 'function' as const, function: { name: 'late_look', descrip
 
 // A booted chat in a git project under a shell root. The agent files are written by the
 // test; `mark` tells the child's requests from the session's by its first user message.
-async function chat(mark: string, opts: { agents?: Record<string, unknown>; guests?: boolean; nested?: ScriptedModel[] } = {}) {
+async function chat(mark: string, opts: { agents?: Record<string, unknown>; guests?: boolean; nested?: ScriptedModel[]; ai?: Record<string, unknown> } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ag-start-')));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ag-sessions-'));
   made.push(root, dir);
@@ -58,7 +58,7 @@ async function chat(mark: string, opts: { agents?: Record<string, unknown>; gues
     { id: 'other', tools: [OTHER], exec: async () => 'elsewhere' },
   ];
   let plugin: { tools?: unknown[] } | null = null;
-  const extra = { sessions: { dir }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false }, ...(opts.agents ? { agents: opts.agents } : {}) };
+  const extra = { sessions: { dir }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false, ...opts.ai }, ...(opts.agents ? { agents: opts.agents } : {}) };
   const ui = await bootApp(model, 140, 40, (make) => [(plugin = make('guest', { tools: groups })) as never], extra, { toastMs: 10_000, startDir: root });
   await ui.press('F');
   const agents = path.join(root, '.flow-assist', 'agents');
@@ -190,6 +190,16 @@ test('the child receives the filled prompt, is labeled by the agent\'s id, and s
   await ask(ui, '/subagent');
   await settleUntil(() => /job-2 · working/.test(frameOf(ui)));
   expect(frameOf(ui)).toMatch(/2 · job-2 · working/);
+  ui.app.unmount();
+});
+
+test('a role the file names is the model the child runs', async () => {
+  const { agents, child, ui } = await chat('MODEL-A', { ai: { models: { 'small-model': { contextWindow: 256_000 } }, roles: { fast: 'small-model' } } });
+  write(path.join(agents, 'job.md'), doc('model: fast\n', 'MODEL-A go'));
+  child.script([{ text: 'ok' }]);
+  await ask(ui, '/subagent @job');
+  await settleUntil(() => child.requests.length === 1);
+  expect(child.requests[0]!.model).toBe('small-model');
   ui.app.unmount();
 });
 

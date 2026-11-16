@@ -269,7 +269,7 @@ test('on the Anthropic wire the screen comes after the cache breakpoint, and the
     [{ text: 'Opened.' }],
   );
   const state = fresh({ items: [BOARD] });
-  const ui = await bootApp(model, 100, 28, guest(state), { ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all' } });
+  const ui = await bootApp(model, 100, 28, guest(state), { ai: { provider: 'anthropic', model: 'default-model', toolLoading: 'all' } });
   await ui.press('F');
   await ui.type('open 42');
   await ui.press('return');

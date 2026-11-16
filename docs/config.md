@@ -25,7 +25,7 @@ assistant may set or save".
 
   ```sh
   flow-assist config set ai.provider anthropic
-  flow-assist config set ai.model claude-sonnet-5      # or claude-opus-5-5, …
+  flow-assist config set ai.model <model-id-your-endpoint-serves>
   export ANTHROPIC_API_KEY=…                           # or ai.tokenEnv names another variable
   ```
 
@@ -63,6 +63,49 @@ assistant may set or save".
   [usage.md](usage.md), "Agent files".
 - **Reading the web** (`web_fetch`): `web.allowlist`, `web.maxBytes` and
   `web.timeoutMs` — see [safety.md](safety.md), "Reading the web".
+
+## Models and roles
+
+Work asks for a model by **role**, and each machine says what a role runs on: an agent
+file or a background job names `fast` or `deep`, and your config maps the name to a model
+id here. The model ids an endpoint serves are yours; a name travels, an id does not.
+
+```sh
+flow-assist config set ai.model default-model        # what the chat runs
+flow-assist config set ai.roles.fast small-model     # model: fast in an agent file
+flow-assist config set ai.roles.deep big-model       # model: deep — a big context
+flow-assist config set ai.models.small-model '{"contextWindow":64000}'
+flow-assist config set ai.models.default-model '{"contextWindow":200000}'
+flow-assist config set ai.models.big-model '{"contextWindow":512000}'
+```
+
+- **`ai.model`** is a model id — the one the chat runs when nothing else says. It is
+  never read as a role.
+- **`ai.roles`** maps a role (`fast`, `deep` — a name you choose) to a model id on this
+  machine. An agent file's `model:` line and the `subagent` tool's `model` argument name
+  a role, never a model id (see [usage.md](usage.md), "Which model it runs").
+- **`ai.models.<id>.contextWindow`**, in tokens, is what one model can hold — the API
+  cannot be asked for it. A model not named there uses `ai.contextWindow` (200 000
+  otherwise). The window is what the context meter (`ctx N%`), the automatic compaction
+  and the recall measure against: the window of the model the work runs, so a subagent on
+  `deep` counts against its 512 000, not the chat's 200 000.
+- **A model id with a dot** cannot be a key path — every config key is a dot path, so
+  `config set ai.models.big-model.v2.contextWindow 512000` reads `big-model` and `v2` as
+  two keys and is refused (`unknown key`). Set the whole catalogue in one call instead:
+  `flow-assist config set ai.models '{"big-model.v2":{"contextWindow":512000}}'`, or write
+  it in `config.json`.
+
+Each conversation runs one model: what its role resolved to when it started (a subagent
+or task with no role runs the model of the conversation that started it), else `ai.model`,
+else whatever the endpoint serves by default. A role this machine does not define is not
+an error: the work runs on the conversation's model and one note says so (`role "deep" is
+not defined (ai.roles) — using the conversation's model`). A model id your endpoint does
+not serve is its own error at the first request — the host cannot know which ids an
+endpoint runs.
+
+All three keys sit under `ai`, the model's own leash: only you can set them (see
+[safety.md](safety.md), "What the assistant may set or save"), and `config get` /
+`config set` treat them like any other key under `ai`.
 
 ## Plugins
 

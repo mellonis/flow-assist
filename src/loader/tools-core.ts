@@ -20,6 +20,7 @@ import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import { planAgentStart, type AgentStarter } from '../assistant/agent-model.js';
+import { roleStart } from '../assistant/model-roles.js';
 import { SKILL_FILE_MAX_CHARS, skillToolResult } from '../assistant/skill-model.js';
 import { SKILL_TOOL } from '../assistant/skill-file.js';
 import type { FoundSkills } from '../assistant/skill-find.js';
@@ -48,6 +49,9 @@ import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS } from '../assistant/llm-endpoin
 // workspace the memory and the workspace tools work in — absent, where the call's shell
 // is), the config.local.json path, and the active plugin's identity token.
 export interface CoreCtx {
+  // The host's config as it stands: the ctx carries it through `allServices`. The
+  // `subagent` tool resolves a role against its `ai.roles` here.
+  config?: Record<string, unknown>;
   workspaceProject?: () => string | null;
   configLocalPath?: string;
   pluginToken?: symbol;
@@ -109,7 +113,9 @@ function prettyKeys(map: Record<string, string[]>): string {
 // (`ai.toolLoading`) is looked up before its top-level key.
 const KEY_DEFAULTS: Record<string, string> = {
   'shell.passEnv': '[] — run_command starts without every secret variable the app knows (the ones config names with ${VAR} or ai.tokenEnv, and any whose name says TOKEN, SECRET, PASSWORD, COOKIE or API_KEY); its result names them once per conversation. config set shell.passEnv \'["GH_TOKEN"]\' lets a command see the listed ones — only the person can set it. The person\'s own !command keeps the whole environment, and a secret in any output is shown as ‹secret NAME›',
-  'ai.provider': `unset — an OpenAI-compatible chat-completions API at ai.baseUrl with the token from LLM_TOKEN (or the variable ai.tokenEnv names). config set ai.provider anthropic talks to Anthropic's own Messages API instead: ai.baseUrl defaults to ${ANTHROPIC_BASE_URL}, the token to ANTHROPIC_API_KEY, and ai.model is a Claude model id (claude-sonnet-5, claude-opus-5-5); the tools, the system prompt and the turn so far are cached between requests, and the model's thinking shows in the chat's thinking fold. A base URL of your own includes /v1 (requests go to <ai.baseUrl>/messages)`,
+  'ai.provider': `unset — an OpenAI-compatible chat-completions API at ai.baseUrl with the token from LLM_TOKEN (or the variable ai.tokenEnv names). config set ai.provider anthropic talks to Anthropic's own Messages API instead: ai.baseUrl defaults to ${ANTHROPIC_BASE_URL}, the token to ANTHROPIC_API_KEY, and ai.model is one of that API's model ids; the tools, the system prompt and the turn so far are cached between requests, and the model's thinking shows in the chat's thinking fold. A base URL of your own includes /v1 (requests go to <ai.baseUrl>/messages)`,
+  'ai.roles': 'what a name an agent file or the subagent tool asks for runs on: config set ai.roles.fast small-model makes model: fast in an agent file mean small-model here. Roles travel between machines, model ids do not — a role this machine does not define runs the agent on the conversation\'s model and says so',
+  'ai.models': 'what a model can hold, by model id: config set ai.models.big-model \'{"contextWindow":512000}\'. The API cannot be asked for it, and the meter, the automatic compaction and the recall threshold measure against the window of the model a conversation runs. A model not named here uses ai.contextWindow (200000 otherwise)',
   'ai.maxTokens': `${DEFAULT_MAX_TOKENS} — the longest answer one request may get, with ai.provider anthropic only (that API requires one; thinking counts against it). A fixed thinking budget that leaves the answer less than 1024 under it is lowered to fit (the log says so)`,
   'ai.thinking': 'unset — the model thinks as it does by default (the current Claude models decide for themselves; their thinking is not shown). With ai.provider anthropic: config set ai.thinking \'{"adaptive":true}\' asks for adaptive thinking and shows a summary of it in the chat\'s thinking fold; {"budgetTokens":N} (at least 1024) is a fixed budget, for older models only — the current ones refuse it',
   'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
@@ -122,7 +128,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   'ai.images': `enabled: true — the person can show the model images in the chat: drag a file onto the terminal or paste its path (the whole paste must be the path), /image <path>, or /image, Ctrl+V or Cmd+V for the image on the clipboard (macOS: pngpaste or osascript; Linux: wl-paste or xclip). Each becomes an [Image #N] token in the text; the file is read only when the person attaches it, and kept in the session as its path and hash, not its bytes. maxBytes: ${IMAGE_DEFAULTS.maxBytes} (a bigger file is refused, never shrunk), maxPerMessage: ${IMAGE_DEFAULTS.maxPerMessage}. A tool that fetched images itself (an issue's screenshots) may return them beside its result under the same limits (maxPerMessage counts per result); the chat shows one ▣ row per image, never the image. A model that cannot take images: config set ai.images.enabled false — attaching is then refused, a tool's images are dropped with a note in its result, and images already in the conversation go as their names only`,
   // Said in full: "why does the conversation show [! … — recall("out:…")] instead of the
   // output?" and "did it forget my screenshot?" are asked of the assistant.
-  'ai.recall': `enabled: true — bulky content is sent to the model in full in the turn it arrives in, and later as a short stub it can read again with the recall tool: an attached image, the output of a !command, a tool result over minChars (${RECALL_DEFAULTS.minChars} characters). A stub names the item's id, a hash of its content (img:…, out:…, res:…), e.g. [! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; recall("out:7d41e0aa") brings it back for one turn, an image as an image. Stubbing happens in batches — every eligible item at once when the context passes threshold (${RECALL_DEFAULTS.threshold} of ai.contextWindow) or every everyTurns turns (${RECALL_DEFAULTS.everyTurns}; 0 — the threshold alone) — because replacing old content costs one prompt-cache miss. The screen and the session keep everything in full; /context says how many items are stubbed. config set ai.recall.enabled false sends everything in full on every request`,
+  'ai.recall': `enabled: true — bulky content is sent to the model in full in the turn it arrives in, and later as a short stub it can read again with the recall tool: an attached image, the output of a !command, a tool result over minChars (${RECALL_DEFAULTS.minChars} characters). A stub names the item's id, a hash of its content (img:…, out:…, res:…), e.g. [! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; recall("out:7d41e0aa") brings it back for one turn, an image as an image. Stubbing happens in batches — every eligible item at once when the context passes threshold (${RECALL_DEFAULTS.threshold} of the window the conversation measures against: ai.models.<id>.contextWindow, else ai.contextWindow) or every everyTurns turns (${RECALL_DEFAULTS.everyTurns}; 0 — the threshold alone) — because replacing old content costs one prompt-cache miss. The screen and the session keep everything in full; /context says how many items are stubbed. config set ai.recall.enabled false sends everything in full on every request`,
   'ai.retries': `${RETRIES_DEFAULT} — how many times a request to the model that fails for a reason that passes is made again: a 429, a 500, 502, 503, 504 or 529 (limited, busy or failing), or a connection that could not be made or was lost before the answer began. Only while nothing of its answer was shown — a request that failed after its first word fails as it is, so the answer is never shown twice. Other refusals (a bad token, a missing model, a request too large) fail at once. A chat turn's status line counts down to the next try, and the log has a line for each; a request a plugin or a tool makes itself is repeated the same way, without showing the wait; when the last try fails the message says how many were made. Esc stops the wait. config set ai.retries 0 makes one request and no more`,
   'ai.retryDelay': `${RETRY_DELAY_DEFAULT} — the seconds before each repeat of a failed request (see ai.retries), at most 60. A provider's Retry-After, when it sends one, is waited instead, up to a minute. config set ai.retryDelay 10 waits longer between tries`,
   'ai.maxRounds': `${MAX_ROUNDS_DEFAULT} — how many rounds (a request and the tools it called) one turn of the chat may take before the host stops it. Two limits bound a turn, this and ai.maxTurnTokens, and whichever is reached first ends it: the turn closes with a line saying where it stopped, and Enter on the empty field sends "continue" to carry on. config set ai.maxRounds 300 lets long work run further; 0 is no round cap, and then ai.maxTurnTokens is what ends a long turn`,
@@ -130,7 +136,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   'ai.taskRounds': `${TASK_ROUNDS_DEFAULT} — how many rounds a background task (the subagent tool, an agent file the model started included) may take before it stops and returns what it has, saying so. Sessions and subagents keep ai.maxRounds. config set ai.taskRounds 40 gives tasks more room; 0 is no round cap for tasks, and then ai.maxTurnTokens is what ends a long one. Long work with many commands is better done in the conversation itself, or by an agent file the person starts with /subagent @name`,
   // Said in full: "why did the chat say compacted when I did not ask?" is asked of the
   // assistant.
-  'ai.autoCompact': `enabled: ${AUTO_COMPACT_DEFAULTS.enabled}, threshold: ${AUTO_COMPACT_DEFAULTS.threshold} — before a request that would pass threshold of ai.contextWindow (0.5 to 0.95), the chat compacts the conversation first, as /compact does: the model gets a handoff (goal, done, in progress and the next step, open decisions, facts learned) in place of the old messages, the screen keeps everything, and a "── compacted · auto ──" row marks the place. It happens between two requests, so a tool call and its result are never parted, and it may come in the middle of a long turn. config set ai.autoCompact.enabled false leaves compaction to /compact; config set ai.autoCompact.threshold 0.9 waits longer`,
+  'ai.autoCompact': `enabled: ${AUTO_COMPACT_DEFAULTS.enabled}, threshold: ${AUTO_COMPACT_DEFAULTS.threshold} — before a request that would pass threshold of the window the conversation measures against (ai.models.<id>.contextWindow, else ai.contextWindow; 0.5 to 0.95), the chat compacts the conversation first, as /compact does: the model gets a handoff (goal, done, in progress and the next step, open decisions, facts learned) in place of the old messages, the screen keeps everything, and a "── compacted · auto ──" row marks the place. It happens between two requests, so a tool call and its result are never parted, and it may come in the middle of a long turn. config set ai.autoCompact.enabled false leaves compaction to /compact; config set ai.autoCompact.threshold 0.9 waits longer`,
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
@@ -439,6 +445,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           write: { type: 'boolean', description: 'Optional, default false (read-only: writes and commands are declined). true: the task may write and run commands, and each one stops for the person\'s yes in the chat that started it. Use it only when the job must change something.' },
           agent: { type: 'string', description: 'Optional: an agent from the system prompt\'s list, by its id (with or without @). It starts with its own prompt, tools and auto mode; `task` is then optional.' },
           args: { type: 'object', description: 'With `agent`: its parameter values by name, e.g. {"ticket": "T-1"}.' },
+          model: { type: 'string', description: 'Optional: a ROLE from ai.roles (e.g. "fast", "deep") — the model the work runs on. Roles are defined by the person; a model id here is not one. Costs the person pays for, so name one only when the work needs it (a big context, a cheap mechanical job).' },
         }, required: [] },
       },
     },
@@ -793,6 +800,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // and the tool says so in the toast and the log line.
         const agentName = String(args.agent ?? '').trim();
         let task = String(args.task ?? '').trim();
+        const role = String(args.model ?? '').trim();
         if (!agentName && !task) return 'task is required — the work to do in the background.';
         let label = String(args.label ?? '').trim() || task.slice(0, 40);
         // A named agent: its file's prompt (parameters filled, `task` after it), label,
@@ -801,12 +809,18 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (agentName) {
           const starter = (ctx as CoreCtx).agentStarter;
           if (!starter) return 'subagent: starting an agent by name is not available here.';
-          const plan = planAgentStart(starter, { agent: agentName, args: args.args, prompt: task });
+          const plan = planAgentStart(starter, { agent: agentName, args: args.args, prompt: task, model: role });
           if (!plan.ok) return plan.message;
           named = plan;
           task = plan.prompt;
           label = plan.label;
         }
+        // The plan resolved the file's role (or the call's, which wins); a plain task
+        // resolves the call's alone. A role nothing defines leaves the model absent, and
+        // the note says so in the answer.
+        const started = named
+          ? { model: named.model, note: named.roleNote }
+          : roleStart((ctx as CoreCtx).config?.ai, role);
         // Start delay: `in`/`at` (like remind), or immediately when neither is given.
         let ms = 0;
         const inStr = String(args.in ?? '').trim();
@@ -828,13 +842,13 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // An agent task may write under the person's y/n, as one started with `write: true`
         // does; whether it can ask is `startChild`'s rule.
         const writes = args.write === true || !!named;
-        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;
         if (named && named.mode !== 'ask') scheduled.child.setAutoMode(named.mode);
-        const absent = named ? [absentGroupsNote(named.id, named.absent), named.note].filter(Boolean).join('\n') : '';
-        return `${absent ? `${absent}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
+        const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? ''].filter(Boolean).join('\n');
+        return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
       case 'todo': {
         // Not write-confirmed (like memory): a y/n pause on every `todo add` would

@@ -23,7 +23,7 @@ const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < 
 async function boot(model: ScriptedModel, wire: 'openai' | 'anthropic', autoCompact?: Record<string, unknown>) {
   model.wire = wire;
   const ai = wire === 'anthropic'
-    ? { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: WINDOW }
+    ? { provider: 'anthropic', model: 'default-model', toolLoading: 'all', contextWindow: WINDOW }
     : { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: WINDOW };
   const ui = await bootApp(model, 110, 30, undefined, { ai: { ...ai, ...(autoCompact ? { autoCompact } : {}) } });
   await ui.press('F');

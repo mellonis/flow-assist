@@ -7,6 +7,29 @@ shape of the problem.
 
 ---
 
+## Compaction on a role of its own (2026-11)
+
+### The summary request sends the whole history, so a smaller window cannot compact a larger conversation
+
+`/compact` and the automatic compaction run on the conversation's own model
+(`foldIntoHandoff` — `withModel(llmOpts(ai), c.model)` in
+`src/assistant/conversation-turn.ts`): the request that writes the handoff carries the
+WHOLE history the model saw, so a child on a role with a smaller window than its
+conversation grew into cannot be asked to compact it — the provider refuses the request
+before any summary is written, and the only answer is to start the work on a role with a
+window big enough to hold it all.
+
+**Hit when:** writing the models-by-role work (2026-11-15) — the summary request sends the
+whole history, so it takes the window of the conversation it compacts.
+
+**Action:** keep a `keep` tail verbatim beside the summary (opencode's `compaction.keep`:
+the last messages carried into the new history as they are, taking no part in the summary
+request), then the compaction model may be a role of its own — a small, cheap one writing
+the summary — with a check that the kept tail fits that model's window
+(`ai.models.<id>.contextWindow`).
+
+---
+
 ## Driving the host from outside the TUI (2026-11)
 
 ### No way to reach a session the TUI does not draw

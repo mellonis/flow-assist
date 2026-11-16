@@ -94,7 +94,7 @@ test('a round\'s kept blocks go back exactly as they came — thinking, signatur
 });
 
 test('the cache breakpoints sit on the last system block and the last message block; no thinking is asked for unless configured', () => {
-  const body = anthropicRequest(history, { model: 'claude-sonnet-5', maxTokens: 8192, stream: true, tools: [tool('a'), tool('b')] });
+  const body = anthropicRequest(history, { model: 'default-model', maxTokens: 8192, stream: true, tools: [tool('a'), tool('b')] });
   expect(body.system!.map((b) => b.cache_control)).toEqual([undefined, { type: 'ephemeral' }]);
   // The tools come before the system in the prefix: its breakpoint covers them.
   expect(body.tools!.every((t) => !t.cache_control)).toBe(true);
@@ -107,7 +107,7 @@ test('the cache breakpoints sit on the last system block and the last message bl
   const msgs: ChatMessage[] = [{ role: 'user', content: 'q' }, { role: 'assistant', content: null, tool_calls: [call('t1', 'datetime', '{}')], [ANTHROPIC_CONTENT]: kept }];
   anthropicRequest([...msgs, { role: 'user', content: 'more' }], { maxTokens: 5, stream: true });
   expect(kept[0]).toEqual({ type: 'tool_use', id: 't1', name: 'datetime', input: {} });
-  expect(body).toMatchObject({ model: 'claude-sonnet-5', max_tokens: 8192, stream: true });
+  expect(body).toMatchObject({ model: 'default-model', max_tokens: 8192, stream: true });
   expect('thinking' in body).toBe(false);
   // No system, no tools: neither field is sent.
   const bare = anthropicRequest([{ role: 'user', content: 'hi' }], { maxTokens: 5, stream: false });
@@ -195,7 +195,7 @@ test('an error event is read as the provider\'s refusal, with the status its typ
   r.event({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
   const err = r.error()!;
   expect(err.status).toBe(529);
-  expect(llmErrorMessage(err.status, err.body, { model: 'claude-opus-5-5', requestId: 'req_011CSabcdef' })).toBe('LLM 529 · claude-opus-5-5: Overloaded (request req_011C)');
+  expect(llmErrorMessage(err.status, err.body, { model: 'big-model', requestId: 'req_011CSabcdef' })).toBe('LLM 529 · big-model: Overloaded (request req_011C)');
   expect(errorStatus('invalid_request_error')).toBe(400);
   expect(errorStatus('something new')).toBe(500);
   // The Anthropic body read for its words, and an image refusal still recognised.
@@ -271,7 +271,7 @@ test('the endpoint: an OpenAI-compatible API unless the provider says anthropic,
   const env = { LLM_TOKEN: 'l', ANTHROPIC_API_KEY: 'a', MINE: 'm' };
   expect(llmOpts({ baseUrl: 'http://x/v1', model: 'gpt' }, env)).toEqual({ provider: 'openai', baseUrl: 'http://x/v1', model: 'gpt', token: 'l', tokenEnv: 'LLM_TOKEN', maxTokens: 8192, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'openai-ish', model: 'gpt' }, env).provider).toBe('openai');
-  expect(llmOpts({ provider: 'anthropic', model: 'claude-sonnet-5' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-5', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 8192, retries: 10, retryDelay: 3 });
+  expect(llmOpts({ provider: 'anthropic', model: 'default-model' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'default-model', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 8192, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'anthropic', tokenEnv: 'MINE', baseUrl: 'http://proxy/v1', maxTokens: 2000, thinking: { adaptive: true } }, env))
     .toMatchObject({ baseUrl: 'http://proxy/v1', token: 'm', tokenEnv: 'MINE', maxTokens: 2000, thinking: { adaptive: true } });
   expect(llmOpts({ provider: 'anthropic', thinking: { budgetTokens: 2048 } }, env).thinking).toEqual({ budgetTokens: 2048 });

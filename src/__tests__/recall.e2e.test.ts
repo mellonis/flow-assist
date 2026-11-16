@@ -117,7 +117,7 @@ test('the same on the Anthropic wire: the stub replaces the image block, and rec
   model.wire = 'anthropic';
   model.anthropicUsage = { input_tokens: 100, output_tokens: 10 };
   model.script([{ text: 'A screenshot.' }], [{ text: 'Noted.' }]);
-  const ui = await bootApp(model, 120, 36, undefined, { ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: 1000, autoCompact: { enabled: false }, recall: { everyTurns: 0 } } });
+  const ui = await bootApp(model, 120, 36, undefined, { ai: { provider: 'anthropic', model: 'default-model', toolLoading: 'all', contextWindow: 1000, autoCompact: { enabled: false }, recall: { everyTurns: 0 } } });
   await ui.press('F');
   ui.backend.paste(file);
   await settle();

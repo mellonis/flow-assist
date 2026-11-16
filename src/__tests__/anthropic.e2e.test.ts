@@ -22,7 +22,7 @@ const sent = (model: ScriptedModel, i: number) => model.requests[i] as unknown a
 const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 
 // No base URL: the provider brings its own, and the token comes from ANTHROPIC_API_KEY.
-const ANTHROPIC = { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all' };
+const ANTHROPIC = { provider: 'anthropic', model: 'default-model', toolLoading: 'all' };
 
 async function boot(model: ScriptedModel, ai: Record<string, unknown> = {}, cols = 110, rows = 32) {
   model.wire = 'anthropic';
@@ -48,7 +48,7 @@ test('a text answer streams from /messages, with the API\'s headers, a max_token
   expect(model.headers[0]).toMatchObject({ 'x-api-key': 'sk-ant-scripted', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' });
   expect(model.headers[0]!.authorization).toBeUndefined();
   const body = sent(model, 0);
-  expect(body).toMatchObject({ model: 'claude-sonnet-5', max_tokens: 8192, stream: true });
+  expect(body).toMatchObject({ model: 'default-model', max_tokens: 8192, stream: true });
   expect('stream_options' in body).toBe(false);
   expect('thinking' in body).toBe(false);
   // The system prompt left the messages for the top-level field. Two breakpoints: the
@@ -277,7 +277,7 @@ test('an error event in the stream is the provider\'s refusal, read', async () =
   model.script([{ text: 'Half' }, { error: { type: 'overloaded_error', message: 'Overloaded' } }]);
   const ui = await boot(model);
   await ask(ui, 'hi');
-  expect(ui.backend.lastFrame).toContain('LLM 529 · claude-sonnet-5: Overloaded (request req_scri)');
+  expect(ui.backend.lastFrame).toContain('LLM 529 · default-model: Overloaded (request req_scri)');
 });
 
 test('an HTTP 4xx is read out of Anthropic\'s error body, with its request-id header', async () => {
@@ -285,7 +285,7 @@ test('an HTTP 4xx is read out of Anthropic\'s error body, with its request-id he
   const ui = await boot(model);
   globalThis.fetch = (async () => new Response('{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}', { status: 401, headers: { 'request-id': 'req_011CSq7x' } })) as unknown as typeof fetch;
   await ask(ui, 'hi');
-  expect(ui.backend.lastFrame).toContain('LLM 401 · claude-sonnet-5: invalid x-api-key (request req_011C)');
+  expect(ui.backend.lastFrame).toContain('LLM 401 · default-model: invalid x-api-key (request req_011C)');
 });
 
 test('/compact asks /messages once, not streamed, and the summary is its text', async () => {

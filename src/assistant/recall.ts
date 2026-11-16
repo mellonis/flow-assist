@@ -31,7 +31,7 @@ import { formatDuration } from './duration.js';
 import { SKILL_TOOL } from './skill-file.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-// `ai.recall`: on by default. `threshold` is the share of `ai.contextWindow` past which
+// `ai.recall`: on by default. `threshold` is the share of the window in use past which
 // the next turn's end stubs every eligible item; `everyTurns` batches on a clock as well
 // (0 — the threshold alone); `minChars` is what makes a tool result bulky — an image
 // and a `!command`'s output always are.

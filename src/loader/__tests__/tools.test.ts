@@ -346,7 +346,7 @@ test('config_schema says what ai.autoCompact does, and the model may not set it'
   writeFileSync(local, '{}');
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const out = String(await reg.exec('config_schema', { key: 'ai.autoCompact' }, { configLocalPath: local }));
-  expect(out).toMatch(/- ai\.autoCompact\.enabled: true\|false — unset \(default: enabled: true, threshold: 0\.8 — before a request that would pass threshold of ai\.contextWindow/);
+  expect(out).toMatch(/- ai\.autoCompact\.enabled: true\|false — unset \(default: enabled: true, threshold: 0\.8 — before a request that would pass threshold of the window the conversation measures against/);
   expect(out).toMatch(/- ai\.autoCompact\.threshold: .*unset/);
   expect(out).toContain('config set ai.autoCompact.enabled false');
   expect(out).not.toContain('· model may set');

@@ -101,6 +101,27 @@ test('the /agents rows: live nodes in tree order with their time, then the ended
   expect(rows[1]!.tone).toBe('warn');
 });
 
+test('/agents names the model a live node runs when it is not the chat\'s, and the ended rows keep their words', () => {
+  const live = [
+    node('a', { status: 'idle', startedAt: null, model: 'small-model' }),
+    node('b', { status: 'idle', startedAt: null, model: 'default-model' }),
+    node('c', { status: 'idle', startedAt: null }),
+  ];
+  const ended = [{ label: 'old', kind: 'subagent' as const, outcome: 'answer' as const, ms: 1000, tokens: 0 }];
+  expect(agentsPanelRows(live, ended, 0, null, [], 'default-model').map((r) => r.detail)).toEqual([
+    'idle · small-model',
+    'idle',
+    'idle',
+    'done · 1s',
+  ]);
+  // A chat with no model of its own leaves a child's model the only one there is: it is shown.
+  expect(agentsPanelRows(live, [], 0, null, [], undefined).map((r) => r.detail)).toEqual([
+    'idle · small-model',
+    'idle · default-model',
+    'idle',
+  ]);
+});
+
 test('a node whose stop question is up shows the question in place of its text', () => {
   const rows = agentsPanelRows([node('a', { below: 2 }), node('b')], [], 0, 'a');
   expect(rows[0]).toEqual({ id: 'a', text: 'stop a and 2 below it? y yes · n no', tone: 'warn' });

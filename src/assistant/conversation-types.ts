@@ -230,8 +230,10 @@ export interface ConversationDeps {
 // `agent`: the agent file it was started from, recorded in the journal's start lines.
 // `toolGroups`: the tool groups it may use besides the core group (absent: every group).
 // `skills`: the skills of the agent file already in `prompt`; the first message carries their ids as a mark, and a `skill-load` line records each. `head`: the prompt without the skills' text, which rides the child's system prompt in place of `prompt` (the bodies are sent once, in the first message).
+// `model`: the model id the child runs, resolved from its role at the start (absent: the
+// conversation's own).
 export interface AgentRef { id: string; source: 'project' | 'person' | 'plugin'; path: string; hash: string }
-export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[]; head?: string }
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[]; head?: string; model?: string }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';
@@ -331,8 +333,8 @@ export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 
 // A live descendant of a conversation, as the agent tree draws it (`Conversation.tree`).
 // `key` is the descendant's conversation key; `depth` is 1 for a child of the conversation
 // asked; `latest` is the tool it runs, else the verb of its round while it works, else '';
-// `below` counts its live descendants.
-export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'] | 'shell'; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean; shell?: ShellNode }
+// `below` counts its live descendants; `model` is the model it runs, when it has one.
+export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'] | 'shell'; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean; model?: string; shell?: ShellNode }
 // What a background shell adds to its tree node: the row says `<id> · <command> · <state> ·
 // <lines>`. The node is `working` while the job runs and `idle` + `answered` after it ended
 // until the person has opened it. `state` is the job's words (`running`, `exited 0`,
