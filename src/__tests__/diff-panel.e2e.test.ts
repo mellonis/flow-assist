@@ -87,13 +87,44 @@ test('/clear and the sessions key each close the panel with the conversation', a
   await ui.press('return');
   await settle(4);
   expect(ui.backend.lastFrame).not.toContain('diff ·');
-  // The picker takes the conversation's place, and the panel with it.
+  // The picker takes the conversation's place, and the panel with it. The picker draws over
+  // the whole column, so the panel being absent says nothing while it is up: it is closed
+  // with the picker gone that the key is seen to have closed the panel too.
   await ui.type('/diff');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 files'));
   ui.backend.press({ name: 's', ctrl: true });
   await settle(4);
+  await ui.press('escape');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('⏎ send');
   expect(ui.backend.lastFrame).not.toContain('diff ·');
+  ui.app.unmount();
+});
+
+test('⏎ with the field offering continue sends it, and the panel keeps its files', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  // A turn at the round cap: the field's own row offers `⏎ continue`, which a display must
+  // not eat for a fold.
+  model.script(...Array.from({ length: 2 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'Done now.' }]);
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', maxRounds: 2 } }, { startDir: root });
+  await openDiff(ui);
+  await ui.type('work for a while');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('stopped after'));
+  await settle(8);
+  expect(ui.backend.lastFrame).toContain('diff · 1 files');
+  expect(ui.backend.lastFrame).toMatch(/⏎ continue · \S+ new line/);
+  // The hint names what ⏎ does here, and it is not a fold.
+  expect(ui.backend.lastFrame).not.toContain('⏎ fold');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done now.'));
+  const sent = (model.requests.at(-1) as { messages: { role: string; content: unknown }[] }).messages;
+  expect(sent.at(-1)).toEqual({ role: 'user', content: 'continue' });
+  // The panel was not folded away by it: its file is still open.
+  expect(ui.backend.lastFrame).toContain('diff · 1 files');
+  expect(ui.backend.lastFrame).toContain('+changed');
   ui.app.unmount();
 });
 

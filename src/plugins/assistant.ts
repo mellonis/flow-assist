@@ -1105,7 +1105,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The roots the working tree is read from: the shell's own, or — with none
           // configured — where the shell starts, the `shellCwd` precedent.
           const diffRoots = () => {
-            const roots = shellRoots(host.config as Parameters<typeof shellRoots>[0]);
+            const roots = shellRoots(host.config);
             return roots.length ? roots : [startDir()];
           };
           // One walk of the tree. A walk that is still running takes no second one: the
@@ -1160,7 +1160,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The tree a closed panel showed is not the tree the next one opens on (a session
             // switch changes the roots): it goes with the panel, and the walk the next open
             // starts says `capturing baseline…` until it lands. The folds stay — a file the
-            // person folded stays folded where they put it (ruling 27).
+            // person folded stays folded where they put it.
             diffSectionsRef.current = [];
             setDiffSections([]);
             diffCursorRef.current = null;
@@ -1174,7 +1174,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             diffOpenRef.current = true;
             setDiffOpenState(true);
             // The rows are read at once; `loading` covers the wait — a root with no
-            // repository captures its baseline first.
+            // repository captures its baseline first, and a walk a closed panel left in
+            // flight answers nothing, so the wait is the remembered walk's, not this one's.
+            // Without it a reopened panel over an empty list would claim the tree is clean.
+            setDiffLoading(true);
             void walkDiff();
             host.notify();
           };
