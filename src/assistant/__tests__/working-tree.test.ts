@@ -137,6 +137,19 @@ test('a file over 2 MiB is noted as too large, never read', async () => {
   expect(by['big.txt']!.added + by['big.txt']!.removed).toBe(0);
 });
 
+test('a tracked file grown past 2 MiB is noted as too large instead of diffed', async () => {
+  const root = tmpRoot();
+  makeRepo(root, { 'dump.txt': 'one\n' });
+  write(root, 'dump.txt', Buffer.alloc(2 * 1024 * 1024 + 1, 'b'));
+
+  const sections = await workingTreeDiff([root]);
+  const f = byPath(sections[0]!.files)['dump.txt']!;
+  expect(f.status).toBe('M');
+  expect(f.note).toBe('too large');
+  expect(f.hunks).toBe('');
+  expect(f.added + f.removed).toBe(0);
+});
+
 test('a repository with no commit yet still lists what is not tracked', async () => {
   const root = tmpRoot();
   fs.mkdirSync(root, { recursive: true });
@@ -149,6 +162,29 @@ test('a repository with no commit yet still lists what is not tracked', async ()
   expect(sections).toHaveLength(1);
   expect(sections[0]!.label).toBe('vs HEAD');
   expect(byPath(sections[0]!.files)['first.txt']!.status).toBe('A');
+});
+
+test('a repo holding a nested repo: the folder is never an added file of the outer one', async () => {
+  const root = tmpRoot();
+  makeRepo(root, { 'a.txt': 'one\n' });
+  makeRepo(path.join(root, 'nested'), { 'n.txt': 'one\n' });
+  write(root, 'a.txt', 'two\n');
+  write(path.join(root, 'nested'), 'n.txt', 'two\n');
+
+  const sections = await workingTreeDiff([root]);
+  // The outer repository first (it is the root's own top), then the nested one.
+  expect(sections.map((s) => s.files.map((f) => f.path))).toEqual([['a.txt'], ['nested/n.txt']]);
+  expect(sections.every((s) => s.root === real(root) && s.baseline === 'head')).toBe(true);
+  // `git status` reports the nested repository as `?? nested/`; a directory is never
+  // an entry of the parent's section — the nested top shows its files itself.
+  const outer = byPath(sections[0]!.files);
+  expect(outer['nested']).toBeUndefined();
+  expect(Object.keys(outer).some((p) => p.startsWith('nested/'))).toBe(false);
+
+  // Staged as a gitlink (`A  nested`) it is still a folder, not an added file.
+  git(root, 'add', 'nested');
+  const afterStage = await workingTreeDiff([root]);
+  expect(afterStage[0]!.files.map((f) => f.path)).toEqual(['a.txt']);
 });
 
 test('a nested repository is a section of its own, and its paths are relative to the root', async () => {

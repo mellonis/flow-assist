@@ -231,6 +231,27 @@ async function hasHead(top: string): Promise<boolean> {
   try { await runGit(top, ['rev-parse', '--verify', '--quiet', 'HEAD']); return true; } catch { return false; }
 }
 
+// Whether a path a status entry names is a directory on disk. A nested repository
+// staged as a gitlink, or an untracked one git collapses to `sub/`, is a DIRECTORY:
+// the walk has a section of its own for it, and a folder drawn in its parent as an
+// added file with no diff is a phantom. A link is not a directory here — git keeps a
+// link's target as its text, and it is a file of the tree.
+function isDirectory(abs: string): boolean {
+  try { return fs.lstatSync(abs).isDirectory(); } catch { return false; }
+}
+
+// Whether a modified file is past the size the panel reads. A modification is diffed
+// by git, whose hunks are as big as the change: a lockfile or a generated dump of a
+// few megabytes is not something to carry through every refresh, so it is named and
+// not shown, as an added or a deleted file of that size is. A file gone from the disk
+// (a deletion the status has not caught up with) is not this check's business.
+function pastReadSize(abs: string, root: string): boolean {
+  let st: fs.Stats;
+  try { st = fs.lstatSync(abs); } catch { return false; }
+  if (!st.isFile() || !within(realOf(abs), root)) return false;
+  return st.size > MAX_FILE_BYTES;
+}
+
 // One file of a git top, as its own diff. An addition (staged or untracked) is diffed
 // from empty text and a deletion to empty text, so both read the way the panel draws
 // any other change; a modification is git's own diff of it.
@@ -248,6 +269,7 @@ async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A
     const d = unifiedDiff(read ? read.text : '', '', FULL_DIFF);
     return { added: d.added, removed: d.removed, hunks: d.diff };
   }
+  if (pastReadSize(path.resolve(top, entry.path), root)) return { added: 0, removed: 0, hunks: '', note: 'too large' };
   const own = segments.get(entry.path);
   const diff = own ?? (await runGit(top, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', 'HEAD', '--', entry.path])).toString('utf8');
   const seg = segmentOf(diff);
@@ -255,12 +277,20 @@ async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A
 }
 
 // One git top's section: everything changed under `root` that belongs to `top`.
-// `null` — nothing changed there, so there is nothing to draw.
-async function headSection(root: string, top: string): Promise<DiffSection | null> {
+// A nested repository is left to the section the walk gives it — git reports it as a
+// `sub/` entry or a staged gitlink, and it is a folder either way, never a file of
+// this top. `null` — nothing changed there, so there is nothing to draw.
+async function headSection(root: string, top: string, tops: string[]): Promise<DiffSection | null> {
+  // Repositories nested INSIDE this top own their paths. A top above it owns `top`
+  // itself and must not swallow what is inside.
+  const nested = tops.filter((t) => t !== top && within(t, top));
   const changed = parseStatus((await runGit(top, ['status', '--porcelain', '-z', '--untracked-files=all'])).toString('utf8'))
     .map((entry) => ({ entry, abs: path.resolve(top, entry.path) }))
     // Only what the root holds: a repository above it carries paths of its own too.
-    .filter(({ abs }) => abs !== root && within(abs, root));
+    .filter(({ abs }) => abs !== root && within(abs, root))
+    // Only what this top holds: a path at or under another one is that one's.
+    .filter(({ abs }) => !nested.some((t) => within(abs, t)))
+    .filter(({ abs }) => !isDirectory(abs));
   if (!changed.length) return null;
   const head = await hasHead(top);
   const segments = head ? splitDiff((await runGit(top, GIT_DIFF_ARGS)).toString('utf8')) : new Map<string, string>();
@@ -323,7 +353,7 @@ async function rootSections(given: string): Promise<DiffSection[]> {
   const scan = scanRoot(root);
   for (const top of scan.tops) {
     try {
-      const section = await headSection(root, top);
+      const section = await headSection(root, top, scan.tops);
       if (section) out.push(section);
     } catch {
       // git is not installed, or it failed on this top: the root keeps what is left
