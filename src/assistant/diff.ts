@@ -135,6 +135,16 @@ export function changeCounts(v: ChangeView): string {
   return v.diff || v.added || v.removed ? `· +${v.added} −${v.removed}` : '· binary, not shown';
 }
 
+// What the `/diff` panel's file row says after the path: `· +N −M` in `changeCounts`'
+// wording, or why the file is not drawn at all. The argument is the three fields the
+// answer needs rather than a `FileDiff`: `working-tree.ts` imports this module, so a
+// type import back would close a cycle, and this module stays dependency-free.
+export function fileDiffCounts(f: { added: number; removed: number; note?: 'binary' | 'too large' }): string {
+  if (f.note === 'binary') return '· binary, not shown';
+  if (f.note === 'too large') return '· too large, not shown';
+  return `· +${f.added} −${f.removed}`;
+}
+
 // The markdown the chat lays out for one change: the hunks in a ```diff fence, which
 // is what colours a diff green and red. The fence is longer than any backtick run in
 // the diff, so a changed Markdown file cannot close it early. Empty for a change with

@@ -24,7 +24,8 @@ import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownTex
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
-import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
+import { changeCounts, changeMarkdown, diffRows, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
+import { diffFileKey, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
@@ -2460,6 +2461,74 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
     cacheLine ? h(Text, { dim: true, wrap: 'truncate' }, cacheLine) : null,
     recallLine ? h(Text, { dim: true, wrap: 'truncate' }, recallLine) : null,
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: the model's · ${CAP.esc} / ${CAP.enter} close`));
+}
+
+// `/diff` — the working tree in a panel of its own: a header per section, a row per
+// file, and the whole hunks of every file that is open. Each row is ONE terminal line
+// (`wrap: 'truncate'`, the house rule for the chat's chrome): a hunk is drawn row by
+// row and never laid out as markdown, which would wrap a long line into a second row.
+//
+// Pure: the chat hands over what `workingTreeDiff` answered, what the person folded and
+// which file the cursor is on; nothing here reads the tree, the clock or the config.
+export function renderDiffPanel(p: {
+  sections: DiffSection[];
+  // Folded files, and the cursor, keyed `diffFileKey(root, path)`: a relative path
+  // repeats across roots, so each section's row folds and lights on its own.
+  collapsed: ReadonlySet<string>;
+  cursor: string | null;
+  wrap: number; // the panel's inner width
+  bg: string | undefined;
+  palette?: Record<string, string | undefined>;
+}) {
+  const m = p.palette ?? {};
+  const inner = Math.max(10, p.wrap || 10);
+  const rows: ReactNode[] = [];
+  const total = p.sections.reduce((n, s) => n + s.files.length, 0);
+  if (!total) rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false }, 'no changes in the working tree'));
+  p.sections.forEach((s, si) => {
+    if (!s.files.length) return;
+    // A section's header sums its own files: two roots are two answers, never one.
+    const added = s.files.reduce((n, f) => n + f.added, 0);
+    const removed = s.files.reduce((n, f) => n + f.removed, 0);
+    rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
+      cutStep(`diff · ${s.files.length} files +${added} −${removed} · ${s.label}`, inner)));
+    s.files.forEach((f, fi) => {
+      const key = diffFileKey(s.root, f.path);
+      const folded = p.collapsed.has(key);
+      const counts = fileDiffCounts(f);
+      const lead = `${folded ? '▸' : '▾'} ${f.status} `;
+      // The tail of the path is the part that says where one is, so it is what a cut keeps.
+      const room = Math.max(8, inner - cellWidth(lead) - cellWidth(counts) - 1);
+      const lit = p.cursor === key ? { color: m.accent } : {};
+      rows.push(h(Box, { key: `f${si}-${fi}`, flexDirection: 'row', flexShrink: 0 },
+        h(Text, { wrap: 'truncate' }, lead),
+        h(Text, { ...lit, wrap: 'truncate' }, cutLeft(f.path, room)),
+        h(Text, { dim: true, wrap: 'truncate' }, ` ${counts}`)));
+      if (folded) return;
+      // A file with no hunks at all says why where they would have been.
+      if (f.note) {
+        const why = f.note === 'binary' ? 'binary' : 'too large';
+        rows.push(h(Text, { key: `n${si}-${fi}`, dim: true, wrap: 'truncate', selectable: false }, `  ${why} — not shown`));
+        return;
+      }
+      // The hunks are drawn WHOLE — no cap on their lines: the panel is a reader, not a
+      // summary. Each row carries the number it has in the FILE; the `@@` row is left
+      // out, since these numbers say where one is on every row.
+      const hunkRows = diffRows(f.hunks);
+      const width = Math.max(1, ...hunkRows.map((r) => r.no.length));
+      hunkRows.forEach((r, ri) => {
+        // The number is chrome — dim, out of a drag — and the line is coloured by what
+        // it does: what came in, what went out, or the context around it. A palette
+        // without `ok`/`warn` leaves those rows the terminal's own ink, never dim.
+        const changed = r.text.startsWith('+') || r.text.startsWith('-');
+        const color = r.text.startsWith('+') ? m.ok : r.text.startsWith('-') ? m.warn : undefined;
+        rows.push(h(Box, { key: `h${si}-${fi}-${ri}`, flexDirection: 'row', flexShrink: 0 },
+          h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${r.no.padStart(width)} `),
+          changed ? h(Text, { color, wrap: 'truncate' }, r.text) : h(Text, { dim: true, wrap: 'truncate' }, r.text)));
+      });
+    });
+  });
+  return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, backgroundColor: p.bg }, rows);
 }
 
 // The question's free-text row: its prompt, indented under the options, and the width
