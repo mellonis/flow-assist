@@ -6,10 +6,12 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { askClock } from '../assistant/child-ask-guard.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const realNow = askClock.now;
+afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-e2e-')));
@@ -222,8 +224,11 @@ test('Esc during a confirmed run_command stops the command with the answer', asy
   ui.app.unmount();
 });
 
-test("a background task's command waits for the person: the y/n is offered under its label", async () => {
+test("a background task's command waits for the person, and their yes runs it", async () => {
   const root = rootDir();
+  // The pause before a child's y/n takes a key, moved as the clock rather than slept.
+  const clock = { t: 10_000 };
+  askClock.now = () => clock.t;
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'subagent', args: { task: 'create a file' } }],
@@ -239,6 +244,10 @@ test("a background task's command waits for the person: the y/n is offered under
   // before it.
   expect(ui.backend.lastFrame).toContain('create a file');
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(path.join(root, 'made.txt')));
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
   ui.app.unmount();
 });
 

@@ -385,6 +385,8 @@ test('the subagent tool with write: false or writes: \'deny\' declines a write: 
     worker(model, 'make u').script(write('u.txt'), [{ text: 'could not' }]);
     const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
     await rig.conv.send('make it');
+    // Nothing is left to ask, so the answer carries no ask sentence either.
+    expect(String(rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'subagent')?.result ?? '')).not.toContain('It may ask the person to approve each write');
     await over(rig);
     expect(rig.conv.offered()).toBeNull();
     expect(made(rig, 'u.txt')).toBe(false);

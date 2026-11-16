@@ -63,6 +63,7 @@ test('a task runs in the background and reports back', async () => {
   // Counted at 1 from arming — while it works and while its y/n waits — and 0 only
   // after its end frees the slot, so the last render shows none in the background.
   await rig.until(() => counts.length > 0 && counts[counts.length - 1] === 0);
+  expect(counts[0]).toBe(1);
   expect(counts.slice(0, -1).every((c) => c === 1)).toBe(true);
 });
 

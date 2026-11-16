@@ -28,4 +28,22 @@ test('a task may not grant itself allow', () => {
   const r = taskWritesOf({ writes: 'allow' });
   expect(r.writes).toBe('ask');
   expect(r.note).not.toBe('');
+  // The note is the capability rule: the person's y/n (the auto mode answers), never a
+  // promise the mode cannot keep.
+  expect(r.note).toContain("person's y/n");
+  expect(r.note).not.toContain('config_set');
+});
+
+test('writes: null reads as the optional key left out: a bare worker', () => {
+  expect(taskWritesOf({ writes: null })).toEqual({ writes: 'ask', note: '' });
+});
+
+test('writes wins in the reverse conflict: allow with write: false follows the allow path, never deny', () => {
+  expect(taskWritesOf({ writes: 'allow', write: false })).toEqual(taskWritesOf({ writes: 'allow' }));
+});
+
+test('a second unknown writes value is an error naming the three', () => {
+  const r = taskWritesOf({ writes: 'nope' });
+  expect(r).toMatchObject({ writes: 'error' });
+  expect(r.note).toContain('allow, ask, deny');
 });

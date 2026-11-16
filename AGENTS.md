@@ -1398,7 +1398,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
   auto mode, then the person's y/n), `always-no` (every write declined, journaled
-  `by: 'background'` — a background task's conversation), `none` (nobody to ask:
+  `by: 'background'`), `none` (nobody to ask:
   no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
   confirmation).
   `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
@@ -1408,9 +1408,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   running — the one-shot prompt withholds `subagent` and `remind`, which
   have nothing to deliver to without the app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
-  - a background task — declines: a background task's conversation has the policy
-    `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
-    so does a subagent the model starts (its lines are in its own journal, when it has one). A child with `writes` other than `'deny'` (`ChildSpec.writes`,
+  - a background task with `writes: 'deny'`, or one where nobody can answer — declines:
+    its conversation has the policy
+    `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label. A child with `writes` other than `'deny'` (`ChildSpec.writes`,
     and every subagent the person starts) has the policy `ask` (`allow-writes` when it
     is `'allow'`), where the host has a person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
@@ -3417,7 +3417,7 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a
   plugin's `run_command` — and says it in the log, `ask` waits for the person's yes on each
   (the `subagent` tool
-  starts a `task` with `writes: 'ask'` when the call does not name `writes: 'deny'`:
+  starts a `task` with `writes: 'ask'` when it does not resolve to `deny`:
   `ai.taskRounds` rounds, the worker
   prompt, its y/n offered to the session like a subagent's — `writes` wins over the
   deprecated `write`, `true` reading as `ask` and `false` as `deny`) — where the host's root can ask at all (`canAsk`; with nobody to ask the

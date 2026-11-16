@@ -118,6 +118,22 @@ test('an agent task may write under the person\'s y/n, as a task started with wr
   await childDone(rig);
 });
 
+test('a named agent with `writes: \'deny\'` still gets the interim `ask`: its write waits for the person', async () => {
+  const { model, child, rig } = rigFor('GO-WD');
+  project(rig, 'job', doc('', 'GO-WD go'));
+  child.script([{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'deny' });
+  // The named grant is the interim (`writes: named ? 'ask' : mapped.writes`): the
+  // answer carries the ask sentence and the write is offered however the call spelled
+  // denial — the file's own `writes` wins when Task 3 replaces that line.
+  expect(answer).toContain('may ask the person');
+  await rig.until(() => rig.conv.offered() !== null);
+  expect(rig.conv.offered()).toMatchObject({ path: ['job'] });
+  rig.conv.offered()!.owner.answerConfirm(false);
+  await childDone(rig);
+  expect(fs.existsSync(path.join(rig.root, 'denied.txt'))).toBe(false);
+});
+
 test('a second start while the first runs is labeled job-2', async () => {
   const { model, child, rig } = rigFor('GO-C');
   project(rig, 'job', doc('', 'GO-C go'));

@@ -6,8 +6,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 ## Unreleased
 
 - **`subagent` takes `writes`, and a bare task is a worker.** A background task writes
-  and runs commands through the person's y/n (the session's auto mode answers) — each
-  write and each command stops for the person's yes in the chat that started it. The
+  and runs commands through the person's y/n (the session's auto mode answers). The
   call's `writes` is `allow`, `ask` (the default) or `deny`: `writes: 'deny'` narrows a
   task to read-only (write tools and run_command are declined), and a call may not
   grant its own `allow` — it reads as `ask`, said in the answer. `write:` remains as
