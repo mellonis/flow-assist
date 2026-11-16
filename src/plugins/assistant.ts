@@ -76,7 +76,7 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
-import { roleStart } from '../assistant/model-roles.js';
+import { modelChoice, modelRows, roleStart } from '../assistant/model-roles.js';
 import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
@@ -121,6 +121,7 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'auto', description: 'what runs without asking', values: ['reads', 'all', 'off'] },
   { name: 'notes', description: 'how the steps between tool calls are drawn', values: NOTES_MODES },
   { name: 'mode', description: 'the chat\'s layout', values: CHAT_MODES },
+  { name: 'model', description: 'the model this conversation runs' },
   { name: 'log', description: 'share the tail of the host log' },
   { name: 'exit', description: 'close the chat' },
 ];
@@ -775,7 +776,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const chatCommandDefs: ChatCommandDef[] = [
             ...CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
               ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
-              : c.name === 'subagent' || c.name === 'sub'
+              : c.name === 'model'
+                // What the config knows, read when the field is drawn: the reset, the
+                // roles, then the catalogue's ids — each labelled as `/model` says it.
+                ? { ...c, values: () => modelRows(conv.deps.config().ai).map((r) => ({ value: r.name, label: r.label })) }
+                : c.name === 'subagent' || c.name === 'sub'
                 // Only the first word completes, and only an agent: `@` and its names.
                 ? { ...c, complete: (before: string[]) => (before.length ? [] : agentCompletions(agentsFound())) }
                 : c.name === 'skill'
@@ -1633,6 +1638,30 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return;
                 }
                 setMode(v as ChatMode);
+                return;
+              }
+              case 'model': {
+                // Whose model this conversation runs. The config defines the names; the
+                // choice is the session's and is saved with it, never written back to the
+                // config.
+                const name = arg.trim();
+                setField('');
+                const ai = conv.deps.config().ai;
+                if (!name) {
+                  // Said where things stand — in the chat, as a note (display only, like
+                  // /memory's list): a toast is drawn under a chat that covers the whole
+                  // terminal.
+                  conv.pushNote(`model: ${conv.effectiveModel() ?? 'the provider\'s default'} · /model <name> to change`);
+                  host.notify();
+                  return;
+                }
+                const got = modelChoice(ai, name);
+                if ('error' in got) { setError(got.error); return; }
+                conv.model = got.model ?? undefined; // `null` — back to ai.model
+                conv.save();
+                const row = modelRows(ai).find((r) => r.name === name);
+                conv.pushNote(`model: ${row?.label ?? name}`);
+                host.notify();
                 return;
               }
               case 'log': {
