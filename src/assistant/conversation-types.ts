@@ -103,6 +103,10 @@ export interface TurnEnd {
   stoppedBy?: string;            // the key glyph that stopped it: 'Esc', '^c'
   error?: string;
   limit?: { rounds: number; lastStep: string; by?: 'tokens'; turnTokens?: number };
+  // The loop guard's cut: the characters of the repeated run it dropped. The text before
+  // the cut is the answer (`loopTurn` closes the turn beside it); a cut from the
+  // answer's first characters kept nothing.
+  looped?: number;
   ms: number;
   tokens?: number;
   cached?: number;
@@ -241,6 +245,9 @@ export interface ChildResult {
   text: string;                  // the child's final text, trimmed ('' when none)
   error?: string;                // the turn's error, when it failed
   limit?: { rounds: number; lastStep: string; by?: 'tokens' };
+  // The loop guard's cut: the characters of the repeated run it dropped, named in the
+  // result as a limit is.
+  looped?: number;
   // The text delivered to the session or subagent that takes the child's result ('' when
   // none did: it was closed first, or the child was stopped with it), and where it
   // landed: its title, and whether it is the conversation on screen (or no chat draws
@@ -257,12 +264,14 @@ export interface ChildResult {
 // What a stopped child says when it had said nothing yet.
 export const STOPPED_EMPTY = 'nothing said yet';
 // A child's result without its header line: the reason it failed, the text a stopped one
-// had written (or that it had written none), or its text and the limit it stopped at.
+// had written (or that it had written none), or its text with the limit it stopped at
+// and the loop its answer was cut at, each as a clause of its own.
 export function childResultBody(r: ChildResult): string {
   if (r.outcome === 'stopped') return r.text || STOPPED_EMPTY;
   if (r.outcome === 'failed') return r.error ?? r.outcome;
   const lim = r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '';
-  return (r.text || '(no output)') + lim;
+  const looped = r.looped ? `\nthe answer was looping (${r.looped} chars dropped) — the loop is not kept in the model's history` : '';
+  return (r.text || '(no output)') + lim + looped;
 }
 // A child's result as its session reads it: `<label> finished:`, `<label> failed:` or
 // `<label> stopped:`, then the body.

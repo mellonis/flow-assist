@@ -786,6 +786,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       ...(aborted ? { stoppedBy: c.stopKey || keyGlyph('escape') } : {}),
       ...(failed ? { error: failure } : {}),
       ...(roundLimit ? { limit: { rounds: roundLimit, lastStep, ...(limitTokens !== undefined ? { by: 'tokens' as const, turnTokens: limitTokens } : {}) } } : {}),
+      ...(loopedInfo ? { looped: loopedInfo.dropped } : {}),
       ...(spent ? { tokens: spent } : {}),
       ...(cachedSpent ? { cached: cachedSpent } : {}),
     };
@@ -835,7 +836,7 @@ export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.paren
 // asked, and the summary folded under it.
 export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], signal: AbortSignal): ReturnType<typeof compactConversation> {
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
-  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), maxTokens: answerCeilingFor(c, ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
+  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), maxTokens: answerCeilingFor(c, ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false), onNote: (line: string) => c.deps.pushLog(line) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   // The skills the history loaded are named after the summary: their text goes with it. The
   // person's loads are read from the kept history, where their mark is (the model's view drops it).

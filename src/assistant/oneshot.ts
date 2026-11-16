@@ -11,6 +11,9 @@ import type { TurnEnd } from './conversation-types.js';
 // - a limit (`ai.maxRounds`, `ai.maxTurnTokens`): said on stderr, exit 2;
 // - a failure: the error on stderr, as the command line prints any error, exit 1;
 // - nothing sent (`end` null: an empty prompt): said on stderr, exit 1.
+// An answer the loop guard cut carries one stderr line beside all of these. The text
+// before the cut is delivered as the answer (its own outcome, exit 0); a cut from the
+// answer's first characters kept nothing and answers nothing — the limit's exit 2.
 // A settings file changed on disk during the run (`settingsChanged`) adds one line after
 // these and never changes the exit code: the change is not applied (src/config/load.ts,
 // the guard). Every stderr line passes `redactSecrets`, as every line the chat shows
@@ -25,13 +28,25 @@ export function oneShotOutcome(end: TurnEnd | null, answer: string, settingsChan
 }
 function turnOutcome(end: TurnEnd | null, answer: string): OneShotOutcome {
   if (!end) return { err: 'flow-assist: the prompt is empty — flow-assist "your request"\n', code: 1 };
-  if (end.outcome === 'answer' || end.outcome === 'empty') return { out: `${answer}\n`, code: 0 };
-  if (end.outcome === 'limit' && end.limit) return { err: `${redactSecrets(limitLine(end.limit))}\n`, code: 2 };
-  return { err: `${redactSecrets(end.error ?? `the turn ended: ${end.outcome}`)}\n`, code: 1 };
+  const looped = Number(end.looped ?? 0) > 0 ? `${redactSecrets(loopLine(Number(end.looped)))}\n` : '';
+  if (end.outcome === 'answer' || end.outcome === 'empty') {
+    // A loop that kept the head delivers it, saying what was dropped; one that kept
+    // nothing answers nothing at all.
+    if (!looped) return { out: `${answer}\n`, code: 0 };
+    return end.outcome === 'answer' ? { out: `${answer}\n`, err: looped, code: 0 } : { err: looped, code: 2 };
+  }
+  if (end.outcome === 'limit' && end.limit) return { err: `${redactSecrets(limitLine(end.limit))}\n${looped}`, code: 2 };
+  return { err: `${redactSecrets(end.error ?? `the turn ended: ${end.outcome}`)}\n${looped}`, code: 1 };
 }
 
 // The limit a turn stopped at, as the journal's export says it.
 export function limitLine(limit: NonNullable<TurnEnd['limit']>): string {
   const what = limit.by === 'tokens' ? `${limit.turnTokens ?? 0} tokens (ai.maxTurnTokens)` : `${limit.rounds} rounds (ai.maxRounds)`;
   return `flow-assist: stopped after ${what} — no answer${limit.lastStep ? `; last step: ${limit.lastStep}` : ''}`;
+}
+
+// The loop a turn's answer was cut at, as the chat's warn line says it (`loopTurn`
+// closes the model's history beside it).
+export function loopLine(dropped: number): string {
+  return `flow-assist: the answer was looping (${dropped} chars dropped) — the loop is not kept in the model's history`;
 }
