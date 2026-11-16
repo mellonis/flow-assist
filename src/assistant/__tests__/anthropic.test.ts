@@ -259,7 +259,7 @@ test('the provider is read as written by a person; a value this host does not kn
   expect(llmConfigNotes({ provider: 'openai' })).toEqual([]);
   expect(llmConfigNotes({})).toEqual([]);
   expect(llmConfigNotes({ provider: 'openrouter' })).toEqual(['ai.provider "openrouter" is not one this host knows — read as an OpenAI-compatible API; the other one is "anthropic"']);
-  expect(llmConfigNotes({ provider: 'anthropic', thinking: { budgetTokens: 10000 } })[0]).toMatch(/^ai\.thinking\.budgetTokens 10000 does not fit under ai\.maxTokens 8192 .* sent as 7168; raise ai\.maxTokens/);
+  expect(llmConfigNotes({ provider: 'anthropic', thinking: { budgetTokens: 40000 } })[0]).toMatch(/^ai\.thinking\.budgetTokens 40000 does not fit under the answer ceiling of 32000 .* sent as 30976; raise ai\.maxTokens/);
   expect(llmConfigNotes({ provider: 'anthropic', thinking: { budgetTokens: 4000 } })).toEqual([]);
 });
 
@@ -269,13 +269,13 @@ test('tools are name, description and input_schema only', () => {
 
 test('the endpoint: an OpenAI-compatible API unless the provider says anthropic, which brings its own defaults', () => {
   const env = { LLM_TOKEN: 'l', ANTHROPIC_API_KEY: 'a', MINE: 'm' };
-  expect(llmOpts({ baseUrl: 'http://x/v1', model: 'gpt' }, env)).toEqual({ provider: 'openai', baseUrl: 'http://x/v1', model: 'gpt', token: 'l', tokenEnv: 'LLM_TOKEN', maxTokens: 8192, retries: 10, retryDelay: 3 });
+  expect(llmOpts({ baseUrl: 'http://x/v1', model: 'gpt' }, env)).toEqual({ provider: 'openai', baseUrl: 'http://x/v1', model: 'gpt', token: 'l', tokenEnv: 'LLM_TOKEN', maxTokens: 32000, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'openai-ish', model: 'gpt' }, env).provider).toBe('openai');
-  expect(llmOpts({ provider: 'anthropic', model: 'default-model' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'default-model', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 8192, retries: 10, retryDelay: 3 });
+  expect(llmOpts({ provider: 'anthropic', model: 'default-model' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'default-model', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 32000, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'anthropic', tokenEnv: 'MINE', baseUrl: 'http://proxy/v1', maxTokens: 2000, thinking: { adaptive: true } }, env))
     .toMatchObject({ baseUrl: 'http://proxy/v1', token: 'm', tokenEnv: 'MINE', maxTokens: 2000, thinking: { adaptive: true } });
   expect(llmOpts({ provider: 'anthropic', thinking: { budgetTokens: 2048 } }, env).thinking).toEqual({ budgetTokens: 2048 });
-  expect(llmOpts(undefined, {})).toEqual({ provider: 'openai', tokenEnv: 'LLM_TOKEN', maxTokens: 8192, retries: 10, retryDelay: 3 });
+  expect(llmOpts(undefined, {})).toEqual({ provider: 'openai', tokenEnv: 'LLM_TOKEN', maxTokens: 32000, retries: 10, retryDelay: 3 });
 });
 
 test("a round's tail goes after the cache breakpoint — a text block of the last user turn, or a user turn of its own", () => {

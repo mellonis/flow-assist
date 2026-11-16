@@ -48,7 +48,7 @@ test('a text answer streams from /messages, with the API\'s headers, a max_token
   expect(model.headers[0]).toMatchObject({ 'x-api-key': 'sk-ant-scripted', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' });
   expect(model.headers[0]!.authorization).toBeUndefined();
   const body = sent(model, 0);
-  expect(body).toMatchObject({ model: 'default-model', max_tokens: 8192, stream: true });
+  expect(body).toMatchObject({ model: 'default-model', max_tokens: 32_000, stream: true });
   expect('stream_options' in body).toBe(false);
   expect('thinking' in body).toBe(false);
   // The system prompt left the messages for the top-level field. Two breakpoints: the
@@ -255,7 +255,7 @@ test('with a fixed budget, a thinking block refused goes with the thinking field
   expect(sent(model, 0).thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
   for (const i of [1, 2]) {
     expect('thinking' in sent(model, i)).toBe(false);
-    expect(sent(model, i).max_tokens).toBe(8192);
+    expect(sent(model, i).max_tokens).toBe(32_000);
     expect(JSON.stringify(sent(model, i).messages)).not.toContain('"type":"thinking"');
   }
   expect(ui.backend.lastFrame).toContain('Noon.');
