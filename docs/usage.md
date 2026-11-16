@@ -685,7 +685,7 @@ assistant is sent: your answer reaches it once, as the tool's result.
 for a sustained repeat — the same short stretch of text over and over — and, once the
 repeat has run on for some four hundred characters, stops the turn where it began. What
 was written before it stays as the answer, and the line under it, in the warn colour,
-says what was dropped: `⚠ stopped — the answer was looping (2 140 chars dropped); it is
+says what was dropped: `⚠ stopped — the answer was looping (2140 chars dropped); it is
 not kept in the model's history`. None of it reaches the assistant: the next request
 carries the kept answer and one line of the host's saying where it stopped, so the repeat
 cannot come back to be repeated. The `⏎ continue` offer is there as after a turn that ran

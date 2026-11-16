@@ -2132,7 +2132,10 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - `compact` — the summary and its row, `auto` when the chat compacted by itself;
     `end` — how the turn ended: duration, tokens, stopped or failed, `roundLimit` with
     `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
-    and the text of a round cut off, which never reached `onLiveCommit`.
+    `looped` — the code units the loop guard's hit dropped — with `loopTail`, the text
+    from the run's start (at most 2 000 characters), and the text of a round cut off,
+    which never reached `onLiveCommit`. `/export` draws such a turn as `stopped (the
+    answer looped)`.
   - `task-end` — a background task that stopped without finishing: `task` (its label),
     `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session,
     `exit` when the process exited while it ran or waited on its delay (`closeAll`),
@@ -2759,6 +2762,14 @@ reads as one). The text of the round that was cut off is not kept. The closing
 message is model-side only: the screen already says `stopped (Esc)` or shows the
 error. It is saved with the session like the rest of the conversation's `api`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
+
+**A turn the loop guard stopped is closed the same way, without an error.** Its kept
+text was pushed as the answer before the cut and stays the answer; the chat appends
+`loopTurn(dropped, kept)` — the model's own voice saying where it stopped, or that
+nothing of the answer was kept (`kept` is whether any text survived the cut) — beside
+`roundCapTurn`, so `⏎ continue` writes on from there, or again from the start. None of
+the dropped run goes back into the history, which is what keeps the next rounds from
+repeating it.
 
 **A provider's refusal is read, not pasted** (`llmErrorMessage` in
 `src/assistant/llm-error.ts`, pure). The raw body is not the error: pasted as-is it
@@ -4582,6 +4593,19 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
   (the conversation's `continueOffer`) goes with the next message and wherever the empty-answer notice
   is reset.
+- **A looped answer is stopped where the repeat began, and the same `⏎ continue`
+  carries the work on** (`src/assistant/loop-guard.ts`, pure: one guard per answer, fed
+  the round's accumulated text, firing once — a unit of 1–32 code units repeating
+  EXACTLY, whole repeats counted back from the text's end, `LOOP_MIN_RUN` = 400 code
+  units of run, with `LOOP_TAIL` = 512 looked at for candidate units). On the hit
+  `agentChat` keeps the text before the run and records `looped` on the result, aborts
+  the round's own stream — `roundStop`, a controller the turn's own signal feeds, so the
+  person's Esc still stops the turn — and drops the call fragments it had begun: a
+  stopped round is the answer round, and nothing asks the model again. The chat draws
+  the kept answer, then `⚠ stopped — the answer was looping (N chars dropped); it is
+  not kept in the model's history` in the warn colour, and sets the same
+  `continueOffer`. The guard is always on and has no config key: a false positive costs
+  a visible trim, a silent loop costs the session.
 - **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
   delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
   `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
