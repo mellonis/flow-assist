@@ -37,6 +37,14 @@ const makeRepo = (dir: string, files: Record<string, string> = { 'a.txt': 'one\n
   git(dir, 'commit', '-qm', 'init');
 };
 const byPath = (files: FileDiff[]) => Object.fromEntries(files.map((f) => [f.path, f]));
+// The store the module keeps for one root: `<hostStateDir()>/snapshot/<id>/`.
+const storeDir = (root: string) =>
+  path.join(hostStateDir(), 'snapshot', crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16));
+// The capture's ceiling is a module constant; its test-only seam lowers it so the
+// cap is exercised without twenty thousand files on disk. Read through an optional
+// member so the test file itself loads against an older module.
+const capSeam = async (): Promise<{ setSnapshotMaxFilesForTests?: (n: number) => void }> =>
+  (await import('../working-tree.ts')) as unknown as { setSnapshotMaxFilesForTests?: (n: number) => void };
 
 test('diffFileKey names a file by its root and path, since one path repeats across roots', () => {
   expect(diffFileKey('/w/a', 'src/x.ts')).toBe('/w/a\u0000src/x.ts');
@@ -374,8 +382,7 @@ test('a corrupt index.json is captured again rather than trusted', async () => {
   const root = tmpRoot();
   write(root, 'x.txt', 'one\n');
   await ensureSnapshot(root);
-  const id = crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
-  const indexPath = path.join(hostStateDir(), 'snapshot', id, 'index.json');
+  const indexPath = path.join(storeDir(root), 'index.json');
 
   // The store's index is rewritten after the file changed: the re-capture swallows
   // the edit, so the baseline is the text on disk now, not the one before it.
@@ -402,4 +409,145 @@ test('ensureSnapshot answers null for a root that is not a directory', async () 
 
 test('a root that is not there yields nothing and never throws', async () => {
   expect(await workingTreeDiff([path.join(tmpRoot(), 'missing')])).toEqual([]);
+});
+
+// ── the cap, the store's integrity, and yielding ────────────────────────────
+
+test('a capture that stops at the cap never draws what it left out as an addition', async () => {
+  const root = tmpRoot();
+  for (let i = 0; i < 4; i++) write(root, `f${i}.txt`, `one ${i}\n`);
+  const seam = await capSeam();
+  seam.setSnapshotMaxFilesForTests?.(2);
+  try {
+    await ensureSnapshot(root);
+    // Nothing on disk changed, so nothing is a change: the two paths the capture
+    // never reached are not additions, and the cap is recorded in the index.
+    expect(await workingTreeDiff([root])).toEqual([]);
+    expect(JSON.parse(fs.readFileSync(path.join(storeDir(root), 'index.json'), 'utf8')).truncated).toBe(true);
+
+    // An indexed file still reviews against its own bytes, and a dropped one stays out.
+    write(root, 'f0.txt', 'one 0, changed\n');
+    const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+    const by = byPath(s.files);
+    expect(by['f0.txt']!.status).toBe('M');
+    expect(by['f2.txt']).toBeUndefined();
+    expect(by['f3.txt']).toBeUndefined();
+  } finally {
+    seam.setSnapshotMaxFilesForTests?.(20_000);
+  }
+});
+
+test('an index that says its capture was truncated draws no addition it cannot vouch for', async () => {
+  const root = tmpRoot();
+  write(root, 'kept.txt', 'one\n');
+  write(root, 'dropped.txt', 'left out of the baseline\n');
+  // A baseline whose capture hit the cap: `kept.txt` was indexed, `dropped.txt` was not.
+  const dir = storeDir(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const hash = crypto.createHash('sha256').update('one\n').digest('hex');
+  fs.writeFileSync(path.join(dir, hash), 'one\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify({
+    root: real(root), taken: Date.now(), truncated: true, files: { 'kept.txt': hash },
+  }));
+
+  // A path the index does not name could be new or could be one the cap left out,
+  // and a truncated baseline cannot tell them apart — so it draws neither.
+  expect(await workingTreeDiff([root])).toEqual([]);
+
+  write(root, 'kept.txt', 'one, changed\n');
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  const by = byPath(s.files);
+  expect(by['kept.txt']!.status).toBe('M');
+  expect(by['kept.txt']!.hunks).toContain('+one, changed');
+  expect(by['dropped.txt']).toBeUndefined();
+});
+
+test('an index hash that is not a sha-256 file name is never followed', async () => {
+  const root = tmpRoot();
+  write(root, 'x.txt', 'one\n');
+  await ensureSnapshot(root);
+  const outside = tmpRoot();
+  write(outside, 'secret.txt', 'TOPSECRET\n');
+
+  // A hand-edited index naming a path outside the store in place of a blob hash.
+  const dir = storeDir(root);
+  const indexPath = path.join(dir, 'index.json');
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  index.files['x.txt'] = path.relative(dir, path.join(outside, 'secret.txt'));
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  write(root, 'x.txt', 'two\n');
+
+  // The index is corrupt, so it is not trusted: the root is captured again and the
+  // file outside the store is never opened as a blob.
+  const sections = await workingTreeDiff([root]);
+  expect(sections).toEqual([]);
+  expect(JSON.stringify(sections)).not.toContain('TOPSECRET');
+});
+
+test('an index of another root, or with a flag that is not a boolean, is captured again', async () => {
+  const root = tmpRoot();
+  write(root, 'x.txt', 'one\n');
+  await ensureSnapshot(root);
+  const indexPath = path.join(storeDir(root), 'index.json');
+  const readIdx = () => JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+
+  const elsewhere = readIdx();
+  elsewhere.root = real(tmpRoot());
+  fs.writeFileSync(indexPath, JSON.stringify(elsewhere));
+  write(root, 'x.txt', 'two\n');
+  expect(await workingTreeDiff([root])).toEqual([]); // re-captured: 'two' is the baseline
+
+  const badFlag = readIdx();
+  badFlag.truncated = 'yes';
+  fs.writeFileSync(indexPath, JSON.stringify(badFlag));
+  write(root, 'x.txt', 'three\n');
+  expect(await workingTreeDiff([root])).toEqual([]);
+
+  // The re-captured index is sound again, so the next edit is a change.
+  write(root, 'x.txt', 'four\n');
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  expect(byPath(s.files)['x.txt']!.hunks).toContain('-three');
+  expect(byPath(s.files)['x.txt']!.hunks).toContain('+four');
+});
+
+test('files named like object members are tracked by their own entry', async () => {
+  const root = tmpRoot();
+  for (const name of ['__proto__', 'toString', 'hasOwnProperty', 'constructor']) write(root, name, `body of ${name}\n`);
+  await ensureSnapshot(root);
+  // Nothing changed: no inherited member stands in for a hash, and a path named
+  // `__proto__` is an entry like any other rather than a dropped assignment.
+  expect(await workingTreeDiff([root])).toEqual([]);
+
+  // A file that appears after the capture is an addition whatever it is called.
+  write(root, 'valueOf', 'new\n');
+  const added = byPath((await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!.files);
+  expect(added['valueOf']!.status).toBe('A');
+  expect(added['valueOf']!.hunks).toContain('+new');
+
+  // An edit of a member-named file is a modification against its own baseline.
+  write(root, '__proto__', 'changed\n');
+  const by = byPath((await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!.files);
+  expect(by['__proto__']!.status).toBe('M');
+  expect(by['__proto__']!.hunks).toContain('-body of __proto__');
+  expect(by['__proto__']!.hunks).toContain('+changed');
+  expect(by['valueOf']!.status).toBe('A');
+});
+
+test('a long capture and a long comparison both yield to the event loop', async () => {
+  const root = tmpRoot();
+  const names = Array.from({ length: 250 }, (_, i) => `f${String(i).padStart(3, '0')}.txt`);
+  for (const name of names) write(root, name, 'one\n');
+
+  // A macrotask registered before the work resumes only after the work yields: with
+  // the loop held for the whole walk, a frame could never be painted meanwhile.
+  const firstMove = async (work: Promise<unknown>, tag: string): Promise<string[]> => {
+    const order: string[] = [];
+    const loopTurn = new Promise<void>((resolve) => setImmediate(() => { order.push('loop'); resolve(); }));
+    await Promise.all([work.then(() => { order.push(tag); }), loopTurn]);
+    return order;
+  };
+
+  expect(await firstMove(ensureSnapshot(root), 'capture')).toEqual(['loop', 'capture']);
+  for (const name of names) write(root, name, 'two\n');
+  expect(await firstMove(workingTreeDiff([root]), 'diff')).toEqual(['loop', 'diff']);
 });

@@ -104,7 +104,7 @@ function runGit(dir: string, argv: string[]): Promise<Buffer> {
   });
 }
 
-type TextRead = { text: string } | { note: 'binary' | 'too large' } | null;
+type TextRead = { text: string; bytes?: Buffer } | { note: 'binary' | 'too large' } | null;
 
 // Bytes as the text a diff shows; a NUL or a byte sequence that is not UTF-8 is a
 // binary file, and a text that big is not read at all.
@@ -118,17 +118,21 @@ function decodeText(buf: Buffer): TextRead {
 // One file of the working tree, as a diff sees it. A link is not followed for its
 // content: git records the LINK TARGET as the file's text, and reading through it
 // would put a file of somebody else's into the panel. `null` — nothing readable here
-// (gone, a directory, or a real location outside the root).
-function readWorkingFile(abs: string, root: string): TextRead {
+// (gone, a directory, or a real location outside the root). A text read keeps its
+// raw bytes, so a caller can compare content without encoding it again.
+async function readWorkingFile(abs: string, root: string): Promise<TextRead> {
   let st: fs.Stats;
-  try { st = fs.lstatSync(abs); } catch { return null; }
+  try { st = await fs.promises.lstat(abs); } catch { return null; }
   if (st.isSymbolicLink()) {
-    try { return { text: fs.readlinkSync(abs) }; } catch { return null; }
+    try { return { text: await fs.promises.readlink(abs) }; } catch { return null; }
   }
   if (!st.isFile()) return null;
   if (!within(realOf(abs), root)) return null;
   if (st.size > MAX_FILE_BYTES) return { note: 'too large' };
-  try { return decodeText(fs.readFileSync(abs)); } catch { return null; }
+  let buf: Buffer;
+  try { buf = await fs.promises.readFile(abs); } catch { return null; }
+  const read = decodeText(buf);
+  return read && 'text' in read ? { text: read.text, bytes: buf } : read;
 }
 
 // A file's text in HEAD, for a deletion's removed lines. `null` — HEAD has no such
@@ -260,7 +264,7 @@ function pastReadSize(abs: string, root: string): boolean {
 // any other change; a modification is git's own diff of it.
 async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A' | 'M' | 'D', segments: Map<string, string>, head: boolean): Promise<Omit<FileDiff, 'path' | 'status'>> {
   if (status === 'A') {
-    const read = readWorkingFile(path.resolve(top, entry.path), root);
+    const read = await readWorkingFile(path.resolve(top, entry.path), root);
     if (read && 'note' in read) return { added: 0, removed: 0, hunks: '', note: read.note };
     const d = unifiedDiff('', read ? read.text : '', FULL_DIFF);
     return { added: d.added, removed: d.removed, hunks: d.diff };
@@ -348,7 +352,27 @@ function scanRoot(root: string): RootScan {
 // exactly when the panel first looks at it. So each root's baseline is captured
 // ONCE and kept on the host's disk: content-addressed blobs plus one index per
 // root. Everything after the capture shows; nothing before it can.
+// A file that is indexed is read whole for its hash, so one capture stops at this
+// count rather than hashing a whole workspace's tree. `snapshotMaxFiles` is the live
+// ceiling; `setSnapshotMaxFilesForTests` is the only thing that moves it.
 const SNAPSHOT_MAX_FILES = 20_000;
+let snapshotMaxFiles = SNAPSHOT_MAX_FILES;
+
+// Test-only: exercise the cap without putting twenty thousand files on disk. The
+// module's public answer never reads it.
+export function setSnapshotMaxFilesForTests(n: number): void { snapshotMaxFiles = n; }
+
+// A blob's name: the sha-256 of its bytes. The index is the only thing that decides
+// what a hash is used as a filename, so it is held to that shape before the store is
+// asked to open anything.
+const SNAPSHOT_HASH = /^[0-9a-f]{64}$/;
+
+// A walk this long runs between two paints unless it lets the loop breathe: a file's
+// read is awaited, and every `SNAPSHOT_YIELD_EVERY` entries the walk waits a macrotask
+// so a frame drawn by the caller can be shown while the baseline is captured.
+const SNAPSHOT_YIELD_EVERY = 100;
+const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 // Names the snapshot leaves alone wherever they turn up. The system's own directory
 // droppings are never a person's change, and `.gitignore` means nothing outside a
 // repository, so no ignore file is read here.
@@ -357,6 +381,7 @@ const JUNK = new Set(['.DS_Store']);
 interface SnapshotIndex {
   root: string; // the root's REAL path
   taken: number; // when the baseline was captured, ms since the epoch
+  truncated: boolean; // the capture stopped at `SNAPSHOT_MAX_FILES` and left files out
   files: Record<string, string>; // root-relative '/'-path → sha-256 hex of the file's bytes
 }
 
@@ -366,20 +391,30 @@ const hex = (buf: Buffer | string): string => crypto.createHash('sha256').update
 // temporary directory made per process — so it is resolved on every call.
 const snapshotDir = (root: string): string => path.join(hostStateDir(), 'snapshot', hex(root).slice(0, 16));
 
-// The index on disk, or `null` when there is none or it no longer parses. A root's
-// id is fixed, so a hand-edited or half-written index is the only way to get a
-// `null` here once a capture has run.
-function readIndex(dir: string): SnapshotIndex | null {
+// The index on disk, or `null` when there is none or it no longer parses. An index is
+// trusted only for the root it names: a copied or hand-edited one could otherwise
+// compare one tree's bytes with another's. A root's id is fixed, so a bad index is the
+// only way to get a `null` here once a capture has run — and the caller captures again.
+function readIndex(dir: string, root: string): SnapshotIndex | null {
   let raw: string;
   try { raw = fs.readFileSync(path.join(dir, 'index.json'), 'utf8'); } catch { return null; }
   try {
     const parsed = JSON.parse(raw) as Partial<SnapshotIndex> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (parsed.root !== root) return null;
     if (typeof parsed.taken !== 'number' || !Number.isFinite(parsed.taken)) return null;
+    if (typeof parsed.truncated !== 'undefined' && typeof parsed.truncated !== 'boolean') return null;
     if (!parsed.files || typeof parsed.files !== 'object' || Array.isArray(parsed.files)) return null;
-    const files: Record<string, string> = {};
-    for (const [rel, hash] of Object.entries(parsed.files)) if (typeof hash === 'string') files[rel] = hash;
-    return { root: typeof parsed.root === 'string' ? parsed.root : '', taken: parsed.taken, files };
+    // A null-prototype map, so a file whose name is `toString`, `valueOf` or
+    // `__proto__` is an entry of its own rather than a member the prototype answers
+    // for — and so a path named `__proto__` is stored at all.
+    const files: Record<string, string> = Object.create(null);
+    for (const [rel, hash] of Object.entries(parsed.files)) {
+      // A hash names a file in this directory; anything else is not an index we trust.
+      if (typeof hash !== 'string' || !SNAPSHOT_HASH.test(hash)) return null;
+      files[rel] = hash;
+    }
+    return { root, taken: parsed.taken, truncated: parsed.truncated === true, files };
   } catch { return null; }
 }
 
@@ -393,38 +428,47 @@ function writeIndex(dir: string, index: SnapshotIndex): void {
 }
 
 // A blob's text as a diff shows it. `null` — the store does not hold those bytes.
-function blobText(dir: string, hash: string): TextRead {
-  try { return decodeText(fs.readFileSync(path.join(dir, hash))); } catch { return null; }
+// The hash is checked again here, so no caller can turn an index value into a path.
+async function blobText(dir: string, hash: string): Promise<TextRead> {
+  if (!SNAPSHOT_HASH.test(hash)) return null;
+  try { return decodeText(await fs.promises.readFile(path.join(dir, hash))); } catch { return null; }
 }
 
-// One root's baseline: every regular file the walk meets, hashed. A link is never
-// followed — its target may be somebody else's file — and a file over
-// `MAX_FILE_BYTES` is left out of the index: the diff names it without reading it
-// and cannot show it. What `SNAPSHOT_MAX_FILES` drops is simply never diffed.
+// One root's baseline: every regular file the walk meets, hashed, up to
+// `snapshotMaxFiles`. A link is never followed — its target may be somebody else's
+// file — and a file over `MAX_FILE_BYTES` is left out of the index: the diff names it
+// without reading it and cannot show it. A capture that stopped at the cap records
+// `truncated`, and the diff then draws no addition for a path the index does not
+// name: the cap cannot tell a new file from one it left out.
 async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex | null> {
-  const files: Record<string, string> = {};
+  const files: Record<string, string> = Object.create(null);
+  const cap = snapshotMaxFiles;
   let count = 0;
-  const walk = (d: string): void => {
-    if (count >= SNAPSHOT_MAX_FILES) return;
+  let examined = 0;
+  let truncated = false;
+  const walk = async (d: string): Promise<void> => {
+    if (count >= cap) return;
     let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(d, { withFileTypes: true }); } catch { return; }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const e of entries) {
-      if (count >= SNAPSHOT_MAX_FILES) return;
+      // An entry reached with the cap full is a file the baseline will not hold.
+      if (count >= cap) { truncated = true; return; }
+      if (++examined % SNAPSHOT_YIELD_EVERY === 0) await yieldToLoop();
       if (SKIPPED.has(e.name) || JUNK.has(e.name) || e.isSymbolicLink()) continue;
       const abs = path.join(d, e.name);
-      if (e.isDirectory()) { walk(abs); continue; }
+      if (e.isDirectory()) { await walk(abs); continue; }
       if (!e.isFile()) continue;
       let st: fs.Stats;
-      try { st = fs.lstatSync(abs); } catch { continue; }
+      try { st = await fs.promises.lstat(abs); } catch { continue; }
       if (!st.isFile() || st.size > MAX_FILE_BYTES) continue;
       if (!within(realOf(abs), root)) continue;
       let bytes: Buffer;
-      try { bytes = fs.readFileSync(abs); } catch { continue; }
+      try { bytes = await fs.promises.readFile(abs); } catch { continue; }
       const hash = hex(bytes);
       const blob = path.join(dir, hash);
       try {
-        if (!fs.existsSync(blob)) fs.writeFileSync(blob, bytes, { mode: 0o600 });
+        if (!fs.existsSync(blob)) await fs.promises.writeFile(blob, bytes, { mode: 0o600 });
       } catch { continue; }
       files[path.relative(root, abs).split(path.sep).join('/')] = hash;
       count++;
@@ -432,8 +476,8 @@ async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex
   };
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    walk(root);
-    const index: SnapshotIndex = { root, taken: Date.now(), files };
+    await walk(root);
+    const index: SnapshotIndex = { root, taken: Date.now(), truncated, files };
     writeIndex(dir, index);
     return index;
   } catch { return null; }
@@ -456,7 +500,7 @@ export async function ensureSnapshot(root: string): Promise<{ taken: number } | 
   } catch { return null; }
   if (!st.isDirectory()) return null;
   const dir = snapshotDir(real);
-  const existing = readIndex(dir);
+  const existing = readIndex(dir, real);
   if (existing) return { taken: existing.taken };
   let job = capturing.get(real);
   if (!job) {
@@ -476,25 +520,25 @@ function snapshotDate(ms: number): string {
 
 // One current file against the index. `null` — unchanged, or not a file the snapshot
 // sees at all (a link, a junk name, no longer there).
-function snapshotFile(root: string, dir: string, index: SnapshotIndex, rel: string, st: fs.Stats): FileDiff | null {
+async function snapshotFile(root: string, dir: string, index: SnapshotIndex, rel: string): Promise<FileDiff | null> {
   const known = index.files[rel];
-  const status = known === undefined ? 'A' : 'M';
-  // A file that was already past the cap when the baseline was taken is not part of
-  // it, so being that big is not a change.
-  if (st.size > MAX_FILE_BYTES) {
-    return known === undefined ? null : { status, path: rel, added: 0, removed: 0, hunks: '', note: 'too large' };
+  // A path the capture never reached is not a change: whether it is new or was left
+  // out at the cap cannot be told from a truncated index, so it is not drawn as one.
+  if (known === undefined && index.truncated) return null;
+  const status: 'A' | 'M' = known === undefined ? 'A' : 'M';
+  // The module's one read of a working file: the real-path guard, the link rule and
+  // the size cap all come from there, and the reader's own note says what it found.
+  const read = await readWorkingFile(path.resolve(root, rel), root);
+  if (!read) return null;
+  if ('note' in read) {
+    // A file that was already past the cap when the baseline was taken is not part of
+    // it, so being that big is not a change.
+    if (read.note === 'too large' && known === undefined) return null;
+    return { status, path: rel, added: 0, removed: 0, hunks: '', note: read.note };
   }
-  let bytes: Buffer;
-  try { bytes = fs.readFileSync(path.resolve(root, rel)); } catch {
-    return { status, path: rel, added: 0, removed: 0, hunks: '', note: 'binary' };
-  }
+  const bytes = read.bytes ?? Buffer.from(read.text);
   if (known !== undefined && hex(bytes) === known) return null;
-  // The bytes differ, and a file the panel cannot show as text is named, not guessed at.
-  const read = decodeText(bytes);
-  if (!read || 'note' in read) {
-    return { status, path: rel, added: 0, removed: 0, hunks: '', note: 'binary' };
-  }
-  const before = known === undefined ? null : blobText(dir, known);
+  const before = known === undefined ? null : await blobText(dir, known);
   if (before && 'note' in before) {
     return { status, path: rel, added: 0, removed: 0, hunks: '', note: before.note };
   }
@@ -505,8 +549,8 @@ function snapshotFile(root: string, dir: string, index: SnapshotIndex, rel: stri
 }
 
 // One file the tree no longer holds: its text from the baseline, diffed to nothing.
-function deletedSnapshotFile(dir: string, rel: string, hash: string): FileDiff {
-  const before = blobText(dir, hash);
+async function deletedSnapshotFile(dir: string, rel: string, hash: string): Promise<FileDiff> {
+  const before = await blobText(dir, hash);
   if (before && 'note' in before) {
     return { status: 'D', path: rel, added: 0, removed: 0, hunks: '', note: before.note };
   }
@@ -525,7 +569,7 @@ async function snapshotSection(root: string, scan: RootScan): Promise<DiffSectio
   if (scan.tops.some((t) => within(root, t))) return null;
   if (!(await ensureSnapshot(root))) return null;
   const dir = snapshotDir(root);
-  const index = readIndex(dir);
+  const index = readIndex(dir, root);
   if (!index) return null;
   const own = (rel: string): boolean => {
     const abs = path.resolve(root, rel);
@@ -534,18 +578,21 @@ async function snapshotSection(root: string, scan: RootScan): Promise<DiffSectio
   const base = (rel: string): string => rel.slice(rel.lastIndexOf('/') + 1);
   const current = new Set<string>();
   const files: FileDiff[] = [];
+  let examined = 0;
   for (const rel of scan.files) {
     if (own(rel) || JUNK.has(base(rel))) continue;
+    if (++examined % SNAPSHOT_YIELD_EVERY === 0) await yieldToLoop();
     let st: fs.Stats;
-    try { st = fs.lstatSync(path.resolve(root, rel)); } catch { continue; }
+    try { st = await fs.promises.lstat(path.resolve(root, rel)); } catch { continue; }
     if (st.isSymbolicLink() || !st.isFile()) continue;
     current.add(rel);
-    const file = snapshotFile(root, dir, index, rel, st);
+    const file = await snapshotFile(root, dir, index, rel);
     if (file) files.push(file);
   }
   for (const [rel, hash] of Object.entries(index.files)) {
     if (current.has(rel) || own(rel) || JUNK.has(base(rel))) continue;
-    files.push(deletedSnapshotFile(dir, rel, hash));
+    if (++examined % SNAPSHOT_YIELD_EVERY === 0) await yieldToLoop();
+    files.push(await deletedSnapshotFile(dir, rel, hash));
   }
   if (!files.length) return null;
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
