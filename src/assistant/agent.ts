@@ -42,6 +42,7 @@ import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } fr
 import { SKILL_TOOL } from './skill-file.js';
 import { toolArgsError } from './tool-args.js';
 import { planReminder, type Plan } from './plan.js';
+import { createLoopGuard } from './loop-guard.js';
 import { RAW_OMITTED, RAW_RESULT, findToolResult, keptRaw, toolReturn, type FoundResult } from './tool-results.js';
 import type { RecallSource } from './recall.js';
 
@@ -141,6 +142,12 @@ export interface AgentResult {
   lastStep?: string;
   limitBy?: 'tokens';
   turnTokens?: number;
+  // The answer degenerated into a repeat and the turn stopped itself: the text before
+  // the repeat run is the answer, and this says what was cut. `dropped` is how much of
+  // the streamed text was dropped (never kept in the answer or the model's history);
+  // `tail` is its first 2 000 characters — the text as it was kept, already secret-
+  // redacted (./secrets.ts) — for the caller to record, never to re-send.
+  looped?: { dropped: number; tail: string };
   // What the provider reported for the LAST round, when it reports usage at all.
   usage?: TokenUsage;
 }
@@ -867,6 +874,9 @@ export async function agentChat(
   // (this turn's own call counter, unique within it) would already be enough, but
   // keeping the provider's id absent from the key means it can never matter again.
   const turnKey = crypto.randomUUID();
+  // The streaming text is watched for a loop (./loop-guard.ts): one guard per call,
+  // fed each round's accumulated text, firing once. Its hit ends the turn (below).
+  const loopGuard = createLoopGuard();
 
   const chatRoundFn = roundFor(opts);
 
@@ -875,6 +885,8 @@ export async function agentChat(
   // Did a round come back as an ANSWER? Without one the loop ran out of rounds, and
   // the caller has nothing to show for the turn but the trail.
   let answered = false;
+  // What one firing of the loop guard dropped, for the result's `looped`.
+  let looped: { dropped: number; tail: string } | null = null;
   let rounds = 0;
   // Where the history stood when the last reported usage was taken: what joined after
   // it (the round's tool results) is not in that figure.
@@ -932,18 +944,49 @@ export async function agentChat(
         if (replaced?.append?.length) current.push(...replaced.append);
       }
       let roundContent = '';
+      // The round runs on a stop of its own (./loop-guard.ts): the loop guard aborts
+      // THIS stream without ending the turn, while the person's Esc — the turn's own
+      // signal — still stops it, forwarded in through one listener that is taken off
+      // when the round ends.
+      const roundStop = new AbortController();
+      const turnSignal = typeof (opts.signal as { addEventListener?: unknown } | null | undefined)?.addEventListener === 'function' ? (opts.signal as AbortSignal) : null;
+      const stopWithTurn = () => roundStop.abort();
+      if (turnSignal) {
+        if (turnSignal.aborted) roundStop.abort();
+        else turnSignal.addEventListener('abort', stopWithTurn, { once: true });
+      }
       // What the model writes is shown, kept and saved without a known secret in it
       // (./secrets.ts): its text and its reasoning each pass a redacting stream, which
       // holds back a tail a chunk boundary may have split; the tails go out when the
       // round ends, however it ends.
       const answerStream = secretStream();
       const thinkStream = secretStream();
-      const onLive = (d: string) => { if (d) { roundContent += d; (opts.onLive as AgentOpts['onLive'])?.(d); } };
+      const onLive = (d: string) => {
+        if (!d) return;
+        roundContent += d;
+        // The guard reads the accumulated round text — already redacted, as it is kept.
+        // On its one hit the kept text is the head before the repeat run, the tail is
+        // recorded once for the result, and the stopped round is aborted; a later
+        // append (the redacting stream's held tail, flushed in the `finally`) is cut
+        // again by the same hit, so the kept text never moves.
+        const hit = loopGuard.push(roundContent);
+        if (hit) {
+          if (!looped) {
+            looped = { dropped: hit.dropped, tail: roundContent.slice(hit.at, hit.at + 2000) };
+            roundStop.abort();
+          }
+          roundContent = roundContent.slice(0, hit.at);
+        }
+        (opts.onLive as AgentOpts['onLive'])?.(d);
+      };
       const onThink = (d: string) => { if (d) opts.onReasoning?.(d); };
       let r: ChatRoundResult;
       try {
         r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
           ...opts,
+          // The round's own signal: what the loop guard stops, and what the turn's
+          // signal reaches through the listener above.
+          signal: roundStop.signal,
           tools: roundTools(),
           ...(noThinking ? { thinking: undefined } : {}),
           onToolCalls: () => opts.onRoundKind?.('tools'),
@@ -953,12 +996,23 @@ export async function agentChat(
           onDelta: (d: string) => onLive(answerStream.push(d)),
           onReasoning: (d: string) => onThink(thinkStream.push(d)),
         } as Record<string, unknown>);
+      } catch (e) {
+        // The stop the loop guard raised ends the round as its answer, with the text
+        // that was kept; every other throw goes up as it is — the person's Esc, a
+        // provider failure.
+        if (!looped || (e as { name?: string } | null)?.name !== 'AbortError') throw e;
+        r = { content: '', reasoning: '', toolCalls: [], finishReason: 'stop' };
       } finally {
+        if (turnSignal) turnSignal.removeEventListener('abort', stopWithTurn);
         // Whatever the round ends in — its end, a stop, an error — the held tails go
         // out, a begun secret as its mark.
         onThink(thinkStream.flush());
         onLive(answerStream.flush());
       }
+      // A round the loop guard stopped is the answer round with what was kept, whatever
+      // it was carrying: tool calls it had begun to stream are dropped before anything
+      // can run them, and no result is invented for them.
+      if (looped) r = { content: '', reasoning: '', toolCalls: [], finishReason: 'stop' };
       if (r.usage) {
         usage = r.usage;
         // New tokens: the prompt less its cached part — or, with no cache figure reported,
@@ -988,7 +1042,9 @@ export async function agentChat(
         contentLen: r.content.length,
         ...(r.usage ? { usage: r.usage } : {}),
       });
-      if (!r.toolCalls.length && hasToolMarkup(roundContent)) {
+      // A looped round is the answer round already: its kept text ends the turn, and
+      // nothing asks the model again (below, `continue`).
+      if (!looped && !r.toolCalls.length && hasToolMarkup(roundContent)) {
         // A tool call written as text: nothing ran, and the markup is neither the answer
         // nor kept anywhere — what the model wrote around it stays, as a step. Once in a
         // row the model is told in one line and asked again (an unknown name answered
@@ -1356,6 +1412,7 @@ export async function agentChat(
   return {
     content, process, toolRuns, transcript: current.slice(turnStart),
     ...(answered ? {} : { roundLimit: rounds, ...(lastStep ? { lastStep } : {}), ...(limitBy ? { limitBy, turnTokens: spent } : {}) }),
+    ...(looped ? { looped } : {}),
     ...(usage ? { usage } : {}),
   };
 }
