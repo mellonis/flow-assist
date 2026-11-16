@@ -460,3 +460,13 @@ export const handoff = (mark: string): string => [
   '## Open decisions\nnone',
   '## Facts learned\n- none yet',
 ].join('\n');
+
+// Long text for a scripted ANSWER of a given length. It must not be `'b'.repeat(n)`: the
+// loop guard (src/assistant/loop-guard.ts) stops an answer whose tail repeats a unit of
+// 1..32 code units for 400 or more, and a fixture that fills a window would be exactly
+// that. Counting words gives every 400 code units a different shape.
+export const longText = (n: number): string => {
+  let out = '';
+  for (let i = 0; out.length < n; i++) out += `w${i} `;
+  return out.slice(0, n);
+};

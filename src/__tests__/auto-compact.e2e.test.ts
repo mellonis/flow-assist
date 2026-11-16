@@ -2,7 +2,7 @@
 // conversation is compacted first — the same handoff and the same row as /compact,
 // marked `auto` — at a request boundary, so a call is never parted from its result.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, longText, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
@@ -52,13 +52,13 @@ for (const wire of ['openai', 'anthropic'] as const) {
     const model = new ScriptedModel();
     model.script([{ text: 'short' }]);
     const ui = await boot(model, wire);
-    const narration = `Checking the clock. ${'n'.repeat(Math.ceil(WINDOW * 0.2 * 4))}`;
+    const narration = `Checking the clock. ${longText(Math.ceil(WINDOW * 0.2 * 4))}`;
     measure(model, (i) => (i === 2 ? Math.ceil(narration.length / 4) : 5));
     await ask(ui, 'first');
     const base = Math.ceil(body(model, 0).length / 4);
     expect(base).toBeLessThan(WINDOW * 0.4);
     // A long answer: the conversation now weighs about 0.65 of the window.
-    const big = `BIG-ANSWER ${'b'.repeat(Math.ceil((WINDOW * 0.65 - base) * 4))}`;
+    const big = `BIG-ANSWER ${longText(Math.ceil((WINDOW * 0.65 - base) * 4))}`;
     model.script([{ text: big }]);
     await ask(ui, 'tell me everything');
     expect(ui.backend.lastFrame).not.toContain('compacted');
@@ -106,7 +106,7 @@ test('a conversation already over the threshold is compacted before the first re
   const ui = await boot(model, 'openai');
   await ask(ui, 'first');
   const base = Math.ceil(body(model, 0).length / 4);
-  model.script([{ text: `BIG-ANSWER ${'b'.repeat(Math.ceil((WINDOW * 0.85 - base) * 4))}` }]);
+  model.script([{ text: `BIG-ANSWER ${longText(Math.ceil((WINDOW * 0.85 - base) * 4))}` }]);
   await ask(ui, 'tell me everything');
   model.script([{ text: long('BEFORE-HANDOFF') }], [{ text: 'Sure.' }]);
   await ask(ui, 'the next question');
@@ -127,7 +127,7 @@ test('autoCompact.enabled false never compacts by itself', async () => {
   const ui = await boot(model, 'openai', { enabled: false });
   await ask(ui, 'first');
   const base = Math.ceil(body(model, 0).length / 4);
-  model.script([{ text: `BIG-ANSWER ${'b'.repeat(Math.ceil((WINDOW * 0.85 - base) * 4))}` }]);
+  model.script([{ text: `BIG-ANSWER ${longText(Math.ceil((WINDOW * 0.85 - base) * 4))}` }]);
   await ask(ui, 'tell me everything');
   model.script([{ text: 'Sure.' }]);
   await ask(ui, 'the next question');
@@ -144,9 +144,9 @@ test('a message queued in the crossing turn is delivered first, then the compact
   const ui = await boot(model, 'openai');
   await ask(ui, 'first');
   const base = Math.ceil(body(model, 0).length / 4);
-  model.script([{ text: `BIG-ANSWER ${'b'.repeat(Math.ceil((WINDOW * 0.65 - base) * 4))}` }]);
+  model.script([{ text: `BIG-ANSWER ${longText(Math.ceil((WINDOW * 0.65 - base) * 4))}` }]);
   await ask(ui, 'tell me everything');
-  const narration = `Checking the clock. ${'n'.repeat(Math.ceil(WINDOW * 0.2 * 4))}`;
+  const narration = `Checking the clock. ${longText(Math.ceil(WINDOW * 0.2 * 4))}`;
   model.script([{ text: narration, tool: 'datetime', args: {} }, { hold: true }], [{ text: long('QUEUE-HANDOFF') }], [{ text: 'It is noon.' }]);
   await ui.type('what time is it?');
   await ui.press('return');

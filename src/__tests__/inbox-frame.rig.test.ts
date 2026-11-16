@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { writeSession } from '../assistant/conversation-session.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
-import { ScriptedModel, handoff } from './helpers/scripted';
+import { ScriptedModel, handoff, longText } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import type { ConversationKind } from '../assistant/conversation-types.ts';
 
@@ -112,7 +112,7 @@ test('an automatic compaction inside an inbox follow-up turn keeps the item\'s m
     return scripted(url as string, init);
   }) as typeof fetch;
   try {
-    const narration = `Checking the clock. ${'n'.repeat(Math.ceil(WINDOW * 0.2 * 4))}`;
+    const narration = `Checking the clock. ${longText(Math.ceil(WINDOW * 0.2 * 4))}`;
     model.script(
       [{ text: 'Hello.' }],
       [{ text: narration, tool: 'datetime', args: {} }],
