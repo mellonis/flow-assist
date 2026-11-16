@@ -132,6 +132,7 @@ caller must remember to lift.
 - Modify: `src/assistant/confirm-policy.ts` (new `childPolicy` next to `ConfirmPolicy`)
 - Modify: `src/assistant/conversation.ts:1187-1215` (`startChild`)
 - Modify: `src/loader/tools-core.ts:845` and `src/plugins/assistant.ts:2162` (call sites, mapped one-to-one to today's behavior)
+- Modify: `AGENTS.md` ("A conversation starts a child of its own": the child-policy sentence; the auto-mode section: the sentence "the chat's mode never reaches it" says the new inheritance)
 - Test: `src/assistant/__tests__/child-writes.test.ts` (new), `src/assistant/__tests__/confirm-policy.test.ts` (extend)
 
 **Interfaces:**
@@ -175,7 +176,7 @@ test('a task without a writes field inherits like a worker', ...)
 Run: `bun test src/assistant/__tests__/confirm-policy.test.ts src/assistant/__tests__/child-writes.test.ts`
 Expected: FAIL (`childPolicy` is not defined; `ChildSpec` has no `writes`).
 
-- [ ] **Step 3: Implement.** In `conversation-types.ts` add `export type TaskWrites = 'allow' | 'ask' | 'deny'`, swap `ChildSpec`'s `write?: boolean` for `writes?: TaskWrites`, and reword that field's comment line to the new shape (present tense). In `confirm-policy.ts` add `childPolicy(writes, mayVouch, say)`: `deny` → `{ kind: 'always-no', reason: 'read-only' }`; `allow` → `mayVouch ? { kind: 'allow-writes', say } : { kind: 'always-no', reason: 'cannot-ask' }`; `ask` → `mayVouch ? { kind: 'ask' } : { kind: 'always-no', reason: 'cannot-ask' }`. In `startChild` replace the `wantsWrites`/`asks` pair (lines 1196-1207) with: `const writes = spec.writes ?? 'ask'`; `const mayVouch = (!this.parent || this.policy.kind === 'ask' || this.policy.kind === 'allow-writes') && host.deps.canAsk !== false`; `const policy = childPolicy(writes, mayVouch, (line) => this.deps.pushLog(`[bg] ${line}`))`; `canAsk: policy.kind === 'ask'` in the child's deps, `policy` passed to the `Conversation` constructor as before. After the child is configured (next to `child.model`), when `writes !== 'deny'`: `child.setAutoMode(this.autoMode, false)`. Update the two call sites to the new field (`tools-core.ts:845`: today's `writes` boolean becomes `writes: writes ? 'ask' : 'deny'`; `plugins/assistant.ts:2162`: `writes: 'ask'`) — the tool's own default lands in Task 2.
+- [ ] **Step 3: Implement.** In `conversation-types.ts` add `export type TaskWrites = 'allow' | 'ask' | 'deny'`, swap `ChildSpec`'s `write?: boolean` for `writes?: TaskWrites`, and reword that field's comment line to the new shape (present tense). In `confirm-policy.ts` add `childPolicy(writes, mayVouch, say)`: `deny` → `{ kind: 'always-no', reason: 'read-only' }`; `allow` → `mayVouch ? { kind: 'allow-writes', say } : { kind: 'always-no', reason: 'cannot-ask' }`; `ask` → `mayVouch ? { kind: 'ask' } : { kind: 'always-no', reason: 'cannot-ask' }`. In `startChild` replace the `wantsWrites`/`asks` pair (lines 1196-1207) with: `const writes = spec.writes ?? 'ask'`; `const mayVouch = (!this.parent || this.policy.kind === 'ask' || this.policy.kind === 'allow-writes') && host.deps.canAsk !== false`; `const policy = childPolicy(writes, mayVouch, (line) => this.deps.pushLog(`[bg] ${line}`))`; `canAsk: policy.kind === 'ask'` in the child's deps, `policy` passed to the `Conversation` constructor as before. After the child is configured (next to `child.model`), when `writes !== 'deny'`: `child.setAutoMode(this.autoMode, false)`. Update the two call sites to the new field (`tools-core.ts:845`: today's `writes` boolean becomes `writes: writes ? 'ask' : 'deny'`; `plugins/assistant.ts:2162`: `writes: 'ask'`) — the tool's own default lands in Task 2. Reword `AGENTS.md`'s two rule sentences this changes (the child-policy sentence and the auto-mode section's inheritance), present tense, no history.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -185,7 +186,7 @@ Expected: PASS, the older suites included (the `ChildSpec` rename touches them).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/assistant/conversation-types.ts src/assistant/confirm-policy.ts src/assistant/conversation.ts src/loader/tools-core.ts src/plugins/assistant.ts src/assistant/__tests__/
+git add src/assistant/conversation-types.ts src/assistant/confirm-policy.ts src/assistant/conversation.ts src/loader/tools-core.ts src/plugins/assistant.ts AGENTS.md src/assistant/__tests__/
 git commit -m "feat: a child's writes are a capability of its agent"
 ```
 
@@ -193,7 +194,7 @@ git commit -m "feat: a child's writes are a capability of its agent"
 
 **Files:**
 - Modify: `src/loader/tools-core.ts:436-451` (the `subagent` schema), `:793-852` (its exec)
-- Modify: `CHANGELOG.md`
+- Modify: `CHANGELOG.md`, `AGENTS.md` (the `subagent` paragraph of "What the model can do": the sentences saying a task is read-only unless `write: true`)
 - Test: `src/loader/__tests__/tools-core-writes.test.ts` (new)
 
 **Interfaces:**
@@ -230,10 +231,10 @@ Expected: PASS.
 
 - [ ] **Step 5: CHANGELOG entry and commit**
 
-In `CHANGELOG.md`'s current section, one entry: a background task writes and runs commands through the person's y/n (the session's auto mode answers), `writes: 'deny'` narrows a task to read-only, and `write:` remains as the deprecated spelling.
+In `CHANGELOG.md`'s current section, one entry: a background task writes and runs commands through the person's y/n (the session's auto mode answers), `writes: 'deny'` narrows a task to read-only, and `write:` remains as the deprecated spelling. Reword `AGENTS.md`'s `subagent` paragraph to match.
 
 ```bash
-git add src/loader/tools-core.ts src/loader/__tests__/tools-core-writes.test.ts CHANGELOG.md
+git add src/loader/tools-core.ts src/loader/__tests__/tools-core-writes.test.ts CHANGELOG.md AGENTS.md
 git commit -m "feat: subagent takes writes, defaults to a worker"
 ```
 
