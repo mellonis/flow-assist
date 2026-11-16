@@ -459,6 +459,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const diffCursorRef = ui.useRef<string | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<string | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
+          // Whether the walk this open started has landed. Only a panel with nothing on
+          // screen yet says it is capturing: a 1 s refresh of a tree already shown lands
+          // the same rows, and flipping the line back and forth each second reads as work.
+          const diffLoadedRef = ui.useRef(false);
           // Whether the panel is drawn at all this render: `chatRoom` gives it no rows when
           // the terminal is too small for the split, and its keys wait for the rows.
           const diffShownRef = ui.useRef(false);
@@ -656,8 +660,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // to, so a host that somehow boots with no `services.viewRenderers` draws
           // views identically whichever of the two places below reads it.
           const viewRenderers: ViewRenderers = (host.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? { console: renderConsole };
+          // The width the conversation's rows are laid out at: its half beside the panel, the
+          // chat's whole width otherwise. The render sets it, the keys and the pager measure by it.
+          const chatWrapRef = ui.useRef(0);
           const rowOpts = (state: FoldState): RowOpts => ({
-            wrap: chatWrapWidth(width, fullscreenRef.current),
+            wrap: chatWrapRef.current || chatWrapWidth(width, fullscreenRef.current),
             folds: state,
             viewLines: Number((host.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             notes: notesRef.current,
@@ -1120,10 +1127,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (diffBusy.current) { diffAgain.current = true; return; }
             diffBusy.current = true;
             const seq = ++diffWalked.current;
-            setDiffLoading(true);
+            if (!diffLoadedRef.current) setDiffLoading(true);
             try {
-              const sections = await workingTreeDiff(diffRoots());
+              const raw = await workingTreeDiff(diffRoots());
               if (seq !== diffWalked.current || !diffOpenRef.current) return;
+              // A diff is text a token may sit in — a config, a script, a log — so it is
+              // redacted before it reaches the state the panel draws from.
+              const sections = redactDeep(raw);
               // The file the cursor was on stays the cursor while it is still there, and
               // a tree that lost it moves the cursor to the first file drawn.
               const keys = diffPanelFileKeys(sections);
@@ -1132,6 +1142,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               diffSectionsRef.current = sections;
               setDiffSections(sections);
               if (cursor !== at) { diffCursorRef.current = cursor; setDiffCursor(cursor); }
+              diffLoadedRef.current = true;
               setDiffLoading(false);
             } catch (e) {
               if (seq === diffWalked.current) setDiffLoading(false);
@@ -1177,6 +1188,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // repository captures its baseline first, and a walk a closed panel left in
             // flight answers nothing, so the wait is the remembered walk's, not this one's.
             // Without it a reopened panel over an empty list would claim the tree is clean.
+            diffLoadedRef.current = false;
             setDiffLoading(true);
             void walkDiff();
             host.notify();
@@ -1203,6 +1215,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffCollapsed(next);
             host.notify();
           };
+          // A panel the layout gave no rows is open and invisible: the docked chat has the
+          // field's strip and nothing left over. Say how to give it room, once, when the
+          // panel is asked for.
+          ui.useEffect(() => {
+            if (diffOpen && !diffShownRef.current) (host.services as Record<string, any>).showMessage?.('no room for the diff panel here — /mode window');
+          }, [diffOpen]);
           // A tree that changes while the panel is open is read again: once a second, so a
           // write lands in the panel as it happens, and after every round of a turn.
           // A panel nobody can see costs no git call: collapsed in panel mode or closed in
@@ -3271,6 +3289,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const { nodes, view, room } = treeNow(chatProps);
           // Whether the panel is drawn: the split the layout gave, which the key handlers read.
           diffShownRef.current = !!room.split && (room.split.mode === 'side' || room.split.diff.height > 0);
+          // The conversation's rows are laid out at its half while the panel stands beside
+          // them — the measure `renderChatModal` draws them at — so a click's row
+          // arithmetic, an anchor and the pager's `blockRows` act on what the screen shows.
+          chatWrapRef.current = room.split && room.split.mode === 'side'
+            ? Math.max(20, room.split.chat.width - 2)
+            : chatWrapWidth(width, fullscreenRef.current);
           const was = treeSelRef.current;
           const at = was.at === null || room.hidden ? null : treeCursor(was.at, treeIdxRef.current, view.rows);
           const ask = at !== null && at === was.at && was.ask;

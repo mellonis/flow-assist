@@ -1043,7 +1043,7 @@ test('the diff panel lists a file with its hunks and folds what is collapsed', a
   const key = diffFileKey('/r', 'a.txt');
   const open = await diffFrame({ sections: [section], collapsed: new Set(), cursor: key });
   // The header counts the section, the row says which file and how much it changed.
-  expect(open.frame).toContain('diff · 1 files +1 −1 · vs HEAD');
+  expect(open.frame).toContain('diff · 1 file +1 −1 · vs HEAD');
   expect(open.frame).toContain('▾ M a.txt');
   // The hunks are drawn whole, each row a line of its own with the FILE's number in
   // the gutter; the `@@` row is not drawn — the numbers say what it says, per row.
@@ -1053,6 +1053,15 @@ test('the diff panel lists a file with its hunks and folds what is collapsed', a
   expect(open.frame).toMatch(/1 \+two/);
   expect(open.frame).not.toContain('@@');
   open.handle.unmount();
+
+  // The count says one file, and files above it.
+  const two: DiffSection = {
+    ...section,
+    files: [section.files[0]!, { status: 'A', path: 'b.txt', added: 2, removed: 0, hunks: '@@ -0,0 +1,2 @@\n+p\n+q' }],
+  };
+  const plural = await diffFrame({ sections: [two], collapsed: new Set(), cursor: null });
+  expect(plural.frame).toContain('diff · 2 files +3 −1 · vs HEAD');
+  plural.handle.unmount();
 
   const folded = await diffFrame({ sections: [section], collapsed: new Set([key]), cursor: key });
   expect(folded.frame).toMatch(/▸ M a\.txt/);
@@ -1108,8 +1117,8 @@ test('two sections keep their own header, totals and fold', async () => {
   ];
   const folded = await diffFrame({ sections, collapsed: new Set([diffFileKey('/a', 'a.txt')]), cursor: null });
   // Each section sums its own files, under its own label.
-  expect(folded.frame).toContain('diff · 1 files +2 −1 · vs HEAD');
-  expect(folded.frame).toContain('diff · 1 files +3 −0 · vs snapshot (taken 2026-01-01)');
+  expect(folded.frame).toContain('diff · 1 file +2 −1 · vs HEAD');
+  expect(folded.frame).toContain('diff · 1 file +3 −0 · vs snapshot (taken 2026-01-01)');
   // The same relative path is two rows, and folding one leaves the other open.
   expect(folded.frame).toMatch(/▸ M a\.txt/);
   expect(folded.frame).toMatch(/▾ A a\.txt/);
@@ -1153,6 +1162,68 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   drawn.handle.unmount();
 });
 
+test('a hunk longer than the chat\'s 80-line cap is drawn whole', async () => {
+  // `unifiedDiff`'s 80 lines are the in-chat `✎` block's cap; the panel is a reader and
+  // draws every row the section holds, however tall.
+  const added = Array.from({ length: 100 }, (_, i) => `+line ${i + 1}`).join('\n');
+  const section: DiffSection = {
+    root: '/r', baseline: 'head', label: 'vs HEAD',
+    files: [{ status: 'M', path: 'big.txt', added: 100, removed: 0, hunks: `@@ -0,0 +1,100 @@\n${added}` }],
+  };
+  const backend = new TestBackend(80, 130);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: null, wrap: 74, bg: 'black' }), backend);
+  const frame = backend.lastFrame ?? '';
+  // Every added line is a row of its own: the last one is drawn and nothing is counted
+  // away, which a cap on the rows would do.
+  expect(frame.split('\n').filter((l) => /\+line \d+/.test(l))).toHaveLength(100);
+  expect(frame).toContain('+line 100');
+  expect(frame).not.toMatch(/… \d+/);
+  handle.unmount();
+});
+
+test('the cursor file\'s row is drawn inverse, and a reader without colour still sees it', async () => {
+  const section: DiffSection = {
+    root: '/r', baseline: 'head', label: 'vs HEAD',
+    files: [
+      { status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' },
+      { status: 'A', path: 'b.txt', added: 1, removed: 0, hunks: '@@ -0,0 +1 @@\n+new' },
+    ],
+  };
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: diffFileKey('/r', 'b.txt'), wrap: 74, bg: 'black' }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const y = (t: string) => {
+    const at = lines.findIndex((l) => l.includes(t));
+    expect(at).toBeGreaterThanOrEqual(0);
+    return at;
+  };
+  const grid = (backend as unknown as { lastBuffer: Grid }).lastBuffer;
+  const inverseAt = (text: string) => grid.get(lines[y(text)]!.indexOf(text), y(text)).style.inverse === true;
+  expect(inverseAt('b.txt')).toBe(true);
+  expect(inverseAt('a.txt')).toBe(false);
+  handle.unmount();
+});
+
+test('the file row\'s lead and counts are chrome: a drag takes the path, and the hunks still copy', async () => {
+  const section: DiffSection = {
+    root: '/r', baseline: 'head', label: 'vs HEAD',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null });
+  const lines = drawn.frame.split('\n');
+  const at = lines.findIndex((l) => l.includes('▾ M a.txt'));
+  expect(at).toBeGreaterThanOrEqual(0);
+  const lead = lines[at]!.indexOf('▾ M a.txt');
+  // A drag that starts on `▾ M` and runs past the counts brings the path and nothing of
+  // the chrome around it — the same rule the chat's own rows keep.
+  const row = drawn.handle.select({ x: lead, y: at }, { x: lead + 16, y: at }).trim();
+  expect(row).toBe('a.txt');
+  // The hunks are the thing a reader copies, and they stay selectable.
+  const hunk = lines.findIndex((l) => l.includes('+two'));
+  expect(drawn.handle.select({ x: 2, y: hunk }, { x: 20, y: hunk })).toContain('+two');
+  drawn.handle.unmount();
+});
+
 test('a panel with nothing to show yet says it is capturing, then that the tree is clean', async () => {
   const capturing = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
   expect(capturing.frame).toContain('capturing baseline…');
@@ -1180,7 +1251,7 @@ test('the panel stands beside the conversation in a wide chat', async () => {
     expect(y).toBeGreaterThanOrEqual(0);
     return { y, x: lines[y]!.indexOf(t) };
   };
-  const header = row('diff · 1 files');
+  const header = row('diff · 1 file');
   // A column of its own, right of the conversation's text, with the hunks as rows.
   expect(header.x).toBeGreaterThan(60);
   expect(row('› hello').x).toBeLessThan(40);
@@ -1202,7 +1273,7 @@ test('the panel is the column\'s last block under the field in a narrow chat', a
   const narrow = new TestBackend(80, 24);
   const n = await render(h(renderChatModal, { ...baseChat, diffPanel: splitPanel }), narrow);
   const nlines = (narrow.lastFrame ?? '').split('\n');
-  const nheader = nlines.findIndex((l) => l.includes('diff · 1 files'));
+  const nheader = nlines.findIndex((l) => l.includes('diff · 1 file'));
   expect(nheader).toBeGreaterThan(nlines.findIndex((l) => l.includes('⏎ send')));
   expect(nlines[nheader]!).not.toContain('›');
   // The panel is the column's last block: its bottom border closes the frame, and nothing

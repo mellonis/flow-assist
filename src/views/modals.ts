@@ -2076,7 +2076,9 @@ export function renderChatModal({
               // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
               // names them instead of the history it does not walk here. With the field
               // offering `⏎ continue` after a limit, ⏎ is the field's and is not a fold.
-              : diffShown && !input
+              // A y/n or a question takes the keys, and the panel's keys are not offered
+              // then.
+              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice
               ? (continueOffer
                 ? `${CAP.upDown} file · ${CAP.esc} close`
                 : `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`)
@@ -2589,7 +2591,7 @@ export function diffPanelBody(p: {
     const added = s.files.reduce((n, f) => n + f.added, 0);
     const removed = s.files.reduce((n, f) => n + f.removed, 0);
     rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
-      cutStep(`diff · ${s.files.length} files +${added} −${removed} · ${s.label}`, inner)));
+      cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · ${s.label}`, inner)));
     s.files.forEach((f, fi) => {
       const key = diffFileKey(s.root, f.path);
       const folded = p.collapsed.has(key);
@@ -2597,12 +2599,14 @@ export function diffPanelBody(p: {
       const lead = `${folded ? '▸' : '▾'} ${f.status} `;
       // The tail of the path is the part that says where one is, so it is what a cut keeps.
       const room = Math.max(8, inner - cellWidth(lead) - cellWidth(counts) - 1);
-      const lit = p.cursor === key ? { color: m.accent } : {};
+      // The cursor's file is lit AND inverted: colour alone is no mark for a reader who
+      // cannot see it, and every other cursor in this file is drawn the same way.
+      const lit = p.cursor === key ? { color: m.accent, inverse: true } : {};
       if (p.cursor === key) cursorRow = rows.length;
       rows.push(h(Box, { key: `f${si}-${fi}`, flexDirection: 'row', flexShrink: 0 },
-        h(Text, { wrap: 'truncate' }, lead),
+        h(Text, { wrap: 'truncate', selectable: false }, lead),
         h(Text, { ...lit, wrap: 'truncate' }, cutLeft(f.path, room)),
-        h(Text, { dim: true, wrap: 'truncate' }, ` ${counts}`)));
+        h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${counts}`)));
       if (folded) return;
       // A file with no hunks at all says why where they would have been.
       if (f.note) {
@@ -2696,6 +2700,8 @@ export function renderDiffPanel(p: {
   return h(Box, {
     flexDirection: 'column',
     width: '100%',
+    // A drag that starts in the panel stays in its content rect, as every pane's does.
+    selectionScope: true,
     // The chat gives the box a height; the body takes what the border leaves.
     ...(p.scroll ? { height: '100%' as const } : {}),
     border: 'round',
