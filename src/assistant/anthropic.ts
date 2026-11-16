@@ -21,7 +21,7 @@ import type { ContentPart } from './images.js';
 import { failedRequest, reach, readChunk, withRetry, LlmRequestError, type RetryOpts } from './llm-retry.js';
 import { llmErrorMessage } from './llm-error.js';
 import { CEILING_FALLBACK, type ThinkingConfig } from './llm-endpoint.js';
-import { ceilingRefused, rememberCeilingRefusal, retryFields, sendWithRefusals, type WireFields } from './wire-fields.js';
+import { ceilingMemory, rememberCeilingRefusal, retryFields, sendWithRefusals, ANTHROPIC_CEILING_STEPS, type WireFields } from './wire-fields.js';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -377,6 +377,9 @@ export interface AnthropicOpts {
   token?: string;
   maxTokens?: number;
   thinking?: ThinkingConfig;
+  // A line for the person about the request itself (AgentOpts.onNote): a ceiling the
+  // provider refused is adjusted and remembered, and the adjustment is never silent.
+  onNote?: (text: string) => void;
   signal?: AbortSignal;
 }
 
@@ -392,9 +395,10 @@ const headers = (token: string): Record<string, string> => ({
 // same 400 first.
 //
 // `build` makes the body at a given ceiling: a provider that refuses the resolved one
-// by name is asked once at `CEILING_FALLBACK`, and the refusal is remembered for this
-// process per (base URL, model). The body is rebuilt rather than patched so a fixed
-// thinking budget fits under the lower ceiling too.
+// is asked once at `min(CEILING_FALLBACK, asked)` — the person's ceiling is kept when it
+// shrank below the fallback — and the refusal is remembered for this process per
+// (base URL, model), said on the note line. The body is rebuilt rather than patched so a
+// fixed thinking budget fits under the lower ceiling too.
 async function post(build: (maxTokens: number) => AnthropicRequest, asked: number, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
   let body = build(asked);
   let sent = asked;
@@ -405,14 +409,14 @@ async function post(build: (maxTokens: number) => AnthropicRequest, asked: numbe
     const init: RequestInit = { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(body) };
     return reach(() => fetch(url, init), o.signal);
   };
-  const start: WireFields = { usage: false, ceiling: ceilingRefused('anthropic', o.baseUrl, o.model) ? 'fallback' : 'ask' };
+  const mem = ceilingMemory('anthropic', o.baseUrl, o.model);
+  const start: WireFields = { usage: false, ceiling: mem.value ? 'fallback' : 'ask' };
   const { res, body: text } = await sendWithRefusals(
     start,
-    (fields) => send(fields.ceiling === 'fallback' ? CEILING_FALLBACK : asked),
+    (fields) => send(fields.ceiling === 'fallback' ? Math.min(CEILING_FALLBACK, asked) : asked),
     (fields, failed, failure) => retryFields(fields, failed, failure, {
-      // Nothing lower to ask when the resolved ceiling already is the fallback.
-      ceiling: asked === CEILING_FALLBACK ? null : 'fallback',
-      remember: () => rememberCeilingRefusal('anthropic', o.baseUrl, o.model),
+      ceiling: ANTHROPIC_CEILING_STEPS,
+      remember: (_refused, add) => rememberCeilingRefusal('anthropic', o.baseUrl, o.model, add, o.onNote),
     }),
   );
   if (res.ok) return { res, thinkingDropped: false };

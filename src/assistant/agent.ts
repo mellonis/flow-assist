@@ -25,7 +25,7 @@ import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { failedRequest, reach, readChunk, withRetry, type RetryOpts } from './llm-retry.js';
-import { ceilingRefused, rememberCeilingRefusal, retryFields, sendWithRefusals, type WireFields } from './wire-fields.js';
+import { ceilingMemory, rememberCeilingRefusal, retryFields, sendWithRefusals, OPENAI_CEILING_STEPS, type WireFields } from './wire-fields.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
@@ -33,7 +33,7 @@ import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from './rounds.js';
 
 export { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, TASK_ROUNDS_DEFAULT, maxRoundsOf, maxTurnTokensOf, taskRoundsOf } from './rounds.js';
 import { estimateTokens } from './context-meter.js';
-import type { ThinkingConfig } from './llm-endpoint.js';
+import { CEILING_FALLBACK, type ThinkingConfig } from './llm-endpoint.js';
 import {
   TOOLS_LOAD, TOOLS_LOAD_PARAMETERS, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
@@ -472,6 +472,16 @@ function roundFor(opts: Record<string, unknown>): NonNullable<AgentOpts['chatRou
   return realChatRound as NonNullable<AgentOpts['chatRound']>;
 }
 
+// The ceiling one request carries, as `./wire-fields.ts`' states say it: the resolved
+// value (`ask`), the smaller named fallback (`fallback`, `min(CEILING_FALLBACK, asked)`
+// so a ceiling that shrank below it is kept), or nothing — under the field name the
+// provider takes it as.
+function ceilingFieldOf(fields: WireFields, asked: number | undefined): Record<string, number> {
+  if (fields.ceiling === 'none' || typeof asked !== 'number') return {};
+  const value = fields.ceiling === 'fallback' ? Math.min(CEILING_FALLBACK, asked) : asked;
+  return { [fields.ceilingField === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens']: value };
+}
+
 // The OpenAI-compatible round, repeated while it fails for a reason that passes and has
 // given nothing to its callbacks (./llm-retry.ts).
 type RoundOpts = {
@@ -484,6 +494,9 @@ type RoundOpts = {
   onDelta?: (d: string) => void;
   onReasoning?: (d: string) => void;
   onToolCalls?: () => void;
+  // A line for the person about the request itself (AgentOpts.onNote): a field a
+  // provider refused is adjusted and remembered, and the adjustment is never silent.
+  onNote?: (text: string) => void;
   signal?: AbortSignal;
 } & RetryOpts;
 
@@ -502,36 +515,44 @@ async function openAiRound(
     onDelta = () => {},
     onReasoning = () => {},
     onToolCalls = () => {},
+    onNote,
     signal,
     tokenEnv,
   }: RoundOpts,
 ): Promise<ChatRoundResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
   // A streamed response carries token usage only when asked (`stream_options`), and the
-  // answer's ceiling goes as `max_tokens`. Most OpenAI-compatible servers know both; one
-  // that does not answers 400 NAMING the field, and that field is dropped for a retry and
-  // not asked again in this process. The sequence is bounded (`sendWithRefusals`): a
-  // server that refuses both is asked three times, whichever it names first.
+  // answer's ceiling goes as `max_tokens` — or as `max_completion_tokens` for a
+  // provider that names it as the fix. Most OpenAI-compatible servers know both; one
+  // that does not answers 400 NAMING the field, and the refusal is read for what it
+  // says (`./wire-fields.ts`): a name to use instead, a value too large, or a plain
+  // unknown field. The sequence is bounded (`sendWithRefusals`): a server that refuses
+  // past its three requests fails the request. Every refusal is remembered and said on
+  // the note line, so the adjustment is never a silent one.
   const post = (fields: WireFields) => {
     const url = `${baseUrl}/chat/completions`;
     const init: RequestInit = {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(fields.ceiling === 'ask' ? { max_tokens: maxTokens } : {}), ...(fields.usage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...ceilingFieldOf(fields, maxTokens), ...(fields.usage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
     };
     return reach(() => fetch(url, init), signal);
   };
+  const mem = ceilingMemory('openai', baseUrl, model);
   const start: WireFields = {
     usage: !noUsage.has(String(baseUrl)),
-    ceiling: typeof maxTokens === 'number' && !ceilingRefused('openai', baseUrl, model) ? 'ask' : 'none',
+    ceiling: typeof maxTokens !== 'number' || mem.value === 'none' ? 'none' : mem.value === 'fallback' ? 'fallback' : 'ask',
+    ...(mem.field ? { ceilingField: mem.field } : {}),
   };
   const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
     retryFields(fields, failed, text, {
-      ceiling: 'none',
-      remember: (refused) => {
-        if (refused === 'usage') noUsage.add(String(baseUrl));
-        else rememberCeilingRefusal('openai', baseUrl, model);
+      ceiling: OPENAI_CEILING_STEPS,
+      remember: (refused, add) => {
+        if (refused === 'usage') {
+          noUsage.add(String(baseUrl));
+          onNote?.(`[llm] ${model ?? baseUrl ?? 'the provider'} refused stream_options — the provider is asked without it from now on`);
+        } else rememberCeilingRefusal('openai', baseUrl, model, add, onNote);
       },
     }),
   );
@@ -1439,7 +1460,7 @@ export interface CompactResult { summary: string; incomplete?: string }
 // anything is kept. No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '', retries, retryDelay, onRetry }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string } & Pick<RetryOpts, 'retries' | 'retryDelay' | 'onRetry'>,
+  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '', retries, retryDelay, onRetry, onNote }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string; onNote?: (text: string) => void } & Pick<RetryOpts, 'retries' | 'retryDelay' | 'onRetry'>,
 ): Promise<CompactResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
   const history = messages.filter((m) => m.role !== 'system').map(compactable);
@@ -1451,20 +1472,25 @@ export async function compactConversation(
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
     const url = `${baseUrl}/chat/completions`;
     // The handoff carries the ceiling the chat's own requests carry, and a provider that
-    // refuses the field by name gets the request once without it — the same sequence, and
-    // the same memory of what it refused.
+    // refuses the field gets the same bounded sequence, with the same memory of what it
+    // refused (`./wire-fields.ts`).
     const post = (fields: WireFields) => {
       const init: RequestInit = {
         method: 'POST',
         signal,
         headers: LLM_HEADERS(token as string),
-        body: JSON.stringify({ model, messages: sent, ...(fields.ceiling === 'ask' ? { max_tokens: maxTokens } : {}) }),
+        body: JSON.stringify({ model, messages: sent, ...ceilingFieldOf(fields, maxTokens) }),
       };
       return reach(() => fetch(url, init), signal);
     };
-    const start: WireFields = { usage: false, ceiling: typeof maxTokens === 'number' && !ceilingRefused('openai', baseUrl, model) ? 'ask' : 'none' };
+    const mem = ceilingMemory('openai', baseUrl, model);
+    const start: WireFields = {
+      usage: false,
+      ceiling: typeof maxTokens !== 'number' || mem.value === 'none' ? 'none' : mem.value === 'fallback' ? 'fallback' : 'ask',
+      ...(mem.field ? { ceilingField: mem.field } : {}),
+    };
     const { res, body } = await sendWithRefusals(start, post, (fields, failed, text) =>
-      retryFields(fields, failed, text, { ceiling: 'none', remember: () => rememberCeilingRefusal('openai', baseUrl, model) }),
+      retryFields(fields, failed, text, { ceiling: OPENAI_CEILING_STEPS, remember: (_refused, add) => rememberCeilingRefusal('openai', baseUrl, model, add, onNote) }),
     );
     if (!res.ok) throw failedRequest(res, body, { model });
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };

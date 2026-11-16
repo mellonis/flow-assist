@@ -401,3 +401,32 @@ test('a provider refusing the resolved ceiling is asked once at 8192, and rememb
     globalThis.fetch = scripted;
   }
 });
+
+test('the fallback keeps a ceiling that shrank below 8192 — never asks more than the person\'s', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'the kept answer' }]);
+  // A ceiling of its own, under the fallback: a late-conversation derived ceiling.
+  const ui = await boot(model, { model: 'tiny-capped-model', maxTokens: 4_000 });
+  const scripted = globalThis.fetch;
+  const sentBodies: Sent[] = [];
+  let attempts = 0;
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    const req = JSON.parse(String(init.body)) as Sent;
+    sentBodies.push(req);
+    // The probe: the first attempt is refused by value, the retry is accepted whatever
+    // it carries — what is under test is the value the retry carries.
+    if (attempts++ === 0) {
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'max_tokens: 4000 > 1024, which is the maximum allowed number of output tokens for tiny-capped-model' } }), { status: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_too_big' } });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  try {
+    await ask(ui, 'first?');
+    await settleUntil(() => ui.backend.lastFrame.includes('the kept answer'));
+    // The one retry at the fallback keeps the person's ceiling (`min(CEILING_FALLBACK,
+    // asked)`): it never asks for the 8192 that does not fit under it.
+    expect(sentBodies.map((b) => b.max_tokens)).toEqual([4_000, 4_000]);
+  } finally {
+    globalThis.fetch = scripted;
+  }
+});
