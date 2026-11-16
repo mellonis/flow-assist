@@ -50,6 +50,25 @@ test('a model the catalogue does not name still runs, on the window ai.contextWi
   expect(rig.conv.contextWindow()).toBe(90000);
 });
 
+test('a model a file holds that the catalogue does not name opens from the file and runs it', async () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { model: 'default-model', contextWindow: 90000 } });
+  rig.conv.model = 'unlisted-model';
+  await rig.conv.send('hello');
+  const id = rig.conv.sessionId!;
+  // Saved by the conversation, put away, and taken back from its file: the id survives
+  // the round-trip even though no catalogue names it.
+  rig.conv.save();
+  rig.conv.releaseLock();
+  rig.conv.close('park');
+  rig.open(id);
+  expect(rig.conv.model).toBe('unlisted-model');
+  await rig.conv.send('again');
+  expect(model.requests.at(-1)?.model).toBe('unlisted-model');
+  // Its window falls back to what `ai.contextWindow` stands for, never refused.
+  expect(rig.conv.contextWindow()).toBe(90000);
+});
+
 test('a model a file holds that is not a string reads as no model', async () => {
   const model = new ScriptedModel();
   const rig = conversationRig(model, { ai: { model: 'default-model' } });
