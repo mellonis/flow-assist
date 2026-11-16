@@ -7,6 +7,9 @@ node_modules
 # Build output
 dist/
 
+# Local worktrees of this repo
+.worktrees/
+
 # Superpowers SDD scratch area
 .superpowers/
 
