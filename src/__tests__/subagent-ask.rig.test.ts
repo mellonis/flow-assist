@@ -10,7 +10,7 @@ import { exportMarkdown } from '../assistant/journal.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec, PendingConfirm } from '../assistant/conversation-types.ts';
 import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
-import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
+import { ScriptedModel, type RecordedRequest, type Turn } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
 const realFetch = globalThis.fetch;
@@ -267,13 +267,13 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   // Each read-only child attempts a hidden write tool (answered `Unknown tool`, never
   // started) and then a write outside the hidden set, which its always-no policy
   // declines with the pinned sentence.
-  const rounds = [
+  const rounds: Turn[] = [
     [{ tool: 'run_command', args: { command: 'echo x' } }],
     [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
     [{ text: 'm' }],
   ];
-  subScript(model, 'model job').script(...rounds.map((r) => [...r] as never));
-  model.script(...rounds.map((r) => [...r] as never));
+  subScript(model, 'model job').script(...rounds.map((r): Turn => [...r]));
+  model.script(...rounds.map((r): Turn => [...r]));
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const m = begin(rig, spec('model-sub', 'model job', { by: 'model', writes: 'deny' }));
   expect(await m.done).toMatchObject({ outcome: 'answer' });

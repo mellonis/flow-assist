@@ -5,7 +5,7 @@
 // (confirm-policy.test.ts), and it still declines a write a name outside the set hides.
 import { expect, test } from 'bun:test';
 import { Conversation } from '../conversation.ts';
-import type { ChildSpec } from '../conversation-types.ts';
+import type { ChildSpec, ConversationDeps } from '../conversation-types.ts';
 import { childPolicy, confirmFor, READ_ONLY_TASK_DECLINE } from '../confirm-policy.ts';
 import { WRITE_TOOLS_WITHHELD } from '../conversation-turn.ts';
 import { fakeDeps } from './conversation-deps.ts';
@@ -38,11 +38,12 @@ test('a task without a writes field inherits like a worker', () => {
 test('a deny child is offered no write tools', async () => {
   // The fakeDeps chatLLM records its options: each child's own turn goes through the
   // `chatLLM` wrapper `startChild` builds.
-  const seen: Record<string, any>[] = [];
-  const chatLLM = (async (_wire: unknown[], o: Record<string, any> = {}) => {
+  type ChatOpts = NonNullable<Parameters<ConversationDeps['chatLLM']>[1]>;
+  const seen: ChatOpts[] = [];
+  const chatLLM = (async (_wire: unknown[], o: ChatOpts = {} as ChatOpts) => {
     seen.push({ ...o });
     return { content: 'x', transcript: [{ role: 'assistant', content: 'x' }], toolRuns: [] };
-  }) as never;
+  }) as unknown as ConversationDeps['chatLLM'];
   const parent = new Conversation(fakeDeps({ chatLLM }));
   await childOf(parent, { writes: 'deny' }).send('do it');
   for (const name of WRITE_TOOLS_WITHHELD) expect(seen[0]!.withholdTools).toContain(name);
@@ -52,11 +53,12 @@ test('a deny child is offered no write tools', async () => {
 });
 
 test('deny never lifts: a descendant of a deny child is write-blind too', async () => {
-  const seen: Record<string, any>[] = [];
-  const chatLLM = (async (_wire: unknown[], o: Record<string, any> = {}) => {
+  type ChatOpts = NonNullable<Parameters<ConversationDeps['chatLLM']>[1]>;
+  const seen: ChatOpts[] = [];
+  const chatLLM = (async (_wire: unknown[], o: ChatOpts = {} as ChatOpts) => {
     seen.push({ ...o });
     return { content: 'x', transcript: [{ role: 'assistant', content: 'x' }], toolRuns: [] };
-  }) as never;
+  }) as unknown as ConversationDeps['chatLLM'];
   const parent = new Conversation(fakeDeps({ chatLLM }));
   // The grandchild's own writes are `ask`, but a denied child never gets writes back —
   // the hidden set rides the chained `chatLLM` wrappers to everything below it.
