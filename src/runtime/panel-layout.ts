@@ -102,4 +102,36 @@ export function panelLayout({ width, height, side, size, collapsed = false, need
   return { side: s, collapsed, fits, region: { left: 0, top: 0, width, height: height - h }, panel: { left: 0, top: height - h, width, height: h } };
 }
 
+// Where the chat's conversation column and the /diff panel go inside the chat's
+// content rect (inside the frame, above the field strip).
+export interface DiffPanelLayout {
+  mode: 'side' | 'stacked';
+  chat: { width: number; height: number };
+  diff: { width: number; height: number };
+}
+export const DIFF_SIDE_MIN_COLS = 50; // a side split never squeezes a half under this
+
+// Wide enough for a 1-column gap and two halves of at least `DIFF_SIDE_MIN_COLS`
+// each, and tall enough for the conversation's least rows, the split is side by
+// side: the chat takes the odd column, both halves the full height. Stacked, the
+// panel takes half the rows left after the field strip, never more than that
+// leaves the conversation its least; below two rows it is 0 — a one-row panel has
+// no usable box inside its frame — and a 0 is read as "draw nothing" (the `fits`
+// precedent in `panelLayout`).
+export function diffPanelLayout({ width, height, fieldRows, minChatRows = 4 }: {
+  width: number;       // the chat's content width (boxW - 4)
+  height: number;      // rows available to the split (boxH - 4 - chrome rows below/around)
+  fieldRows: number;   // rows the field strip takes when stacked (0 ignored in side mode)
+  minChatRows?: number; // the conversation keeps at least this many rows (default 4)
+}): DiffPanelLayout {
+  if (width >= 2 * DIFF_SIDE_MIN_COLS + 1 && height >= minChatRows) {
+    const chat = Math.ceil((width - 1) / 2);
+    return { mode: 'side', chat: { width: chat, height }, diff: { width: width - 1 - chat, height } };
+  }
+  const rest = height - fieldRows;
+  const half = Math.min(Math.floor(rest / 2), rest - minChatRows);
+  const panel = half < 2 ? 0 : half;
+  return { mode: 'stacked', chat: { width, height: rest - panel }, diff: { width, height: panel } };
+}
+
 export const inRect = (r: Rect, x: number, y: number) => x >= r.left && x < r.left + r.width && y >= r.top && y < r.top + r.height;

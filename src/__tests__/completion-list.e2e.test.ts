@@ -179,9 +179,9 @@ test('the list keeps its place while typing narrows it, and a count says where t
   const big = await bootApp(new ScriptedModel(), 100, 30);
   await big.press('F');
   await big.type('/');
-  expect(big.backend.lastFrame).toContain('1/24');
+  expect(big.backend.lastFrame).toContain('1/25');
   await big.press('up');
-  expect(big.backend.lastFrame).toContain('24/24');
+  expect(big.backend.lastFrame).toContain('25/25');
   expect(big.backend.lastFrame).toMatch(/exit +close the chat/);
   expect(big.backend.lastFrame).not.toMatch(/compact +fold/);
   big.app.unmount();

@@ -19,7 +19,7 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
+import { cdChatTarget, realOf, shellAutoRun, shellRoots, startDir, startNote, tildePath } from '../assistant/shell.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession, lockPath,
   dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
@@ -28,6 +28,7 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
+import { workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
 import { backgroundCommand } from '../assistant/background-bang.js';
@@ -38,7 +39,7 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -101,6 +102,7 @@ type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'compact', description: 'fold the conversation into a handoff summary' },
   { name: 'context', description: 'what fills the model\'s context' },
+  { name: 'diff', description: 'working-tree changes in a split panel' },
   { name: 'subagent', description: 'start a subagent from an agent file' },
   { name: 'sub', description: 'start a subagent from an agent file' },
   { name: 'agents', description: 'the live and ended subagents and tasks' },
@@ -443,6 +445,27 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const contextOpenRef = ui.useRef(false);
           const [contextOpen, setContextOpenState] = ui.useState(false);
           const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); host.notify(); };
+          // `/diff`: the working tree in a panel of the chat's own, beside the conversation
+          // or under the field. The refs are the key handler's and the walk's; the states are
+          // the render's. The folded files and the cursor are keyed `diffFileKey(root, path)`
+          // and outlive a refresh and a toggle: a file that stays changed stays folded where
+          // the person put it.
+          const diffOpenRef = ui.useRef(false);
+          const [diffOpen, setDiffOpenState] = ui.useState(false);
+          const diffSectionsRef = ui.useRef<DiffSection[]>([]);
+          const [diffSections, setDiffSections] = ui.useState<DiffSection[]>([]);
+          const diffCollapsedRef = ui.useRef<ReadonlySet<string>>(new Set<string>());
+          const [diffCollapsed, setDiffCollapsed] = ui.useState<ReadonlySet<string>>(new Set<string>());
+          const diffCursorRef = ui.useRef<string | null>(null);
+          const [diffCursor, setDiffCursor] = ui.useState<string | null>(null);
+          const [diffLoading, setDiffLoading] = ui.useState(false);
+          // Whether the walk this open started has landed. Only a panel with nothing on
+          // screen yet says it is capturing: a 1 s refresh of a tree already shown lands
+          // the same rows, and flipping the line back and forth each second reads as work.
+          const diffLoadedRef = ui.useRef(false);
+          // Whether the panel is drawn at all this render: `chatRoom` gives it no rows when
+          // the terminal is too small for the split, and its keys wait for the rows.
+          const diffShownRef = ui.useRef(false);
           // `/sessions` and the `sessions` key: the picker, drawn in the conversation's
           // place (src/assistant/session-picker.ts). The ref is for the key handler, the
           // state for the render; null — closed.
@@ -637,8 +660,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // to, so a host that somehow boots with no `services.viewRenderers` draws
           // views identically whichever of the two places below reads it.
           const viewRenderers: ViewRenderers = (host.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? { console: renderConsole };
+          // The width the conversation's rows are laid out at: its half beside the panel, the
+          // chat's whole width otherwise. The render sets it, the keys and the pager measure by it.
+          const chatWrapRef = ui.useRef(0);
           const rowOpts = (state: FoldState): RowOpts => ({
-            wrap: chatWrapWidth(width, fullscreenRef.current),
+            wrap: chatWrapRef.current || chatWrapWidth(width, fullscreenRef.current),
             folds: state,
             viewLines: Number((host.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             notes: notesRef.current,
@@ -1082,6 +1108,138 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - convRef.current!.segmentStartedAt), 120);
           };
+          // ── `/diff` ──────────────────────────────────────────────────────────────
+          // The roots the working tree is read from: the shell's own, or — with none
+          // configured — where the shell starts, the `shellCwd` precedent.
+          const diffRoots = () => {
+            const roots = shellRoots(host.config);
+            return roots.length ? roots : [startDir()];
+          };
+          // One walk of the tree. A walk that is still running takes no second one: the
+          // request is remembered and made when it ends, so a burst of events costs one
+          // read. An answer from a walk the panel has moved past — closed, or a newer walk
+          // started — is dropped.
+          const diffWalked = ui.useRef(0);
+          const diffBusy = ui.useRef(false);
+          const diffAgain = ui.useRef(false);
+          const diffTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const walkDiff = async () => {
+            if (diffBusy.current) { diffAgain.current = true; return; }
+            diffBusy.current = true;
+            const seq = ++diffWalked.current;
+            if (!diffLoadedRef.current) setDiffLoading(true);
+            try {
+              const raw = await workingTreeDiff(diffRoots());
+              if (seq !== diffWalked.current || !diffOpenRef.current) return;
+              // A diff is text a token may sit in — a config, a script, a log — so it is
+              // redacted before it reaches the state the panel draws from.
+              const sections = redactDeep(raw);
+              // The file the cursor was on stays the cursor while it is still there, and
+              // a tree that lost it moves the cursor to the first file drawn.
+              const keys = diffPanelFileKeys(sections);
+              const at = diffCursorRef.current;
+              const cursor = at && keys.includes(at) ? at : keys[0] ?? null;
+              diffSectionsRef.current = sections;
+              setDiffSections(sections);
+              if (cursor !== at) { diffCursorRef.current = cursor; setDiffCursor(cursor); }
+              diffLoadedRef.current = true;
+              setDiffLoading(false);
+            } catch (e) {
+              if (seq === diffWalked.current) setDiffLoading(false);
+              (host.services as Record<string, any>).pushLog?.(`[diff] ${(e as Error).message}`);
+            } finally {
+              diffBusy.current = false;
+              // A request remembered while the panel was open is not made once it closed.
+              if (diffAgain.current) { diffAgain.current = false; if (diffOpenRef.current) void walkDiff(); }
+              host.notify();
+            }
+          };
+          // A refresh waits for the tree to settle: a turn's rounds and a command's writes
+          // come in bursts, and each round should cost one read, not one per key.
+          const refreshDiff = () => {
+            if (!diffOpenRef.current) return;
+            if (diffTimer.current) clearTimeout(diffTimer.current);
+            diffTimer.current = setTimeout(() => { diffTimer.current = null; void walkDiff(); }, 300);
+          };
+          const closeDiff = () => {
+            if (!diffOpenRef.current) return;
+            diffOpenRef.current = false;
+            diffShownRef.current = false;
+            setDiffOpenState(false);
+            setDiffLoading(false);
+            if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; }
+            // The tree a closed panel showed is not the tree the next one opens on (a session
+            // switch changes the roots): it goes with the panel, and the walk the next open
+            // starts says `capturing baseline…` until it lands. The folds stay — a file the
+            // person folded stays folded where they put it.
+            diffSectionsRef.current = [];
+            setDiffSections([]);
+            diffCursorRef.current = null;
+            setDiffCursor(null);
+            // What a walk in flight answers is dropped: the panel was closed under it.
+            diffWalked.current++;
+            host.notify();
+          };
+          const openDiff = () => {
+            if (diffOpenRef.current) return;
+            diffOpenRef.current = true;
+            setDiffOpenState(true);
+            // The rows are read at once; `loading` covers the wait — a root with no
+            // repository captures its baseline first, and a walk a closed panel left in
+            // flight answers nothing, so the wait is the remembered walk's, not this one's.
+            // Without it a reopened panel over an empty list would claim the tree is clean.
+            diffLoadedRef.current = false;
+            setDiffLoading(true);
+            void walkDiff();
+            host.notify();
+          };
+          const toggleDiff = () => (diffOpenRef.current ? closeDiff() : openDiff());
+          // ↑/↓ walk the files the panel shows, in the order it draws them.
+          const moveDiffCursor = (delta: number) => {
+            const keys = diffPanelFileKeys(diffSectionsRef.current);
+            if (!keys.length) return;
+            const at = diffCursorRef.current;
+            const i = at ? keys.indexOf(at) : -1;
+            const next = keys[i < 0 ? (delta > 0 ? 0 : keys.length - 1) : Math.max(0, Math.min(keys.length - 1, i + delta))]!;
+            diffCursorRef.current = next;
+            setDiffCursor(next);
+            host.notify();
+          };
+          // ⏎ folds the file the cursor is on, or opens it again.
+          const toggleDiffFile = () => {
+            const at = diffCursorRef.current;
+            if (!at) return;
+            const next = new Set(diffCollapsedRef.current);
+            if (next.has(at)) next.delete(at); else next.add(at);
+            diffCollapsedRef.current = next;
+            setDiffCollapsed(next);
+            host.notify();
+          };
+          // A panel the layout gave no rows is open and invisible: a chat docked beside a
+          // plugin has the field's strip and nothing left over, and a terminal too small
+          // for either shape leaves none. Say what would give it room, once, when the
+          // panel is asked for — and with the chat open, since a collapsed chat draws no
+          // panel for another reason and the way out is its own key.
+          ui.useEffect(() => {
+            if (!diffOpen || !open || diffShownRef.current) return;
+            (host.services as Record<string, any>).showMessage?.(layout === 'panel'
+              ? 'no room for the diff panel here — /mode window'
+              : 'the terminal is too small for the diff panel');
+          }, [diffOpen, open, layout]);
+          // A tree that changes while the panel is open is read again: once a second, so a
+          // write lands in the panel as it happens, and after every round of a turn.
+          // A panel nobody can see costs no git call: collapsed in panel mode or closed in
+          // window/full, the chat is not drawn and the interval rests. The 300 ms refresh a
+          // turn's events ask for still keeps it warm, and opening or expanding the chat
+          // starts the interval again.
+          ui.useEffect(() => {
+            if (!diffOpen || !open) return;
+            const t = setInterval(() => refreshDiff(), 1000);
+            (t as unknown as { unref?: () => void }).unref?.();
+            return () => clearInterval(t);
+          }, [diffOpen, open]);
+          // The debounce is not an effect's: it must not fire into a component that is gone.
+          ui.useEffect(() => () => { if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; } }, []);
           viewFx.current = {
             // A subagent below this conversation parked a y/n or had it answered: what is
             // offered changed, and nothing in this conversation's own snapshot says so.
@@ -1104,10 +1262,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               startTicker();
               disarmEsc();
             },
-            // A new segment on the status line: its seconds start from 0.
-            activity: () => setElapsedMs(0),
+            // A new segment on the status line: its seconds start from 0; and a round that
+            // just ended may have written to the tree the panel draws.
+            activity: () => { setElapsedMs(0); refreshDiff(); },
             'turn-end': (ev) => {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+              refreshDiff();
               if (ev.end.kind !== 'turn') setElapsedMs(ev.end.ms); // the command's whole time, as its line last said
               // A stopped or failed run's queue comes back into the field.
               if (ev.end.outcome === 'stopped' || ev.end.outcome === 'failed') restoreQueue();
@@ -1356,6 +1516,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // the plugin had the keys stands: the pager goes, and so does a panel.
             setPager(null);
             setPanel(null);
+            closeDiff();
             setPicker(pickerStart(pickerRows(), conv.currentProject()));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
@@ -1466,13 +1627,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const leave = (prev: Conversation) => {
             endWatch();
             unbindView(prev);
-            // The clock, the `/memory` listing and an open `/context` are the session on
-            // screen's: a left one's `turn-end` reaches no view to stop the clock, and a
+            // The clock, the `/memory` listing, an open `/context` and the diff panel are the
+            // session on screen's: a left one's `turn-end` reaches no view to stop the clock, and a
             // number from a listing names that session's facts.
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
             setElapsedMs(0);
             memoryShownRef.current = null;
             if (contextOpenRef.current) setContextOpen(false);
+            closeDiff();
             // Before `detach`: the folds and notes mode still describe `prev`.
             viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current, viewportRef.current && !viewportRef.current.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), viewportRef.current.scrollTop) : null, draftCaret()));
             prev.detach(portRef.current!);
@@ -1517,7 +1679,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             resetView();
           };
           // The chat's half of a fresh conversation: the field, its bang level, the notes mode, the
-          // folds, the pager, the error line, the clock.
+          // folds, the pager, the diff panel, the error line, the clock.
           const resetView = () => {
             endWatch();
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
@@ -1528,6 +1690,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setElapsedMs(0);
             restoreView();
             setPanel(null);
+            closeDiff();
             disarmEsc();
             host.notify();
           };
@@ -1844,6 +2007,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // For the person; nothing is sent and nothing joins the conversation.
                 setField('');
                 setContextOpen(true);
+                return;
+              case 'diff':
+                // For the person; nothing is sent and nothing joins the conversation.
+                setField('');
+                toggleDiff();
                 return;
               case 'copy': {
                 // For the person; nothing is sent and nothing joins the conversation.
@@ -2293,10 +2461,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The tree rows the chat draws for `props` (the chat's props without `tree`): the
           // render and the keys both ask here: the geometry is the render's, the nodes are read at the key.
           const treeNow = (props: Record<string, unknown>) => {
-            const room = chatRoom(props as unknown as Parameters<typeof chatRoom>[0]);
+            const base = chatRoom(props as unknown as Parameters<typeof chatRoom>[0]);
             const nodes = conv.tree();
-            const fit = treeBudget({ boxH: room.boxH, besides: room.besides, planFull: room.planFull, nodes: nodes.length, max: agentRowsOf(host.config as Record<string, unknown>), hidden: room.hidden });
-            const view = fit > 0 ? treeRows(nodes, fit, room.wrap) : { rows: [], more: 0 };
+            const fit = treeBudget({ boxH: base.boxH, besides: base.besides, planFull: base.planFull, nodes: nodes.length, max: agentRowsOf(host.config as Record<string, unknown>), hidden: base.hidden });
+            const view = fit > 0 ? treeRows(nodes, fit, base.wrap) : { rows: [], more: 0 };
+            // One measure with the tree counted: the plan's shape and `/diff`'s split
+            // both give way to its rows.
+            const room = view.rows.length ? chatRoom({ ...props, treeRows: view.rows.length } as unknown as Parameters<typeof chatRoom>[0]) : base;
             return { room, nodes, view };
           };
           // The rows a key may move among: the drawn ones, not the `+K more` row.
@@ -2647,6 +2818,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setPicker(step.state);
                 if (step.action) pickerAction(step.action);
                 return true;
+              }
+              // The diff panel: Esc closes it, ↑/↓ walk its files and ⏎ folds one — only
+              // while it is drawn and the field is empty, so a typed message stays the
+              // field's. Every other key falls through to its usual handler.
+              // Esc while something runs also stops it, on the first press (the rule the
+              // completion list's Esc follows above): the panel is a display and the stop
+              // is the person's, so the key goes on to the stop below and the panel stays.
+              // ↑/↓ and ⏎ are consumed while the panel is drawn even when it has no file to
+              // move to: the panel owns them, and falling through would walk the history
+              // under a panel that says `↑↓ file`.
+              if (diffOpenRef.current) {
+                if (key.name === 'escape' && !conv.canStop()) { closeDiff(); return true; }
+                if (diffShownRef.current && fieldEmpty() && !key.ctrl && !key.meta) {
+                  if (key.name === 'up') { moveDiffCursor(-1); return true; }
+                  if (key.name === 'down') { moveDiffCursor(1); return true; }
+                  // The offer is the host's recovery from a limit and outranks a fold: the
+                  // field's own row says `⏎ continue`, so ⏎ is the field's then.
+                  if (key.name === 'return' && !conv.continueOffer) { toggleDiffFile(); return true; }
+                }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
               // Any key except the second Esc disarms the exit.
@@ -3027,6 +3217,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
               });
             })() : null,
+            // `/diff`: the working tree as the panel draws it — what the last walk answered,
+            // and the files the person folded.
+            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading } : null,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),
@@ -3099,6 +3292,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // follows its node, and goes back to the field when no row is drawn.
           chatPropsRef.current = chatProps;
           const { nodes, view, room } = treeNow(chatProps);
+          // Whether the panel is drawn: the split the layout gave, which the key handlers read.
+          diffShownRef.current = !!room.split && (room.split.mode === 'side' || room.split.diff.height > 0);
+          // The conversation's rows are laid out at its half while the panel stands beside
+          // them — the measure `renderChatModal` draws them at — so a click's row
+          // arithmetic, an anchor and the pager's `blockRows` act on what the screen shows.
+          chatWrapRef.current = room.split && room.split.mode === 'side'
+            ? Math.max(20, room.split.chat.width - 2)
+            : chatWrapWidth(width, fullscreenRef.current);
           const was = treeSelRef.current;
           const at = was.at === null || room.hidden ? null : treeCursor(was.at, treeIdxRef.current, view.rows);
           const ask = at !== null && at === was.at && was.ask;

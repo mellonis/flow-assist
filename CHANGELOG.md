@@ -5,6 +5,18 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/diff`: the working tree, live, beside the chat.** `/diff` splits the chat — the
+  conversation on the left, every file you have changed on the right, the field across the
+  bottom — and stacks the panel under the field where the terminal is narrow. Each file
+  shows its status, its `+N −M` and its whole diff with the file's own line numbers;
+  `↑`/`↓` choose one, `⏎` folds it, and a fold outlives a refresh while the tree changes
+  under it (a write by the turn, a command you ran, your own editor). A repository is
+  compared with `HEAD`, a directory outside git with a snapshot taken the first time the
+  panel was opened there, and the header says which. It is a view: nothing on it reaches
+  the model, the session or the journal. A y/n or a question is answered first and the
+  panel waits under it; `Esc` (or `/diff` again) closes it, and while a turn runs `Esc`
+  stops the turn and keeps the panel.
+
 - **The chat can run a model of its own — `/model`.** `/model deep` puts this conversation
   on the model your `ai.roles` says `deep` is, and an id of `ai.models` works too; `/model`
   alone opens a panel over the conversation listing everything your config can name, each

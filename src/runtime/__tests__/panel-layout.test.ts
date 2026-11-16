@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { PLUGIN_MIN_ROWS, chatModeOf, inRect, panelLayout } from '../panel-layout';
+import { PLUGIN_MIN_ROWS, chatModeOf, diffPanelLayout, inRect, panelLayout } from '../panel-layout';
 
 test('the mode: the config says it, an old fullscreen reads as full, else the panel', () => {
   expect(chatModeOf(undefined)).toBe('panel');
@@ -79,4 +79,27 @@ test('collapsed: gone on the right, one row at the bottom', () => {
   expect(bottom.region.height).toBe(39);
   expect(inRect(bottom.panel, 5, 39)).toBe(true);
   expect(inRect(bottom.panel, 5, 38)).toBe(false);
+});
+
+test('a wide chat splits side by side with equal halves', () => {
+  const l = diffPanelLayout({ width: 121, height: 20, fieldRows: 3 });
+  expect(l.mode).toBe('side');
+  expect(l.chat.width + l.diff.width + 1).toBe(121);
+  expect(Math.abs(l.chat.width - l.diff.width)).toBeLessThanOrEqual(1);
+  expect(l.chat.height).toBe(20);
+  expect(l.diff.height).toBe(20);
+});
+
+test('a narrow chat stacks, the panel taking half the free rows below the field', () => {
+  const l = diffPanelLayout({ width: 100, height: 20, fieldRows: 3 });
+  expect(l.mode).toBe('stacked');
+  expect(l.chat.width).toBe(100);
+  expect(l.diff.width).toBe(100);
+  expect(l.chat.height + l.diff.height).toBe(20 - 3);
+});
+
+test('the conversation keeps its least rows; beyond that the panel collapses to 0', () => {
+  const l = diffPanelLayout({ width: 100, height: 8, fieldRows: 3, minChatRows: 4 });
+  expect(l.diff.height).toBe(0);
+  expect(l.chat.height).toBe(5);
 });

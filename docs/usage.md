@@ -737,6 +737,38 @@ repository), recorded against a mock tracker:
 
 ![The same plugin in the chat: an epic reviewed, a description fixed and an estimate set behind the y/n, a failed pipeline explained and retried](demo/tracker-chat.gif)
 
+## The working tree beside the chat: `/diff`
+
+**`/diff` opens what you have changed while the assistant works.** A terminal with room
+puts the panel beside the conversation — the chat on the left, the tree on the right,
+the field and its hints across the bottom of both — and a narrow one stacks it under the
+field. It is live: a file the turn writes, a command you ran, an edit you made in another
+editor all reach it within a second, and the panel takes no key from the field unless the
+field is empty.
+
+Each file is a row of its own with its status and how much it changed (`▾ M src/app.ts ·
++12 −3`) and, under it, the whole hunk with the file's own line numbers; nothing is
+folded to begin with. `↑`/`↓` choose a file — the panel scrolls it into view — `⏎` folds
+one and opens it again, and a fold survives a refresh: a file you closed stays closed
+while the tree changes around it. `Esc` closes the panel, and so does `/diff` again; a
+turn or a command that is still running takes the first `Esc` for its stop, and the panel
+stays. A y/n or a question is answered first — the panel waits under it and comes back.
+It closes with the conversation it shows: `/clear`, `/new`, `/resume`, the sessions
+picker and a switch of session.
+
+**What it compares against** is named at the top. A repository is diffed against `HEAD`,
+and a directory outside git against a snapshot of it taken the first time the panel was
+opened there (`vs snapshot (taken 2026-11-16)`) — one per directory, kept, so a file that
+was already modified before you ever asked is still reviewed against what it held then.
+Repositories under a configured `shell.roots` entry are sections of their own, in walk
+order, a nested one before its parent; `.gitignore` decides what git shows, a file over
+2 MB and a binary file are named and not drawn. It refreshes while the panel is up, and
+only then.
+
+It is a view and nothing more: nothing on it reaches the model, the session or the
+journal, and the assistant never runs git to produce it. A docked chat too small to hold
+both says so — `/mode window` gives the panel the room.
+
 ## The model this conversation runs: `/model`
 
 `/model` with no argument opens a panel over the conversation, listing what your config
