@@ -18,7 +18,8 @@
 // `/compact` left, the plan and the last usage reading. They are three views of one
 // conversation (`/compact` moves the history into the summary), so they are saved
 // together or not at all — and the directory the conversation's shell commands were
-// left in, and the tools the model has loaded (the history calls them). Not saved: an answer being written, a pending y/n or
+// left in, the tools the model has loaded (the history calls them), and the model it
+// runs. Not saved: an answer being written, a pending y/n or
 // question, queued messages — restored, they would resolve into nothing.
 //
 // An image the person attached is saved as a ref — its path, hash, type and size

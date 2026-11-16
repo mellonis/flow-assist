@@ -95,13 +95,17 @@ flow-assist config set ai.models.big-model '{"contextWindow":512000}'
   `flow-assist config set ai.models '{"big-model.v2":{"contextWindow":512000}}'`, or write
   it in `config.json`.
 
-Each conversation runs one model: what its role resolved to when it started (a subagent
-or task with no role runs the model of the conversation that started it), else `ai.model`,
-else whatever the endpoint serves by default. A role this machine does not define is not
-an error: the work runs on the conversation's model and one note says so (`role "deep" is
-not defined (ai.roles) — using the conversation's model`). A model id your endpoint does
-not serve is its own error at the first request — the host cannot know which ids an
-endpoint runs.
+Each conversation runs one model: the session's own if you chose one in the chat with
+`/model` (it lives in that session's file, not here), what its role resolved to when it
+started (a subagent or task with no role runs the model of the conversation that started
+it), else `ai.model`, else whatever the endpoint serves by default. `/model` names a role
+or an id of `ai.models` — or `default` to go back to `ai.model` — and writes nothing to
+the config: a session that chose its own model keeps it while `ai.model` changes under it
+(see [usage.md](usage.md), "The model this conversation runs"). A role this machine does
+not define is not an error: the work runs on the conversation's model and one note says so
+(`role "deep" is not defined (ai.roles) — using the conversation's model`). A model id
+your endpoint does not serve is its own error at the first request — the host cannot know
+which ids an endpoint runs.
 
 All three keys sit under `ai`, the model's own leash: only you can set them (see
 [safety.md](safety.md), "What the assistant may set or save"), and `config get` /

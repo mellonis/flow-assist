@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat can run a model of its own — `/model`.** `/model deep` puts this conversation
+  on the model your `ai.roles` says `deep` is, and an id of `ai.models` works too; `/model`
+  alone opens a panel over the conversation listing everything your config can name, each
+  with the window it holds and the one you are on marked, and ⏎ takes the row under the
+  cursor. The choice belongs to the session: it is saved with it, comes back with
+  `/resume`, from the sessions picker and after a restart, and `config set ai.model` leaves
+  it where it is — `/model default` is how a session goes back to following `ai.model`.
+  The frame's title says which model the chat is on (`ƒ Flow Assist (big-model)`), and a
+  subagent or task you start runs it too unless its role says otherwise. Nothing of this
+  reaches your config: `/model` is yours, as `ai` is.
+
 - **Work can run on a model of its own: roles, and a window per model.** An agent file's
   `model:` line and the `subagent` tool's `model` argument name a role — `fast`, `deep`, a
   name you choose — and `ai.roles` says what each runs on this machine, so one file works

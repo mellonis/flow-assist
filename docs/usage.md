@@ -374,8 +374,8 @@ numbered list that `stop <number>` reads.
 
 ⏎ on a row under the line, or on a live row of `/agents`, shows what that node is doing: its
 conversation takes the list's place, folded the way the chat folds its own. The frame title
-names the path (`ƒ Flow Assist · fix-tests › read-logs`); the line, the plan, the queue and
-the rows are not drawn. The hint row says what the node is doing, as its row did (`⚙ <latest
+names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`); the line, the plan,
+the queue and the rows are not drawn. The hint row says what the node is doing, as its row did (`⚙ <latest
 step>`, `⏸ waiting for a y/n`, `○ queued`), and on the right `x stop · Esc back`.
 
 PgUp/PgDn and the wheel scroll the rows, which follow their end while they rest there; End
@@ -491,8 +491,9 @@ a note says so at the start. A subagent or task the agent starts has the same gr
 is yours to carry between machines, and the model ids are each machine's own.
 `config set ai.roles.fast small-model` says what a role runs on here (docs/config.md,
 "Models and roles"). Without a `model:` line — and for a subagent or task that names no
-role — the work runs the model of the conversation that started it: the chat's, or for a
-task a subagent starts, that subagent's.
+role — the work runs the model of the conversation that started it: the chat's (what
+`/model` chose for that session, or `ai.model`; see "The model this conversation runs"),
+or for a task a subagent starts, that subagent's.
 
 A role your machine does not define is not an error: the work runs on that same model and
 one note says so (`role "deep" is not defined (ai.roles) — using the conversation's
@@ -736,6 +737,45 @@ repository), recorded against a mock tracker:
 
 ![The same plugin in the chat: an epic reviewed, a description fixed and an estimate set behind the y/n, a failed pipeline explained and retried](demo/tracker-chat.gif)
 
+## The model this conversation runs: `/model`
+
+`/model` with no argument opens a panel over the conversation, listing what your config
+can name: `default (default-model)` first — `ai.model` and the window it holds — then the
+roles your config defines (`fast → small-model`, `deep → big-model`), then every id of
+`ai.models` that no role names, each with its window (`512k`). The row this conversation
+runs has its window in green, the others' dim; the cursor opens on the first row, so ⏎
+there is the way back to `ai.model`. ↑/↓ move, ⏎ takes the row under the cursor and
+closes the panel, Esc closes it and changes nothing.
+
+`/model <name>` sets it in one line: a role (`/model deep`), an id of `ai.models`
+(`/model other-model` — the id a role maps to works too), or `default`, which is the same
+reset. The chat says the switch in one row (`model: deep → big-model`), and the next
+thing you send runs on it: a turn already under way keeps the model it started with, so
+a switch never lands in the middle of an answer.
+
+The choice is the session's. It is saved with the session — and comes back with
+`/resume`, from the sessions picker and when a restart continues the conversation — and
+it is never written to your config. A session that chose its own model stays on it
+whatever `ai.model` says later; `/model default` leaves it with no model of its own, and
+it follows `ai.model` again. A new session (`/clear`, `/new`) starts on `ai.model` too — a
+switch is that session's, not a setting. A subagent or task you start runs this
+conversation's model too, unless its role — an agent file's `model:` line, or the
+`subagent` call's `model` — names another. The frame's title says which model the chat is
+on, after its name: `ƒ Flow Assist (big-model)`.
+
+A name your config does not know — a model id not in `ai.models`, a role nothing defines
+— is refused with `no model or role "nope" here (/model lists them)`, the line stays as
+you typed it for a fix, and nothing changes. A session already on an id that left
+`ai.models` after you chose it keeps running it: the catalogue is what you can pick from,
+not what the session is bound by.
+
+**The one edge: a big history on a smaller model.** Compaction runs on the conversation's
+own model, and `/compact` sends the whole history it folds, so a session switched down
+while its history is big may not fit the smaller window; the provider's error is what you
+see, and nothing is lost by it. Compacting before you switch down is the way through
+today — a compaction that folds a tail of the history instead of all of it is the change
+this needs.
+
 ## Images
 
 To show the assistant an image — a screenshot, a mock, a diagram — drag the file onto
@@ -769,10 +809,12 @@ done (commits, paths, commands that worked), what is in progress and its next st
 open decisions, the facts learned — and a `── compacted ──` row marks the place; the
 screen keeps everything, and the summary opens under the row. The chat does it by
 itself before a request would pass 80% of the window the conversation measures against
-(`ai.autoCompact.threshold`, 0.5–0.95 of that window — the model's own, docs/config.md,
-"Models and roles"), between two requests so no tool call is parted from
+(`ai.autoCompact.threshold`, 0.5–0.95 of that window — the window of the model the
+conversation runs, so `/model` moves it too; the model's own, docs/config.md, "Models and
+roles"), between two requests so no tool call is parted from
 its result, and marks the row `auto`; `config set ai.autoCompact.enabled false` leaves
-it to `/compact`.
+it to `/compact`. Compacting a history bigger than the model's window fails at the
+provider — see "The model this conversation runs", the one edge.
 
 ## Limits of a turn
 

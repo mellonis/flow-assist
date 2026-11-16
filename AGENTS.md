@@ -298,8 +298,10 @@ the blacklist.
     (`turnShape('task')`) and the one-shot prompt
     (`turnShape('oneshot')`: no screen) get none — they run apart from the screen.
     `/compact` does not see it.
-    The chat's title is the labels joined ` · `, cut to the frame
-    (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`), the plain name with none.
+    The chat's title is the labels joined ` · ` after the chat's name and the model it
+    runs (see (models)), cut to the frame —
+    `ƒ Flow Assist (big-model) · Board: Frontend · Issue ABC-1`. With no labels it is the
+    name and the model alone.
     **The screen changing never switches the session**: opening the chat continues
     the conversation whatever is on screen (switching lost the dialogue for the
     person); `/new` (or `/clear`) is how a fresh one starts. The session never writes
@@ -2038,7 +2040,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   (`currentProject`).
   A session is ONE object: the screen list, the conversation's `api` (what the model is sent),
   its `summary`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
-  loaded tools (`tools`) and the
+  loaded tools (`tools`), the model it runs (`model`, absent — `ai.model`) and the
   shell's directory (`shellCwd`, re-checked against the roots when used) —
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
@@ -2064,12 +2066,13 @@ A saved history that holds calls under the name `background` is sent as it is. T
   a fresh `Conversation` (`renew` in `src/plugins/assistant.ts`): everything this file
   says `/clear` resets — the plan, the loaded tools, the recall state, the images'
   numbering, the auto mode, the notes mode, the folds, the live views, the shell's
-  directory — starts anew with the object, for `/new` too; the ↑/↓ history carries
-  over (as a copy after `/new`: the session left still pushes what it delivers
-  mid-turn, and that stays out of this one's; `/clear`'s closed one pushes nothing). A
-  plugin's news held for a stopped or left turn's end follows the person to the new
-  session, after `/new` too. `/new` and `/resume` are not refused while an answer or a `!command` runs: the
-  turn goes on in the session left (headless, below). 50 sessions are kept per project (`sessions.keep`,
+  directory, the model it runs (`/model`) — starts anew with the object, for `/new`
+  too; the ↑/↓ history carries over (as a copy after `/new`: the session left still
+  pushes what it delivers mid-turn, and that stays out of this one's; `/clear`'s closed
+  one pushes nothing). A plugin's news held for a stopped or left turn's end follows the
+  person to the new session, after `/new` too. `/new` and `/resume` are not refused while
+  an answer or a `!command` runs: the turn goes on in the session left (headless, below).
+  50 sessions are kept per project (`sessions.keep`,
   `pruneSessions` groups by the directory a file is in; the top level is one project),
   and a mirror directory a prune or a picker delete leaves empty is removed, with each
   empty parent up to — never including — the sessions directory (`dropEmptyDirs`).
@@ -3226,14 +3229,20 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` and `ask_user` are withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (a subagent's `chatLLM` adds both to the list, a task's adds `ask_user`). The worker prompt both kinds get says not to wait for the user, to make a reasonable assumption where the task leaves something open and name each assumption in the result, and to ask the conversation that started it ONE question with `ask_parent` (below) only when the work cannot go on without an answer, reading a `no answer` reply as "proceed on the best assumption". The turn shape carries `askParent` and `answerChild`: a task and a subagent are offered `ask_parent`, a session and a subagent are offered `answer_child`; the session withholds `ask_parent`, the task `answer_child`, the one-shot prompt both, and every run a tool starts through `ctx.chatLLM` withholds both (`NESTED_WITHHELD`). A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
-- **A conversation runs ONE model (models)** — its own (a child's, resolved from a role at
-  its start), else `ai.model`, else the provider's default (`effectiveModel()`), and the
+- **A conversation runs ONE model (models)** — its own (a session's, set by `/model` and
+  kept in its file as `model`, absent when it runs `ai.model`; a child's, resolved from a
+  role at its start), else `ai.model`, else the provider's default (`effectiveModel()`),
+  and the frame's title names it after the chat's own name
+  (`ƒ Flow Assist (big-model) · <subject>`, the bare name while no model is known). The
   requests its turn makes carry it (`withModel(llmOpts(ai), c.model)`, at the turn and at
   `foldIntoHandoff`); a run a tool starts through `ctx.chatLLM` keeps `ai.model`, passing
   its own options to `services.chatLLM`, which merges them last. A child without a role of
   its own inherits its parent's model, materialised at the start
-  (`child.model = spec.model ?? this.effectiveModel()`), so a task a subagent starts runs
-  what that subagent runs; a session file records no model. The window is that model's:
+  (`child.model = spec.model ?? this.effectiveModel()`), so a task a subagent starts — and
+  a subagent a session with a `/model` choice starts — runs what its parent runs. A
+  session's own model outlives the config: `config set ai.model` leaves it where it is,
+  and `/model default` is the absence of the field, so the session follows `ai.model`
+  again. The window is that model's:
   `Conversation.contextWindow()` —
   `ai.models.<id>.contextWindow` → `ai.contextWindow` → 200000 — is the ONE reader of the
   window, so the meter, the automatic compaction's threshold and the recall threshold all
@@ -4105,6 +4114,25 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   the running turn's status while an answer comes in, and a mode that disappeared
   exactly while writes were running unasked would be the wrong half of the screen to
   lose.
+- **`/model` is the model this conversation runs (models)** — the session's own, kept in
+  its file and outliving `ai.model`; the config names what may be chosen, and `/model`
+  never writes it (`ai` is the model's own leash). `/model <name>` takes a role of
+  `ai.roles`, an id of `ai.models` (an id a role maps to too), or `default` — the
+  absence of the field, so the session follows `ai.model` again; `/model` alone opens a
+  command panel over the conversation's place whose rows are `modelRows(ai)`
+  (`src/assistant/model-roles.ts`, pure): the reset `default (<ai.model>)`, then the
+  roles in `ai.roles`' order, then the ids of `ai.models` no role names, each with its
+  window (`512k`), the window of the row the session's choice names in the `ok` tone
+  (`default` while it runs `ai.model`; a role's row for an id that role maps to; none for
+  a pinned id the catalogue no longer lists). The cursor starts on the reset; ⏎ takes the
+  row under it and closes the panel, Esc closes it and changes nothing. A name the config
+  does not know is refused (`no model or role "nope" here (/model lists them)`), the line
+  stays as typed for a fix and nothing changes; a switch is one `note` row
+  (`model: deep → big-model`), saved with the session (a switch made before anything is
+  said goes in with the first save), and the next turn's request carries it — the turn in
+  flight sent its own already. The value completes in the field from the
+  same rows, labelled as the panel draws them. While a command panel is up the frame's
+  heading is the panel's (`ƒ Flow Assist · Model`), with no model.
 - A **paste** is one key, `{ name: 'paste', text }` (flowtty's bracketed paste): it
   goes in at the caret with its line breaks kept. It is never decoded into keys, so
   a pasted newline does not send and pasted letters fire no binding — any new
@@ -4446,7 +4474,8 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   walking the rest. What is offered is `chatComplete`'s (`src/config/fieldcomplete.ts`,
   pure): a `/command`'s name in the declared order (a bare `/` lists them all), then
   its argument from `CHAT_COMMAND_DEFS`' `values` — `/auto reads|all|off`, `/notes
-  step|open`, `/mode panel|window|full`, `/memory project|global|forget|accept`, and `/resume` the saved sessions by number,
+  step|open`, `/mode panel|window|full`, `/model` the names the config knows (the panel's
+  own rows, read when the field is drawn), `/memory project|global|forget|accept`, and `/resume` the saved sessions by number,
   newest first, each labelled with its title (`chatCommandDefs`, bound where `sessDir`
   is known and read when the field is drawn) — the picker (`/sessions`) is the way to
   find one by what was said — or, at a non-zero bang level, the last
