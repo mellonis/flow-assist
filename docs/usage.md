@@ -748,22 +748,29 @@ field is empty.
 
 Each file is a row of its own with its status and how much it changed (`▾ M src/app.ts ·
 +12 −3`) and, under it, the whole hunk with the file's own line numbers; nothing is
-folded to begin with. `↑`/`↓` choose a file — the panel scrolls it into view — `⏎` folds
-one and opens it again, and a fold survives a refresh: a file you closed stays closed
+folded to begin with. `↑`/`↓` choose a file — the panel scrolls it into view — and a
+click on a file, or `⏎`, folds it and opens it again: click anywhere on its block, its
+row or one of its hunks. A fold survives a refresh: a file you closed stays closed
 while the tree changes around it. `Esc` closes the panel, and so does `/diff` again; a
 turn or a command that is still running takes the first `Esc` for its stop, and the panel
 stays. A y/n or a question is answered first — the panel waits under it and comes back.
 It closes with the conversation it shows: `/clear`, `/new`, `/resume`, the sessions
 picker and a switch of session.
 
-**What it compares against** is named at the top. A repository is diffed against `HEAD`,
-and a directory outside git against a snapshot of it taken the first time the panel was
-opened there (`vs snapshot (taken 2026-11-16)`) — one per directory, kept, so a file that
-was already modified before you ever asked is still reviewed against what it held then.
-Repositories under a configured `shell.roots` entry are sections of their own, in walk
-order, a nested one before its parent; `.gitignore` decides what git shows, a file over
-2 MB and a binary file are named and not drawn. It refreshes while the panel is up, and
-only then.
+**What it compares against** is `HEAD`, named at the top. **What it shows is the
+repository the shell is in** — its whole working tree at or above
+the shell's directory, as `git status` reads it from a subdirectory — and it follows you
+from one repository to the next as you `cd`; the folders beside it along `shell.roots` are
+never in it, and a repository wider than `shell.roots` still shows whole: the fence is
+where the assistant may read and write, and this is your own screen. Outside git there is
+no "before" that would mean anything, so the panel says
+`not a git repository` and draws nothing — and a folder that merely *holds* repositories
+is outside git too: `git status` refuses there, and so does the panel. A repository nested
+**inside** the repository you are in is a section of its
+own, drawn after the section of the repository it stands under; sibling sections come in
+walk order. A repository git cannot read is named as that — never shown as a clean tree.
+`.gitignore` decides what git shows, a file over 2 MB and a binary file are
+named and not drawn. It refreshes while the panel is up, and only then.
 
 It is a view and nothing more: nothing on it reaches the model, the session or the
 journal, and the assistant never runs git to produce it. A docked chat too small to hold

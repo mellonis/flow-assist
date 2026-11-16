@@ -19,7 +19,7 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { cdChatTarget, realOf, shellAutoRun, shellRoots, startDir, startNote, tildePath } from '../assistant/shell.js';
+import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession, lockPath,
   dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
@@ -28,7 +28,7 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
+import { diffScopeOf, workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
 import { backgroundCommand } from '../assistant/background-bang.js';
@@ -459,8 +459,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const diffCursorRef = ui.useRef<string | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<string | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
+          // Whether the scope stands outside git entirely: the empty panel's answer is
+          // `not a git repository`, not `no changes in the working tree`.
+          const [diffGitless, setDiffGitless] = ui.useState(false);
+          // Whether git could not read a top the walk found: the panel says so rather
+          // than draw what it did read as the whole tree.
+          const [diffFailed, setDiffFailed] = ui.useState(false);
           // Whether the walk this open started has landed. Only a panel with nothing on
-          // screen yet says it is capturing: a 1 s refresh of a tree already shown lands
+          // screen yet says a walk is running: a 1 s refresh of a tree already shown lands
           // the same rows, and flipping the line back and forth each second reads as work.
           const diffLoadedRef = ui.useRef(false);
           // Whether the panel is drawn at all this render: `chatRoom` gives it no rows when
@@ -1109,12 +1115,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - convRef.current!.segmentStartedAt), 120);
           };
           // ── `/diff` ──────────────────────────────────────────────────────────────
-          // The roots the working tree is read from: the shell's own, or — with none
-          // configured — where the shell starts, the `shellCwd` precedent.
-          const diffRoots = () => {
-            const roots = shellRoots(host.config);
-            return roots.length ? roots : [startDir()];
-          };
+          // The one tree the panel reads: the repository the shell stands in — its git
+          // top at or above the shell's directory, the whole working tree as `git status`
+          // shows it from wherever in it the shell is. Outside git there is nothing to
+          // diff, and the panel says so. A move (`!cd`, `/cd`, a tool's own) changes the
+          // scope on the next walk.
+          const diffScope = () => diffScopeOf(convRef.current!.shell.cwd());
           // One walk of the tree. A walk that is still running takes no second one: the
           // request is remembered and made when it ends, so a burst of events costs one
           // read. An answer from a walk the panel has moved past — closed, or a newer walk
@@ -1129,7 +1135,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const seq = ++diffWalked.current;
             if (!diffLoadedRef.current) setDiffLoading(true);
             try {
-              const raw = await workingTreeDiff(diffRoots());
+              const { sections: raw, gitless, failed } = await workingTreeDiff([diffScope()]);
               if (seq !== diffWalked.current || !diffOpenRef.current) return;
               // A diff is text a token may sit in — a config, a script, a log — so it is
               // redacted before it reaches the state the panel draws from.
@@ -1141,6 +1147,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const cursor = at && keys.includes(at) ? at : keys[0] ?? null;
               diffSectionsRef.current = sections;
               setDiffSections(sections);
+              setDiffGitless(gitless);
+              setDiffFailed(failed);
               if (cursor !== at) { diffCursorRef.current = cursor; setDiffCursor(cursor); }
               diffLoadedRef.current = true;
               setDiffLoading(false);
@@ -1169,11 +1177,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffLoading(false);
             if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; }
             // The tree a closed panel showed is not the tree the next one opens on (a session
-            // switch changes the roots): it goes with the panel, and the walk the next open
-            // starts says `capturing baseline…` until it lands. The folds stay — a file the
-            // person folded stays folded where they put it.
+            // switch changes the shell's directory, and the scope with it): it goes with the
+            // panel, and the walk the next open starts says `reading the working tree…` until
+            // it lands. The folds stay — a file the person folded stays folded where they put it.
             diffSectionsRef.current = [];
             setDiffSections([]);
+            setDiffGitless(false);
+            setDiffFailed(false);
             diffCursorRef.current = null;
             setDiffCursor(null);
             // What a walk in flight answers is dropped: the panel was closed under it.
@@ -1184,10 +1194,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (diffOpenRef.current) return;
             diffOpenRef.current = true;
             setDiffOpenState(true);
-            // The rows are read at once; `loading` covers the wait — a root with no
-            // repository captures its baseline first, and a walk a closed panel left in
-            // flight answers nothing, so the wait is the remembered walk's, not this one's.
-            // Without it a reopened panel over an empty list would claim the tree is clean.
+            // The rows are read at once; `loading` covers the wait — the walk runs git
+            // and takes a moment, and a walk a closed panel left in flight answers
+            // nothing, so the wait is the remembered walk's, not this one's. Without it
+            // a reopened panel over an empty list would claim the tree is clean.
             diffLoadedRef.current = false;
             setDiffLoading(true);
             void walkDiff();
@@ -1205,15 +1215,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffCursor(next);
             host.notify();
           };
-          // ⏎ folds the file the cursor is on, or opens it again.
-          const toggleDiffFile = () => {
-            const at = diffCursorRef.current;
-            if (!at) return;
+          // A click on a file's block folds it — the fold a person reaches for without
+          // knowing a key — and puts the cursor on that file, so ↑/↓ walk on from where
+          // they are looking.
+          const foldDiffFile = (key: string) => {
+            diffCursorRef.current = key;
+            setDiffCursor(key);
             const next = new Set(diffCollapsedRef.current);
-            if (next.has(at)) next.delete(at); else next.add(at);
+            if (next.has(key)) next.delete(key); else next.add(key);
             diffCollapsedRef.current = next;
             setDiffCollapsed(next);
             host.notify();
+          };
+          // ⏎ folds the file the cursor is on, or opens it again.
+          const toggleDiffFile = () => {
+            const at = diffCursorRef.current;
+            if (at) foldDiffFile(at);
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
           // plugin has the field's strip and nothing left over, and a terminal too small
@@ -3219,7 +3236,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
             // and the files the person folded.
-            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading } : null,
+            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless, failed: diffFailed, onFold: foldDiffFile } : null,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),

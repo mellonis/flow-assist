@@ -46,6 +46,21 @@ const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
 };
+// One commit, then TWO files changed since it: two blocks to fold independently.
+const scratchPair = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-pair-')));
+  git(root, 'init', '-q');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\n');
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\ntwo\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'init');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\nalpha-change\n');
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\nbeta-change\n');
+  return root;
+};
 
 test('/diff opens the split panel on the tree\'s changes, folds a file and closes', async () => {
   const root = scratchTree();
@@ -76,6 +91,46 @@ test('/diff opens the split panel on the tree\'s changes, folds a file and close
   expect(ui.backend.lastFrame).toContain('⏎ send');
   ui.app.unmount();
 });
+
+// A click folds the file under it — the affordance a person reaches for when a hint
+// row is not enough — as a click folds a block in the conversation. The drag that
+// starts on a hunk is flowtty's selection and never this: only press+release on one
+// cell is a click.
+test('a click on a file folds it and unfolds it, and the cursor follows the click', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'));
+  // The hint row names the click beside the key: a fold nobody guesses is a fold
+  // nobody uses.
+  expect(ui.backend.lastFrame).toContain('click');
+  const clickRow = async (name: string) => {
+    const lines = ui.backend.lastFrame.split('\n');
+    const y = lines.findIndex((l) => l.includes(name));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const x = lines[y]!.indexOf(name);
+    ui.backend.mouse('down', x, y);
+    ui.backend.mouse('up', x, y);
+    await settle(6);
+  };
+  // A click on the SECOND file folds it which ⏎ would not: it folds the cursor's file,
+  // and the cursor follows the click.
+  await clickRow('b.txt');
+  expect(ui.backend.lastFrame).not.toContain('+beta-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  // ⏎ now works on the file the click left the cursor on: it unfolds b, not a.
+  await ui.press('return');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  // And a click on a hunk row is the block's too: anywhere on the file, one fold.
+  await clickRow('+alpha-change');
+  expect(ui.backend.lastFrame).not.toContain('+alpha-change');
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  ui.app.unmount();
+}, 15_000);
 
 test('/clear and the sessions key each close the panel with the conversation', async () => {
   const root = scratchTree();
@@ -287,3 +342,99 @@ test('a docked chat with no rows for the panel says where it can be shown', asyn
   expect(ui.backend.lastFrame).not.toContain('diff ·');
   ui.app.unmount();
 });
+
+// ─── where the diff is looked for ─────────────────────────────────────────────
+// The panel reads the repository the shell stands in, never the neighbours along the
+// roots: an umbrella of repositories is what `shell.roots` is for, and a person who
+// cd'd into one project asks about that project.
+const scratchRepo = (dir: string, file: string, marker: string) => {
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q');
+  git(dir, 'config', 'user.name', 'Test');
+  git(dir, 'config', 'user.email', 'test@example.com');
+  git(dir, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(dir, file), 'one\ntwo\n');
+  git(dir, 'add', file);
+  git(dir, 'commit', '-qm', 'init');
+  fs.writeFileSync(path.join(dir, file), `one\n${marker}\n`);
+};
+// The workspace layout: an umbrella repository with one changed file of its own and a
+// repository under it, each with one changed file. Three working trees, one root.
+const workspaceTree = () => {
+  const umbrella = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-scope-')));
+  scratchRepo(umbrella, 'outer.txt', 'outer-change');
+  scratchRepo(path.join(umbrella, 'projA'), 'alpha.txt', 'alpha-change');
+  scratchRepo(path.join(umbrella, 'projB'), 'beta.txt', 'beta-change');
+  return umbrella;
+};
+
+test('/diff outside git says there is no repository', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-plain-')));
+  fs.writeFileSync(path.join(root, 'note.txt'), 'hello\n');
+  // A repository nested under the folder does not make the folder one: `git status`
+  // says "not a git repository" here, and so does the panel — the nested tree is not
+  // answered for.
+  scratchRepo(path.join(root, 'repoA'), 'alpha.txt', 'alpha-change');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('not a git repository'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('not a git repository');
+  // Nothing is invented for the files the directory holds: no section, no baseline.
+  expect(frame).not.toContain('no changes in the working tree');
+  expect(frame).not.toContain('vs snapshot');
+  expect(frame).not.toContain('diff ·');
+  expect(frame).not.toContain('+alpha-change');
+  ui.app.unmount();
+});
+
+test('/diff shows the repository the shell is in, not its neighbours', async () => {
+  const umbrella = workspaceTree();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [umbrella] } }, { startDir: umbrella });
+  await ui.press('F');
+  await ui.type('/cd projA');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff ·'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 1 file');
+  expect(frame).toContain('+alpha-change');
+  // The umbrella's own change and the sibling's are not this working tree's.
+  expect(frame).not.toContain('+outer-change');
+  expect(frame).not.toContain('+beta-change');
+  ui.app.unmount();
+}, 15_000);
+
+test('an open panel follows a cd', async () => {
+  const umbrella = workspaceTree();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [umbrella] } }, { startDir: umbrella });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('+beta-change'));
+  // At the umbrella the panel is the umbrella's: all three trees stand beside the chat.
+  expect(ui.backend.lastFrame).toContain('+outer-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  await ui.type('/cd projB');
+  await ui.press('return');
+  // The walk after the move is the new one: B's tree alone, with no key of its own. The
+  // refresh is the poll's (a second, debounced), so the window is wide on purpose.
+  await settleUntil(
+    () => ui.backend.lastFrame.includes('+beta-change')
+      && !ui.backend.lastFrame.includes('+alpha-change')
+      && !ui.backend.lastFrame.includes('+outer-change'),
+    8000,
+  );
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 1 file');
+  expect(frame).toContain('+beta-change');
+  expect(frame).not.toContain('+alpha-change');
+  expect(frame).not.toContain('+outer-change');
+  ui.app.unmount();
+}, 15_000);

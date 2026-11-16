@@ -1937,6 +1937,9 @@ export function renderChatModal({
           collapsed: diffPanel.collapsed,
           cursor: diffPanel.cursor,
           loading: diffPanel.loading,
+          gitless: diffPanel.gitless,
+          failed: diffPanel.failed,
+          onFold: diffPanel.onFold,
           wrap: panelWrap,
           bg: m.bg,
           palette: m,
@@ -2074,14 +2077,16 @@ export function renderChatModal({
               : bangLevel && shellCwd
               ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
               // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
-              // names them instead of the history it does not walk here. With the field
-              // offering `⏎ continue` after a limit, ⏎ is the field's and is not a fold.
+              // names them instead of the history it does not walk here. A click folds
+              // too, and the row says so: a fold a person finds by clicking needs no
+              // manual. With the field offering `⏎ continue` after a limit, ⏎ is the
+              // field's and is not a fold.
               // A y/n, a question or the `/context` panel takes the keys, and the
               // panel's keys are not offered then.
               : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
               ? (continueOffer
-                ? `${CAP.upDown} file · ${CAP.esc} close`
-                : `${CAP.upDown} file · ${CAP.enter} fold · ${CAP.esc} close`)
+                ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
+                : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
@@ -2547,13 +2552,18 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
 // which file the cursor is on; nothing here reads the tree, the clock or the config.
 //
 // What the chat hands over for `/diff`: the sections of the walk, the files the person
-// folded and the file the cursor is on — both keyed `diffFileKey(root, path)` — and
-// whether a walk is still running.
+// folded and the file the cursor is on — both keyed `diffFileKey(root, path)` — whether
+// a walk is still running, and the two honest nothings (`gitless`, `failed`).
 export interface DiffPanelView {
   sections: DiffSection[];
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   loading?: boolean;
+  gitless: boolean;
+  failed: boolean;
+  // A click on a file's block folds it: `foldDiffFile` in the chat, which also puts
+  // the cursor on the file. Absent — the rows take no click.
+  onFold?: (fileKey: string) => void;
 }
 
 // The files the panel shows, in the order ↑/↓ walk them: root by root, as drawn.
@@ -2572,6 +2582,11 @@ export function diffPanelBody(p: {
   cursor: string | null;
   wrap: number; // the panel's inner width
   loading?: boolean;
+  gitless: boolean;
+  failed: boolean;
+  // A click on a file's block folds it, as ⏎ does: the fold a person reaches for
+  // without knowing a key. Absent — the rows simply take no click.
+  onFold?: (fileKey: string) => void;
   palette?: Record<string, string | undefined>;
 }): { rows: ReactNode[]; cursorRow: number } {
   const m = p.palette ?? {};
@@ -2580,9 +2595,14 @@ export function diffPanelBody(p: {
   let cursorRow = -1;
   const total = p.sections.reduce((n, s) => n + s.files.length, 0);
   if (!total) {
-    // A walk still running says so; a tree with nothing in it says that.
+    // A walk still running says what it is doing; a place with no repository at all
+    // says so; a repository git could not read says that — never `no changes in the
+    // working tree`, which is a claim only a clean tree read to the end may make.
     rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false },
-      p.loading ? 'capturing baseline…' : 'no changes in the working tree'));
+      p.loading ? 'reading the working tree…'
+        : p.failed ? 'git could not read the working tree'
+        : p.gitless ? 'not a git repository'
+        : 'no changes in the working tree'));
     return { rows, cursorRow };
   }
   p.sections.forEach((s, si) => {
@@ -2591,19 +2611,23 @@ export function diffPanelBody(p: {
     const added = s.files.reduce((n, f) => n + f.added, 0);
     const removed = s.files.reduce((n, f) => n + f.removed, 0);
     rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
-      cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · ${s.label}`, inner)));
+      cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · vs HEAD`, inner)));
     s.files.forEach((f, fi) => {
       const key = diffFileKey(s.root, f.path);
       const folded = p.collapsed.has(key);
       const counts = fileDiffCounts(f);
       const lead = `${folded ? '▸' : '▾'} ${f.status} `;
+      // A click anywhere on the file's block folds it — its row, its note, its hunks —
+      // as a click folds a block in the conversation. A drag is still a selection: the
+      // mouse controller takes only a press and a release on one cell.
+      const fold = p.onFold ? { onClick: () => p.onFold!(key) } : {};
       // The tail of the path is the part that says where one is, so it is what a cut keeps.
       const room = Math.max(8, inner - cellWidth(lead) - cellWidth(counts) - 1);
       // The cursor's file is lit AND inverted: colour alone is no mark for a reader who
       // cannot see it, and every other cursor in this file is drawn the same way.
       const lit = p.cursor === key ? { color: m.accent, inverse: true } : {};
       if (p.cursor === key) cursorRow = rows.length;
-      rows.push(h(Box, { key: `f${si}-${fi}`, flexDirection: 'row', flexShrink: 0 },
+      rows.push(h(Box, { key: `f${si}-${fi}`, flexDirection: 'row', flexShrink: 0, ...fold },
         h(Text, { wrap: 'truncate', selectable: false }, lead),
         h(Text, { ...lit, wrap: 'truncate' }, cutLeft(f.path, room)),
         h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${counts}`)));
@@ -2611,7 +2635,8 @@ export function diffPanelBody(p: {
       // A file with no hunks at all says why where they would have been.
       if (f.note) {
         const why = f.note === 'binary' ? 'binary' : 'too large';
-        rows.push(h(Text, { key: `n${si}-${fi}`, dim: true, wrap: 'truncate', selectable: false }, `  ${why} — not shown`));
+        rows.push(h(Box, { key: `n${si}-${fi}`, flexDirection: 'row', flexShrink: 0, ...fold },
+          h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${why} — not shown`)));
         return;
       }
       // The hunks are drawn WHOLE — no cap on their lines: the panel is a reader, not a
@@ -2625,12 +2650,18 @@ export function diffPanelBody(p: {
         // without `ok`/`warn` leaves those rows the terminal's own ink, never dim.
         const changed = r.text.startsWith('+') || r.text.startsWith('-');
         const color = r.text.startsWith('+') ? m.ok : r.text.startsWith('-') ? m.warn : undefined;
-        rows.push(h(Box, { key: `h${si}-${fi}-${ri}`, flexDirection: 'row', flexShrink: 0 },
+        rows.push(h(Box, { key: `h${si}-${fi}-${ri}`, flexDirection: 'row', flexShrink: 0, ...fold },
           h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${r.no.padStart(width)} `),
           changed ? h(Text, { color, wrap: 'truncate' }, r.text) : h(Text, { dim: true, wrap: 'truncate' }, r.text)));
       });
     });
   });
+  // What one top could not be read is said where what was read draws: a partial tree
+  // shown as the whole one is the dishonesty this line is here for.
+  if (p.failed) {
+    rows.push(h(Text, { key: 'failed', dim: true, wrap: 'truncate', selectable: false },
+      cutStep('git could not read part of the working tree', inner)));
+  }
   return { rows, cursorRow };
 }
 
@@ -2691,6 +2722,9 @@ export function renderDiffPanel(p: {
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   wrap: number; // the panel's inner width
+  gitless: boolean;
+  failed: boolean;
+  onFold?: (fileKey: string) => void;
   bg: string | undefined;
   palette?: Record<string, string | undefined>;
   loading?: boolean;
