@@ -10,12 +10,14 @@ What each version of flow-assist brought, newest first. The version is the one i
   bottom — and stacks the panel under the field where the terminal is narrow. Each file
   shows its status, its `+N −M` and its whole diff with the file's own line numbers;
   `↑`/`↓` choose one, `⏎` folds it, and a fold outlives a refresh while the tree changes
-  under it (a write by the turn, a command you ran, your own editor). A repository is
-  compared with `HEAD`, a directory outside git with a snapshot taken the first time the
-  panel was opened there, and the header says which. It is a view: nothing on it reaches
-  the model, the session or the journal. A y/n or a question is answered first and the
-  panel waits under it; `Esc` (or `/diff` again) closes it, and while a turn runs `Esc`
-  stops the turn and keeps the panel.
+  under it (a write by the turn, a command you ran, your own editor). It reads the
+  repository the shell is in — its whole working tree, wherever in it the shell stands —
+  and follows you as you `cd`, never the folders beside it along `shell.roots`. A
+  repository is compared with `HEAD`, a directory outside git with a snapshot taken the
+  first time the panel was opened there, and the header says which. It is a view: nothing
+  on it reaches the model, the session or the journal. A y/n or a question is answered
+  first and the panel waits under it; `Esc` (or `/diff` again) closes it, and while a turn
+  runs `Esc` stops the turn and keeps the panel.
 
 - **The chat can run a model of its own — `/model`.** `/model deep` puts this conversation
   on the model your `ai.roles` says `deep` is, and an id of `ai.models` works too; `/model`

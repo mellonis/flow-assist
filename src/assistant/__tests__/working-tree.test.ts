@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.ts';
-import { diffFileKey, ensureSnapshot, workingTreeDiff, type FileDiff } from '../working-tree.ts';
+import { diffFileKey, diffScopeOf, ensureSnapshot, workingTreeDiff, type FileDiff } from '../working-tree.ts';
 
 // ── scratch repositories, made by the test itself ───────────────────────────
 // Nothing here reaches a repository of the person's: every root is a fresh
@@ -51,6 +51,31 @@ test('diffFileKey names a file by its root and path, since one path repeats acro
   expect(diffFileKey('/w/a', 'src/x.ts')).not.toBe(diffFileKey('/w/b', 'src/x.ts'));
   expect(diffFileKey('/w/a', 'src/x.ts')).not.toBe(diffFileKey('/w/a', 'src/y.ts'));
   expect(new Set([diffFileKey('/w/a', 'x'), diffFileKey('/w/b', 'x'), diffFileKey('/w/a', 'y')]).size).toBe(3);
+});
+
+// The one directory the panel reads is where the shell stands: the repository at or
+// above it — so a subdirectory still shows the whole working tree, as `git status`
+// does there — or the directory itself when no repository is above it.
+test('diffScopeOf resolves the repository at or above the shell\'s directory', () => {
+  const root = tmpRoot();
+  makeRepo(root);
+  const sub = path.join(root, 'sub');
+  fs.mkdirSync(sub);
+  expect(diffScopeOf(sub)).toBe(real(root));
+  expect(diffScopeOf(root)).toBe(real(root));
+  // A linked worktree's `.git` is a file naming its store; its own directory is the
+  // scope all the same.
+  const wt = path.join(root, 'wt');
+  fs.mkdirSync(wt);
+  fs.writeFileSync(path.join(wt, '.git'), 'gitdir: ../.git/worktrees/wt\n');
+  expect(diffScopeOf(wt)).toBe(real(wt));
+});
+
+test('diffScopeOf falls back to the directory itself outside any repository', () => {
+  const root = tmpRoot();
+  const plain = path.join(root, 'plain', 'deep');
+  fs.mkdirSync(plain, { recursive: true });
+  expect(diffScopeOf(plain)).toBe(real(plain));
 });
 
 test('a git root diffs against HEAD: modified, untracked, deleted, ignored', async () => {

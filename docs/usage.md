@@ -760,10 +760,12 @@ picker and a switch of session.
 and a directory outside git against a snapshot of it taken the first time the panel was
 opened there (`vs snapshot (taken 2026-11-16)`) — one per directory, kept, so a file that
 was already modified before you ever asked is still reviewed against what it held then.
-Repositories under a configured `shell.roots` entry are sections of their own, in walk
-order, a nested one before its parent; `.gitignore` decides what git shows, a file over
-2 MB and a binary file are named and not drawn. It refreshes while the panel is up, and
-only then.
+**What it shows is the repository the shell is in** — its whole working tree at or above
+the shell's directory, as `git status` reads it from a subdirectory — and it follows you
+from one repository to the next as you `cd`; the folders beside it along `shell.roots` are
+never in it. A repository nested under it is a section of its own, in walk order, a
+nested one before its parent; `.gitignore` decides what git shows, a file over 2 MB and a
+binary file are named and not drawn. It refreshes while the panel is up, and only then.
 
 It is a view and nothing more: nothing on it reaches the model, the session or the
 journal, and the assistant never runs git to produce it. A docked chat too small to hold

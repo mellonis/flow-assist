@@ -287,3 +287,75 @@ test('a docked chat with no rows for the panel says where it can be shown', asyn
   expect(ui.backend.lastFrame).not.toContain('diff ·');
   ui.app.unmount();
 });
+
+// ─── where the diff is looked for ─────────────────────────────────────────────
+// The panel reads the repository the shell stands in, never the neighbours along the
+// roots: an umbrella of repositories is what `shell.roots` is for, and a person who
+// cd'd into one project asks about that project.
+const scratchRepo = (dir: string, file: string, marker: string) => {
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q');
+  git(dir, 'config', 'user.name', 'Test');
+  git(dir, 'config', 'user.email', 'test@example.com');
+  git(dir, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(dir, file), 'one\ntwo\n');
+  git(dir, 'add', file);
+  git(dir, 'commit', '-qm', 'init');
+  fs.writeFileSync(path.join(dir, file), `one\n${marker}\n`);
+};
+// The workspace layout: an umbrella repository with one changed file of its own and a
+// repository under it, each with one changed file. Three working trees, one root.
+const workspaceTree = () => {
+  const umbrella = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-scope-')));
+  scratchRepo(umbrella, 'outer.txt', 'outer-change');
+  scratchRepo(path.join(umbrella, 'projA'), 'alpha.txt', 'alpha-change');
+  scratchRepo(path.join(umbrella, 'projB'), 'beta.txt', 'beta-change');
+  return umbrella;
+};
+
+test('/diff shows the repository the shell is in, not its neighbours', async () => {
+  const umbrella = workspaceTree();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [umbrella] } }, { startDir: umbrella });
+  await ui.press('F');
+  await ui.type('/cd projA');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff ·'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 1 file');
+  expect(frame).toContain('+alpha-change');
+  // The umbrella's own change and the sibling's are not this working tree's.
+  expect(frame).not.toContain('+outer-change');
+  expect(frame).not.toContain('+beta-change');
+  ui.app.unmount();
+}, 15_000);
+
+test('an open panel follows a cd', async () => {
+  const umbrella = workspaceTree();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [umbrella] } }, { startDir: umbrella });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('+beta-change'));
+  // At the umbrella the panel is the umbrella's: all three trees stand beside the chat.
+  expect(ui.backend.lastFrame).toContain('+outer-change');
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  await ui.type('/cd projB');
+  await ui.press('return');
+  // The walk after the move is the new one: B's tree alone, with no key of its own.
+  await settleUntil(
+    () => ui.backend.lastFrame.includes('+beta-change')
+      && !ui.backend.lastFrame.includes('+alpha-change')
+      && !ui.backend.lastFrame.includes('+outer-change'),
+  );
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 1 file');
+  expect(frame).toContain('+beta-change');
+  expect(frame).not.toContain('+alpha-change');
+  expect(frame).not.toContain('+outer-change');
+  ui.app.unmount();
+}, 15_000);

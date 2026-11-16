@@ -19,7 +19,7 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { cdChatTarget, realOf, shellAutoRun, shellRoots, startDir, startNote, tildePath } from '../assistant/shell.js';
+import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession, lockPath,
   dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
@@ -28,7 +28,7 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
+import { diffScopeOf, workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
 import { backgroundCommand } from '../assistant/background-bang.js';
@@ -1109,12 +1109,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - convRef.current!.segmentStartedAt), 120);
           };
           // ── `/diff` ──────────────────────────────────────────────────────────────
-          // The roots the working tree is read from: the shell's own, or — with none
-          // configured — where the shell starts, the `shellCwd` precedent.
-          const diffRoots = () => {
-            const roots = shellRoots(host.config);
-            return roots.length ? roots : [startDir()];
-          };
+          // The one tree the panel reads: the repository the shell stands in — its git
+          // top at or above the shell's directory, the whole working tree as `git status`
+          // shows it from wherever in it the shell is — else the directory itself. A move
+          // (`!cd`, `/cd`, a tool's own) changes the scope on the next walk.
+          const diffRoots = () => [diffScopeOf(convRef.current!.shell.cwd())];
           // One walk of the tree. A walk that is still running takes no second one: the
           // request is remembered and made when it ends, so a burst of events costs one
           // read. An answer from a walk the panel has moved past — closed, or a newer walk
@@ -1169,9 +1168,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffLoading(false);
             if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; }
             // The tree a closed panel showed is not the tree the next one opens on (a session
-            // switch changes the roots): it goes with the panel, and the walk the next open
-            // starts says `capturing baseline…` until it lands. The folds stay — a file the
-            // person folded stays folded where they put it.
+            // switch changes the shell's directory, and the scope with it): it goes with the
+            // panel, and the walk the next open starts says `capturing baseline…` until it
+            // lands. The folds stay — a file the person folded stays folded where they put it.
             diffSectionsRef.current = [];
             setDiffSections([]);
             diffCursorRef.current = null;

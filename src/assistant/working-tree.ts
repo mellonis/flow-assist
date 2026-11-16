@@ -49,6 +49,15 @@ export interface DiffSection {
 // its root, so the root is part of the name.
 export const diffFileKey = (root: string, p: string): string => root + '\u0000' + p;
 
+// The one directory the panel reads is where the shell stands: the repository at or
+// above its directory — its git top, a linked worktree's own directory included, so a
+// subdirectory still shows the whole working tree as `git status` does there — or the
+// directory itself when no repository is above it.
+export function diffScopeOf(dir: string): string {
+  const real = realOf(dir);
+  return gitRootOf(real) ?? real;
+}
+
 // A git call that has not answered by now is not going to: the panel is asking about
 // the person's own machine, and a stuck index lock must not hang the chat.
 const GIT_TIMEOUT_MS = 10_000;
