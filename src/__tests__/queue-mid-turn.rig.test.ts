@@ -95,7 +95,7 @@ test('⇥ on the empty field holds the queued message for the turn\'s end', asyn
   expect(JSON.stringify(messages(1))).not.toContain('not there');
   expect(model.requests).toHaveLength(3);
   // The drain turn's wire message is framed as written while the previous turn ran; the
-  // row, the journal and the model's history keep the line as typed.
+  // row and the journal keep the line as typed.
   const wire = messages(2).at(-1)! as Msg;
   expect(wire.role).toBe('user');
   expect(String(wire.content)).toContain('not there, the other file');
@@ -106,6 +106,11 @@ test('⇥ on the empty field holds the queued message for the turn\'s end', asyn
   expect(rig.journal().filter((e) => e.t === 'row' && e.text === 'not there, the other file')).toHaveLength(1);
   expect(JSON.stringify(rig.conv.messages)).not.toContain('previous turn');
   expect(JSON.stringify(rig.journal())).not.toContain('previous turn');
+  // And it stays in the model's history for the next turn, framed as it was sent.
+  model.script([{ text: 'ok' }]);
+  await rig.conv.send('next');
+  expect(JSON.stringify(messages(3))).toContain('not there, the other file');
+  expect(JSON.stringify(messages(3))).toContain('previous turn was running');
 });
 
 test('a message typed while idle goes out unframed', async () => {

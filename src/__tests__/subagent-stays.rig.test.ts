@@ -166,6 +166,24 @@ test('the system prompt of every turn carries the original task, never a later m
   expect(rig.sent(-1).at(-1)).toEqual({ role: 'user', content: 'something quite different' });
 });
 
+test('a message sent to a resting subagent is the person\'s own words, unframed', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'plain');
+  sub.script([{ text: 'resting' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const child = scheduled(rig, spec('plain', 'plain'));
+  await rig.until(() => child.idle);
+  await quiet(rig);
+  child.receive('something quite different');
+  await rig.until(() => sub.requests.length === 2);
+  await rig.until(() => child.idle);
+  // A later turn of a subagent is not a queued message: the wire carries the person's text
+  // and nothing around it — neither steering nor previous-turn wording.
+  const wire = sub.requests[1]!.messages.filter((m) => m.role === 'user').at(-1)!;
+  expect(wire).toEqual({ role: 'user', content: 'something quite different' });
+  expect(String(wire.content)).not.toContain('Written while');
+});
+
 test('an idle subagent keeps its session from parking, and reads as the session does, not as work; one with a task running below it reads working', async () => {
   const model = new ScriptedModel();
   subScript(model, 'rest').script([{ text: 'resting' }]);
