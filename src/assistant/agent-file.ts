@@ -11,12 +11,14 @@
 //   auto:        ask | reads | all (omitted: ask)
 //   model:       a role from ai.roles — never a model id, so the file travels
 //                between machines unchanged
+//   writes:      allow | ask | deny (omitted: ask) — what a run of the agent may change
 //
 // An unknown or repeated key is an error, a `{{name}}` the header does not declare is
 // an error, and so is a declared parameter the body never uses. Single braces in the
 // body are left alone.
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import type { TaskWrites } from './conversation-types.js';
 
 export type AgentSource = { kind: 'project' } | { kind: 'person' } | { kind: 'plugin'; plugin: string };
 export type AgentAuto = 'ask' | 'reads' | 'all';
@@ -29,6 +31,7 @@ export interface Agent {
   skills: string[]; // the skills preloaded at the start, in order; [] — the key is omitted
   auto: AgentAuto;
   model?: string; // a role from ai.roles, as written; absent — the key is omitted
+  writes: TaskWrites | null; // what a run may change; null — the key is omitted (the start reads `ask`)
   body: string;
   path: string;
   source: AgentSource;
@@ -37,8 +40,10 @@ export interface Agent {
 export interface AgentError { path: string; line: number; message: string }
 export type ParsedAgent = { ok: true; agent: Agent } | { ok: false; errors: AgentError[] };
 
-export const AGENT_KEYS = ['description', 'params', 'tools', 'skills', 'auto', 'model'] as const;
+export const AGENT_KEYS = ['description', 'params', 'tools', 'skills', 'auto', 'model', 'writes'] as const;
 export const AGENT_AUTOS: readonly AgentAuto[] = ['ask', 'reads', 'all'];
+// The same membership check `taskWritesOf` maps a call's own `writes` argument with.
+const AGENT_WRITES: Record<TaskWrites, true> = { allow: true, ask: true, deny: true };
 const NAME = /^[A-Za-z0-9-]+$/;
 // A skill's name: `name`, or `<plugin>/<name>` (the grammar of a skill id).
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
@@ -143,6 +148,15 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
     if (value) model = value; else err(modelAt.line, 'model is empty — a role name from ai.roles');
   }
 
+  // What a run of the agent may change: one of three; the key omitted is the worker
+  // default, `ask`, and an unknown value fails the file as any malformed header line.
+  let writes: TaskWrites | null = null;
+  const writesAt = seen.get('writes');
+  if (writesAt) {
+    if (AGENT_WRITES[writesAt.value as TaskWrites] === true) writes = writesAt.value as TaskWrites;
+    else err(writesAt.line, `writes is «${writesAt.value}» — one of allow, ask, deny`);
+  }
+
   // The body's placeholders, each on its own line.
   const used = new Set<string>();
   for (let i = close + 1; i < lines.length; i++) {
@@ -157,7 +171,7 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
 
   if (errors.length || name === null || !description) return { ok: false, errors };
   const body = lines.slice(close + 1).join('\n').replace(/^\s*\n/, '').trimEnd();
-  return { ok: true, agent: { name, description: description.value, params, tools, skills, auto, ...(model ? { model } : {}), body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
+  return { ok: true, agent: { name, description: description.value, params, tools, skills, auto, ...(model ? { model } : {}), writes, body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
 }
 
 // The body with every `{{name}}` replaced by its value; a name with none (an optional

@@ -25,6 +25,24 @@ const delivered = (rig: Rig): string[] => rig.conv.rows().filter((m) => m.role =
 const settled = (rig: Rig, results: number) => rig.until(() => rig.registry.children.backgroundCount() === 0 && delivered(rig).length === results);
 const taskCall = (rig: Rig, label: string, name: string) => rig.journal().find((e) => e.t === 'call' && e.task === label && e.name === name);
 
+test('a plain call may not grant itself allow: the note says so and the task is an ask worker', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'subagent', args: { task: 'run the build', label: 'build', writes: 'allow' } }], [{ text: 'Started.' }]);
+  const task = taskScript(model, 'run the build');
+  task.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'build ok' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await rig.conv.send('build it in the background');
+  const answer = rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'subagent');
+  // The demotion note belongs to the plain-argument path: the call's own `writes` is
+  // answered as `ask`, said in the tool's answer, and the write waits for the person.
+  expect(String(answer?.result)).toContain("is not a task's own call to make");
+  expect(String(answer?.result)).toContain('It may ask the person to approve each write');
+  await rig.until(() => rig.conv.offered() !== null);
+  expect(rig.conv.offered()).toMatchObject({ path: ['build'] });
+  rig.conv.offered()!.owner.answerConfirm(false);
+  await settled(rig, 1);
+});
+
 test('a task runs in the background and reports back', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'subagent', args: { task: 'run the build', label: 'build' } }], [{ text: 'Started.' }]);

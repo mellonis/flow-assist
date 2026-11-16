@@ -455,6 +455,8 @@ Read the diff, then answer with the findings, worst first. In a code block, brac
 - `auto` is `ask`, `reads` or `all`; without it the agent asks.
 - `model` names the role the agent runs on, from your `ai.roles` (see Which model it
   runs).
+- `writes` is `allow`, `ask` or `deny`; without it each write and command waits for your
+  y/n (see What it may do).
 - The prompt spells each parameter as `{{name}}`. A `{{name}}` that `params` does not declare is
   an error, and so is a declared parameter the prompt never uses. A value left out of an
   optional parameter is the empty text. Single braces are left alone.
@@ -483,6 +485,14 @@ file lists, and nothing else (without `tools` every group is available). It does
 whole, with `memory` and `config_set`, which asks; and a group the file lists keeps
 its writing tools, each write asking you unless its auto mode answers, as for any subagent you start. A group named in the file that is not loaded is left out, and
 a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
+
+`writes` is whether the work may change anything at all: `ask` (the default) waits for
+your y/n on every write and command, `deny` makes a read-only run (write tools and
+run_command are declined), and `allow` runs each write the auto mode with `shell.autoRun`
+answers — never `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and
+says each one in the log. When the assistant starts the agent by name, the file's
+`writes` is what the work gets: its own `writes` argument does not move it. Only your
+file grants `allow`; a model asking for `allow` in a plain task is answered as `ask`.
 
 ### Which model it runs
 

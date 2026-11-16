@@ -107,7 +107,7 @@ test('an agent file\'s auto mode is set over the inherited one: a starter at all
   await childDone(rig);
 });
 
-test('an agent task may write under the person\'s y/n, as a task started with write: true does', async () => {
+test('an agent task may write under the person\'s y/n, as a task started with `writes: ask` does', async () => {
   const { model, child, rig } = rigFor('GO-W');
   project(rig, 'job', doc('', 'GO-W go'));
   child.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'done' }]);
@@ -118,20 +118,39 @@ test('an agent task may write under the person\'s y/n, as a task started with wr
   await childDone(rig);
 });
 
-test('a named agent with `writes: \'deny\'` still gets the interim `ask`: its write waits for the person', async () => {
+test('a named agent takes the writes of its own file, not the call\'s: an allow file runs its work where the call spelled `deny`', async () => {
   const { model, child, rig } = rigFor('GO-WD');
-  project(rig, 'job', doc('', 'GO-WD go'));
-  child.script([{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ text: 'done' }]);
+  project(rig, 'job', doc('writes: allow\n', 'GO-WD go'));
+  child.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ hold: true }, { text: 'done' }]);
   const answer = await call(rig, model, { agent: 'job', writes: 'deny' });
-  // The named grant is the interim (`writes: named ? 'ask' : mapped.writes`): the
-  // answer carries the ask sentence and the write is offered however the call spelled
-  // denial — the file's own `writes` wins when Task 3 replaces that line.
-  expect(answer).toContain('may ask the person');
-  await rig.until(() => rig.conv.offered() !== null);
-  expect(rig.conv.offered()).toMatchObject({ path: ['job'] });
-  rig.conv.offered()!.owner.answerConfirm(false);
+  // A named agent takes the writes its own file states and the call's `writes` does not
+  // move it: `allow` runs each write the auto mode with `shell.autoRun` answers and is
+  // said in the log, so no y/n is offered and the write runs.
+  expect(answer).not.toContain('may ask the person');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['allow-writes']);
+  expect(rig.conv.offered()).toBeNull();
+  expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(true);
+  expect(rig.log.some((l) => l.includes('[write]'))).toBe(true);
+  expect(rig.journal().some((e) => e.t === 'confirm')).toBe(false);
+  child.release();
   await childDone(rig);
-  expect(fs.existsSync(path.join(rig.root, 'denied.txt'))).toBe(false);
+});
+
+test('a named call\'s answer says what the file decides: no demotion note, the file\'s ask said', async () => {
+  const { model, child, rig } = rigFor('GO-WA');
+  project(rig, 'job', doc('', 'GO-WA go'));
+  child.script([{ hold: true }, { text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'allow' });
+  // The demotion note maps a call's own argument to a plain task's writes; a named
+  // agent takes the writes of its own file (the key omitted reads as `ask`), so the
+  // answer carries the ask sentence and no note about the call's `allow`.
+  expect(answer).not.toContain('own call to make');
+  expect(answer).toContain('may ask the person');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['ask']);
+  child.release();
+  await childDone(rig);
 });
 
 test('a second start while the first runs is labeled job-2', async () => {

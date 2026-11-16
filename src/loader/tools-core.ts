@@ -458,13 +458,13 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'subagent',
-        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result comes back to the nearest session or subagent above it — the conversation that started it, or, for a task a subagent began, that subagent (as a framed message that starts its next turn) as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error, or `<label> stopped:` and what it had written when the person stopped it) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required unless `agent` is given): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task writes and runs commands through the person\'s y/n like the chat does, and the session\'s auto mode answers for them; `writes: \'deny\'` makes it a read-only task (write tools, run_command among them, are declined, so it cannot run commands). The task is bounded (up to `ai.taskRounds` tool rounds, 12 by default). `write:` is the deprecated spelling: true reads as ask, false as deny. A task is the wrong tool for long work with many commands, since each one waits for the person: do that in the conversation itself, or with an agent file the person starts with `/subagent @name`. You may spawn a follow-up `subagent` task for a further step, but keep the chain to ONE level. A task you start may ask you a question (`ask_parent`); it reaches you framed as <child-question …> and you answer it with `answer_child` in the turn that reads it (ask the person with `ask_user` first if they must decide; a turn that ends unanswered tells the task there is no answer). The chat shows how many background tasks are in flight. Agents named in the system prompt\'s list start by name: `agent` (and `args`, an object of its parameters); `task` is then only extra instructions, and optional.',
+        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result comes back to the nearest session or subagent above it — the conversation that started it, or, for a task a subagent began, that subagent (as a framed message that starts its next turn) as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error, or `<label> stopped:` and what it had written when the person stopped it) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required unless `agent` is given): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task writes and runs commands through the person\'s y/n like the chat does, and the session\'s auto mode answers for them; `writes: \'deny\'` makes it a read-only task (write tools, run_command among them, are declined, so it cannot run commands). With `agent`, the agent file\'s own `writes:` line is what the work gets — the call\'s `writes` does not move it. The task is bounded (up to `ai.taskRounds` tool rounds, 12 by default). `write:` is the deprecated spelling: true reads as ask, false as deny. A task is the wrong tool for long work with many commands, since each one waits for the person: do that in the conversation itself, or with an agent file the person starts with `/subagent @name`. You may spawn a follow-up `subagent` task for a further step, but keep the chain to ONE level. A task you start may ask you a question (`ask_parent`); it reaches you framed as <child-question …> and you answer it with `answer_child` in the turn that reads it (ask the person with `ask_user` first if they must decide; a turn that ends unanswered tells the task there is no answer). The chat shows how many background tasks are in flight. Agents named in the system prompt\'s list start by name: `agent` (and `args`, an object of its parameters); `task` is then only extra instructions, and optional.',
         parameters: { type: 'object', properties: {
           task: { type: 'string', description: 'The work to do in the background, in natural language — e.g. "count the tests in src and report the number".' },
           label: { type: 'string', description: 'Optional short name for the task/notification (default: the task, clipped to ~40 chars).' },
           in: { type: 'string', description: 'Optional delay before it starts, e.g. "10 seconds", "2 minutes".' },
           at: { type: 'string', description: 'Optional clock time to start, "HH:MM" or "HH:MM:SS" (24h); if already past, tomorrow.' },
-          writes: { type: 'string', description: 'Optional: allow, ask (default) or deny — whether the task may write files and run commands; ask means each one waits for the person\'s yes, deny makes it a read-only task' },
+          writes: { type: 'string', description: 'Optional: allow, ask (default) or deny — whether the task may write files and run commands; ask means each one waits for the person\'s yes, deny makes it a read-only task. With `agent` the agent file\'s `writes:` decides and this argument does not move it' },
           write: { type: 'boolean', description: 'Deprecated spelling: true reads as ask, false as deny' },
           agent: { type: 'string', description: 'Optional: an agent from the system prompt\'s list, by its id (with or without @). It starts with its own prompt, tools and auto mode; `task` is then optional.' },
           args: { type: 'object', description: 'With `agent`: its parameter values by name, e.g. {"ticket": "T-1"}.' },
@@ -816,9 +816,10 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       case 'subagent': {
         // Offload a self-contained task to a CHILD conversation of the one whose turn
         // called this (AGENTS.md, "A conversation starts a child of its own"): its own
-        // plan, shell, tool set and abort, no recall, `ai.taskRounds` rounds. Writes and
-        // commands wait for the person's yes in the chat that started it; `writes: 'deny'`
-        // declines each one.
+        // plan, shell, tool set and abort, no recall, `ai.taskRounds` rounds. A plain
+        // task is a worker: writes and commands wait for the person's yes in the chat
+        // that started it, `writes: 'deny'` declines each one. A named agent takes the
+        // writes its own file states.
         // The tool answers at once; when the task ends its result
         // goes into the inbox of the nearest session or subagent above it (`run()` delivers it),
         // and the tool says so in the toast and the log line.
@@ -828,7 +829,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (!agentName && !task) return 'task is required — the work to do in the background.';
         let label = String(args.label ?? '').trim() || task.slice(0, 40);
         // A named agent: its file's prompt (parameters filled, `task` after it), label,
-        // tool groups and auto mode; a refusal is the tool's answer, worded for the model.
+        // tool groups, auto mode and writes; a refusal is the tool's answer, worded for
+        // the model.
         let named: Extract<ReturnType<typeof planAgentStart>, { ok: true }> | null = null;
         if (agentName) {
           const starter = (ctx as CoreCtx).agentStarter;
@@ -863,11 +865,15 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
         // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
         // itself (AGENTS.md (child schedule)) is one function the slash commands share.
-        // An agent task may write under the person's y/n, as one started with
-        // `writes: 'ask'` does; whether it can ask is `startChild`'s rule.
+        // A named agent takes the writes its own file states (`writes:` in the header,
+        // the worker `ask` where the key is omitted) and the call's `writes` does not
+        // move it; a plain task takes the call's own mapping: a worker `ask` by default,
+        // `deny` read-only, and never the `allow` a model grants itself. An unknown value
+        // is the tool's error, named agent or not. Whether the child may ask at all is
+        // `startChild`'s rule.
         const mapped = taskWritesOf(args);
         if (mapped.writes === 'error') return mapped.note;
-        const writes: TaskWrites = named ? 'ask' : mapped.writes;
+        const writes: TaskWrites = named ? named.writes : mapped.writes;
         const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', writes, ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
@@ -875,7 +881,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // The file's capped auto mode is SET on the child, over the mode it inherits —
         // `ask` included, where the file wants every write asked.
         if (named) scheduled.child.setAutoMode(named.mode);
-        const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? '', mapped.note].filter(Boolean).join('\n');
+        // The demotion note maps the call's own argument to a plain task's writes; a
+        // named agent's writes come from its file, so the note is the plain path's.
+        const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? '', named ? '' : mapped.note].filter(Boolean).join('\n');
         return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes === 'ask' ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
       case 'todo': {

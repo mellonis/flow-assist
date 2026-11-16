@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **An agent file states its writes.** A `writes: allow | ask | deny` line in the header
+  (omitted: `ask`) says what a run of that agent may change: `ask` waits for your y/n on
+  each write and command, `deny` declines each one, `allow` runs each write the auto mode
+  with `shell.autoRun` answers (never `config_set`, an unlisted `web_fetch` or a plugin's
+  `run_command`) and says each one in the log. For a named agent the file's `writes` is
+  what the work gets — the `subagent` call's own `writes` argument does not move it. A
+  `writes:` value outside the three fails the file, as any other malformed header line.
+
 - **`subagent` takes `writes`, and a bare task is a worker.** A background task writes
   and runs commands through the person's y/n (the session's auto mode answers). The
   call's `writes` is `allow`, `ask` (the default) or `deny`: `writes: 'deny'` narrows a

@@ -1043,9 +1043,14 @@ there is no `/fullscreen`.
 instructions from the conversation that started you:`; without `agent` it is required. A refusal is the tool's answer, worded for the model, and starts nothing:
 the resolve message, `@id is not trusted here — ask the person to start @id once`
 (checked first, `agentTrusted`), an `args` that is not an object, an unknown parameter
-(naming what it takes), a missing required one. The agent runs as a `task` with
-`write: true` (each write asks the person), the file's tool groups and the capped auto
-mode. **`model` names a ROLE from `ai.roles`** (`roleStart`), never a model id — on an
+(naming what it takes), a missing required one. The agent runs as a `task` whose
+writes are the file's own `writes:` (omitted: the worker `ask` — each write asks the
+person; `deny` declines each one; `allow` runs each write the auto mode with
+`shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's
+`run_command` — and is said in the log), the file's tool groups and the capped auto
+mode. The call's `writes` does not move a named agent's writes; a plain task takes the
+call's — a worker by default, `writes: 'deny'` read-only, and a call's `allow` read as
+`ask` with a note (`taskWritesOf`). **`model` names a ROLE from `ai.roles`** (`roleStart`), never a model id — on an
 agent call (the call's role wins over the file's) and a plain task alike; a role nothing
 defines degrades as a file's does (models): one note, and the work starts on the
 conversation's model. The system prompt of every kind that is offered `subagent` ends with a list of
@@ -3417,7 +3422,9 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a
   plugin's `run_command` — and says it in the log, `ask` waits for the person's yes on each
   (the `subagent` tool
-  starts a `task` with `writes: 'ask'` when it does not resolve to `deny`:
+  starts a `task` whose `writes` is the named agent's own `writes:` (omitted — `'ask'`) or,
+  with no `agent`, the call's own mapping: a worker `'ask'` by default, `writes: 'deny'`
+  read-only, a call's `allow` answered as `'ask'` with a note:
   `ai.taskRounds` rounds, the worker
   prompt, its y/n offered to the session like a subagent's — `writes` wins over the
   deprecated `write`, `true` reading as `ask` and `false` as `deny`) — where the host's root can ask at all (`canAsk`; with nobody to ask the
@@ -3638,11 +3645,12 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
   docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two
   `---` lines — `description` (required), `params` (names, a trailing `?` for an optional
-  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`), `model` (a role from `ai.roles` — a ROLE, never a model id, so the file travels between machines; see (models)) —
+  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`), `model` (a role from `ai.roles` — a ROLE, never a model id, so the file travels between machines; see (models)), `writes` (allow | ask | deny (omitted: ask) — what a run of the agent may change: `ask` waits for the person's yes on each write and command, `deny` declines each one, `allow` runs each write the auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and is said in the log) —
   and a body; `{{name}}` in the body is replaced, single braces never. The reader is our
   own and total: every error carries the file and its 1-based line, an unknown or repeated
-  key, an undeclared `{{name}}`, a declared parameter the body never spells and a
-  malformed name each fail the file, and a failed file is never offered. A file is read at
+  key, an undeclared `{{name}}`, a declared parameter the body never spells, a `writes`
+  value outside the three and a malformed name each fail the file, and a failed file is
+  never offered. A file is read at
   each use (no cache) and hashed over its bytes (`Agent.hash`, sha-256). Three places
   (`findAgents`): the project's `.flow-assist/agents/*.md` under the git top level of the
   shell's directory (else the directory), read only when the real path of the directory and
@@ -4663,7 +4671,8 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     into the chat and it will look at them then; and that when results arrived since
     its last answer, the next answer opens with what came back, a line per task. It also
     says the task writes and runs commands through the person's y/n (the session's auto
-    mode answers), and `writes: 'deny'` narrows it to a read-only task. The
+    mode answers), and `writes: 'deny'` narrows it to a read-only task, and that a named
+    agent's own `writes:` line is what its work gets. The
     call's own answer says the same (`the result appears in the chat when it ends, and
     you see it on your next turn`), and so does `config_schema`'s note for
     `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in `hostConfigSchema`'s `ai`).

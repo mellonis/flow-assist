@@ -8,7 +8,7 @@ import type { FoundAgent } from '../agent-find.ts';
 afterEach(() => { fs.rmSync(agentTrustPath(), { force: true }); });
 
 const agent = (name: string, description: string, kind: 'project' | 'plugin' = 'plugin', model?: string): FoundAgent => ({
-  id: name, name, description, params: [], tools: null, skills: [], auto: 'ask', body: 'b', path: path.join('/x', `${name}.md`),
+  id: name, name, description, params: [], tools: null, skills: [], auto: 'ask', writes: null, body: 'b', path: path.join('/x', `${name}.md`),
   source: kind === 'plugin' ? { kind: 'plugin', plugin: 'p' } : { kind: 'project' }, hash: 'h', ...(model ? { model } : {}),
 });
 
@@ -97,6 +97,11 @@ test('no role anywhere: no model and no note', () => {
   const plan = okPlan(agent('a', 'd'));
   expect('model' in plan).toBe(false);
   expect(plan.roleNote).toBe('');
+});
+
+test('the start plan carries the writes of its file', () => {
+  expect(okPlan({ ...agent('a', 'd'), writes: 'allow' }).writes).toBe('allow');
+  expect(okPlan({ ...agent('a', 'd'), writes: 'deny' }).writes).toBe('deny');
 });
 
 test('the trust question names the role the file gives the work, and nothing when it names none', () => {
