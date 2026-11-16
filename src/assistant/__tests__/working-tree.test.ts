@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { diffFileKey, workingTreeDiff, type FileDiff } from '../working-tree.ts';
+import { hostStateDir } from '../../config/load.ts';
+import { diffFileKey, ensureSnapshot, workingTreeDiff, type FileDiff } from '../working-tree.ts';
 
 // ── scratch repositories, made by the test itself ───────────────────────────
 // Nothing here reaches a repository of the person's: every root is a fresh
@@ -194,8 +196,8 @@ test('a nested repository is a section of its own, and its paths are relative to
   write(root, 'notes.txt', 'a plain file outside any repository\n');
 
   const sections = await workingTreeDiff([root]);
-  // The root has no snapshot section yet (Task 3 fills the seam), so only the
-  // nested repository's section is here.
+  // The first look captures the root's snapshot baseline; nothing outside the
+  // repository changed before it, so only the nested repository's section is here.
   expect(sections).toHaveLength(1);
   expect(sections[0]!.root).toBe(real(root));
   expect(sections[0]!.baseline).toBe('head');
@@ -230,13 +232,172 @@ test('a root inside a repository belongs to that repository, and shows only its 
   expect(byPath(sections[0]!.files)['b.txt']!.status).toBe('M');
 });
 
-test('a root with no git top under it yields no section yet — the snapshot seam is Task 3', async () => {
+test('the first look at a plain root captures its baseline and draws nothing', async () => {
   const root = tmpRoot();
   write(root, 'x.txt', 'plain\n');
   write(root, 'sub/y.txt', 'plain\n');
-  // `snapshotSection` returns null until Task 3 fills it, so a directory outside
-  // git contributes nothing; Task 3 turns this into a `vs snapshot` section.
+  // A directory outside git gets a `vs snapshot` section only once something
+  // differs from the baseline, and the first look is what takes that baseline.
   expect(await workingTreeDiff([root])).toEqual([]);
+});
+
+test('a plain root diffs against its first snapshot: edits, new, deleted', async () => {
+  const root = tmpRoot();
+  write(root, 'x.txt', 'one\n');
+  write(root, 'y.txt', 'gone\n');
+  write(root, 'node_modules/z.txt', 'junk\n');
+  write(root, 'big.bin', Buffer.alloc(2 * 1024 * 1024 + 1, 'a'));
+
+  const snap = await ensureSnapshot(root);
+  expect(snap).not.toBeNull();
+  expect(typeof snap!.taken).toBe('number');
+
+  write(root, 'x.txt', 'one\nTWO\n');
+  write(root, 'n.txt', 'new\n');
+  fs.rmSync(path.join(root, 'y.txt'));
+
+  const sections = await workingTreeDiff([root]);
+  expect(sections).toHaveLength(1);
+  const s = sections[0]!;
+  expect(s.baseline).toBe('snapshot');
+  expect(s.root).toBe(real(root));
+  expect(s.label).toMatch(/^vs snapshot \(taken \d{4}-\d{2}-\d{2}\)$/);
+  const by = byPath(s.files);
+  expect(by['x.txt']!.status).toBe('M');
+  expect(by['x.txt']!.hunks).toContain('+TWO');
+  expect(by['n.txt']!.status).toBe('A');
+  expect(by['n.txt']!.hunks).toContain('+new');
+  expect(by['y.txt']!.status).toBe('D');
+  expect(by['y.txt']!.hunks).toContain('-gone');
+  expect(by['node_modules/z.txt']).toBeUndefined();
+  // Over the cap at capture time and never indexed: not a change of the baseline.
+  expect(by['big.bin']).toBeUndefined();
+  // The section's files are sorted, so a refresh never reorders them.
+  expect(s.files.map((f) => f.path)).toEqual([...s.files.map((f) => f.path)].sort());
+});
+
+test('the first capture sticks: a file changed before any later diff still reviews from the old baseline', async () => {
+  const root = tmpRoot();
+  write(root, 'x.txt', 'one\n');
+  const first = await ensureSnapshot(root);
+  const firstTaken = first!.taken;
+
+  write(root, 'x.txt', 'changed before anyone looked');
+  const again = await ensureSnapshot(root);
+  expect(again!.taken).toBe(firstTaken);
+
+  // The baseline still holds the text from the first capture, so the edit is shown.
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  const f = byPath(s.files)['x.txt']!;
+  expect(f.status).toBe('M');
+  expect(f.hunks).toContain('-one');
+  expect(f.hunks).toContain('+changed before anyone looked');
+});
+
+test('a binary file whose bytes changed reads as modified and binary', async () => {
+  const root = tmpRoot();
+  write(root, 'data.bin', Buffer.from([0, 1, 2, 3]));
+  await ensureSnapshot(root);
+
+  write(root, 'data.bin', Buffer.from([0, 9, 9, 9]));
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  const f = byPath(s.files)['data.bin']!;
+  expect(f.status).toBe('M');
+  expect(f.note).toBe('binary');
+  expect(f.hunks).toBe('');
+  expect(f.added + f.removed).toBe(0);
+
+  // A text file turned into a binary one reads the same way.
+  const other = tmpRoot();
+  write(other, 't.txt', 'plain\n');
+  await ensureSnapshot(other);
+  write(other, 't.txt', Buffer.from([0, 7, 7]));
+  const s2 = (await workingTreeDiff([other])).find((v) => v.baseline === 'snapshot')!;
+  expect(byPath(s2.files)['t.txt']!.status).toBe('M');
+  expect(byPath(s2.files)['t.txt']!.note).toBe('binary');
+});
+
+test('a file small at capture and grown past 2 MiB reads as modified and too large', async () => {
+  const root = tmpRoot();
+  write(root, 'grow.txt', 'one\n');
+  await ensureSnapshot(root);
+
+  write(root, 'grow.txt', Buffer.alloc(2 * 1024 * 1024 + 1, 'b'));
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  const f = byPath(s.files)['grow.txt']!;
+  expect(f.status).toBe('M');
+  expect(f.note).toBe('too large');
+  expect(f.hunks).toBe('');
+  expect(f.added + f.removed).toBe(0);
+});
+
+test('a symlink is never captured and never diffed, even when it leads out of the root', async () => {
+  const root = tmpRoot();
+  const outside = tmpRoot();
+  write(outside, 'secret.txt', "not the root's\n");
+  write(root, 'a.txt', 'one\n');
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'link.txt'));
+  await ensureSnapshot(root);
+
+  write(root, 'a.txt', 'two\n');
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  const by = byPath(s.files);
+  expect(by['a.txt']!.status).toBe('M');
+  expect(by['link.txt']).toBeUndefined();
+  expect(s.files.map((f) => f.path)).toEqual(['a.txt']);
+});
+
+test('a nested repository keeps its paths, and the root snapshot diffs only what is left over', async () => {
+  const root = tmpRoot();
+  makeRepo(path.join(root, 'repo'), { 'x.txt': 'one\n' });
+  write(root, 'notes.txt', 'plain\n');
+  await ensureSnapshot(root);
+
+  write(path.join(root, 'repo'), 'x.txt', 'two\n');
+  const onlyRepo = await workingTreeDiff([root]);
+  expect(onlyRepo.map((s) => s.baseline)).toEqual(['head']);
+  expect(onlyRepo[0]!.files.map((f) => f.path)).toEqual(['repo/x.txt']);
+
+  write(root, 'notes.txt', 'changed\n');
+  const both = await workingTreeDiff([root]);
+  expect(both.map((s) => s.baseline)).toEqual(['head', 'snapshot']);
+  const snapshot = both.find((s) => s.baseline === 'snapshot')!;
+  const by = byPath(snapshot.files);
+  expect(by['notes.txt']!.status).toBe('M');
+  // The repository's own paths are the repository's section alone, even though the
+  // baseline was captured over them too.
+  expect(by['repo/x.txt']).toBeUndefined();
+  expect(snapshot.files.map((f) => f.path)).toEqual(['notes.txt']);
+});
+
+test('a corrupt index.json is captured again rather than trusted', async () => {
+  const root = tmpRoot();
+  write(root, 'x.txt', 'one\n');
+  await ensureSnapshot(root);
+  const id = crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
+  const indexPath = path.join(hostStateDir(), 'snapshot', id, 'index.json');
+
+  // The store's index is rewritten after the file changed: the re-capture swallows
+  // the edit, so the baseline is the text on disk now, not the one before it.
+  write(root, 'x.txt', 'two\n');
+  fs.writeFileSync(indexPath, 'not json at all');
+
+  const again = await ensureSnapshot(root);
+  expect(again).not.toBeNull();
+  expect(() => JSON.parse(fs.readFileSync(indexPath, 'utf8'))).not.toThrow();
+  expect(await workingTreeDiff([root])).toEqual([]);
+
+  write(root, 'x.txt', 'three\n');
+  const s = (await workingTreeDiff([root])).find((v) => v.baseline === 'snapshot')!;
+  expect(byPath(s.files)['x.txt']!.hunks).toContain('-two');
+  expect(byPath(s.files)['x.txt']!.hunks).toContain('+three');
+});
+
+test('ensureSnapshot answers null for a root that is not a directory', async () => {
+  expect(await ensureSnapshot(path.join(tmpRoot(), 'missing'))).toBeNull();
+  const file = path.join(tmpRoot(), 'a-file');
+  fs.writeFileSync(file, 'x\n');
+  expect(await ensureSnapshot(file)).toBeNull();
 });
 
 test('a root that is not there yields nothing and never throws', async () => {

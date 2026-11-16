@@ -5,8 +5,9 @@
 // is READ-ONLY: `git status` and `git diff` under a root, nothing else. What writes
 // the tree stays in the `repo` plugin, behind the person's confirmation.
 //
-// The module is pure of the app: it takes the roots it is handed, imports no config and
-// no React, and answers a plain list. Every path it reads is held to its root by REAL
+// The module is pure of the app: it takes the roots it is handed, answers a plain list,
+// and imports no React. The one thing it reads from the host is `hostStateDir()`, where
+// the snapshot store lives. Every path it reads from a root is held to that root by REAL
 // path, so a link in a clone cannot carry the panel out of the person's work.
 //
 // Two baselines meet here:
@@ -19,8 +20,10 @@
 // contributes no section and the root falls back to its snapshot.
 
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { hostStateDir } from '../config/load.js';
 import { unifiedDiff } from './diff.js';
 import { gitRootOf } from './sessions.js';
 import { realOf, within } from './shell.js';
@@ -339,12 +342,214 @@ function scanRoot(root: string): RootScan {
   return { tops, files };
 }
 
-// The root's leftover paths against its persistent snapshot. Task 3 fills this in; until
-// then a root outside git contributes no section at all.
-async function snapshotSection(root: string, paths: string[]): Promise<DiffSection | null> {
-  void root;
-  void paths;
-  return null;
+// ── the snapshot baseline ────────────────────────────────────────────────────
+// A root outside git still carries dirt that was there before the session began,
+// and a baseline taken when the panel opens would draw that dirt as "unchanged"
+// exactly when the panel first looks at it. So each root's baseline is captured
+// ONCE and kept on the host's disk: content-addressed blobs plus one index per
+// root. Everything after the capture shows; nothing before it can.
+const SNAPSHOT_MAX_FILES = 20_000;
+// Names the snapshot leaves alone wherever they turn up. The system's own directory
+// droppings are never a person's change, and `.gitignore` means nothing outside a
+// repository, so no ignore file is read here.
+const JUNK = new Set(['.DS_Store']);
+
+interface SnapshotIndex {
+  root: string; // the root's REAL path
+  taken: number; // when the baseline was captured, ms since the epoch
+  files: Record<string, string>; // root-relative '/'-path → sha-256 hex of the file's bytes
+}
+
+const hex = (buf: Buffer | string): string => crypto.createHash('sha256').update(buf).digest('hex');
+
+// One root's store. `hostStateDir` is not a constant — under `bun test` it is a
+// temporary directory made per process — so it is resolved on every call.
+const snapshotDir = (root: string): string => path.join(hostStateDir(), 'snapshot', hex(root).slice(0, 16));
+
+// The index on disk, or `null` when there is none or it no longer parses. A root's
+// id is fixed, so a hand-edited or half-written index is the only way to get a
+// `null` here once a capture has run.
+function readIndex(dir: string): SnapshotIndex | null {
+  let raw: string;
+  try { raw = fs.readFileSync(path.join(dir, 'index.json'), 'utf8'); } catch { return null; }
+  try {
+    const parsed = JSON.parse(raw) as Partial<SnapshotIndex> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (typeof parsed.taken !== 'number' || !Number.isFinite(parsed.taken)) return null;
+    if (!parsed.files || typeof parsed.files !== 'object' || Array.isArray(parsed.files)) return null;
+    const files: Record<string, string> = {};
+    for (const [rel, hash] of Object.entries(parsed.files)) if (typeof hash === 'string') files[rel] = hash;
+    return { root: typeof parsed.root === 'string' ? parsed.root : '', taken: parsed.taken, files };
+  } catch { return null; }
+}
+
+// The index is replaced through a temp file in its own directory, so a reader never
+// sees half of one. The blobs are written before it, so an index never names bytes
+// that are not there.
+function writeIndex(dir: string, index: SnapshotIndex): void {
+  const tmp = path.join(dir, `.index-${process.pid}-${crypto.randomUUID()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(index), { mode: 0o600 });
+  fs.renameSync(tmp, path.join(dir, 'index.json'));
+}
+
+// A blob's text as a diff shows it. `null` — the store does not hold those bytes.
+function blobText(dir: string, hash: string): TextRead {
+  try { return decodeText(fs.readFileSync(path.join(dir, hash))); } catch { return null; }
+}
+
+// One root's baseline: every regular file the walk meets, hashed. A link is never
+// followed — its target may be somebody else's file — and a file over
+// `MAX_FILE_BYTES` is left out of the index: the diff names it without reading it
+// and cannot show it. What `SNAPSHOT_MAX_FILES` drops is simply never diffed.
+async function captureSnapshot(root: string, dir: string): Promise<SnapshotIndex | null> {
+  const files: Record<string, string> = {};
+  let count = 0;
+  const walk = (d: string): void => {
+    if (count >= SNAPSHOT_MAX_FILES) return;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
+      if (count >= SNAPSHOT_MAX_FILES) return;
+      if (SKIPPED.has(e.name) || JUNK.has(e.name) || e.isSymbolicLink()) continue;
+      const abs = path.join(d, e.name);
+      if (e.isDirectory()) { walk(abs); continue; }
+      if (!e.isFile()) continue;
+      let st: fs.Stats;
+      try { st = fs.lstatSync(abs); } catch { continue; }
+      if (!st.isFile() || st.size > MAX_FILE_BYTES) continue;
+      if (!within(realOf(abs), root)) continue;
+      let bytes: Buffer;
+      try { bytes = fs.readFileSync(abs); } catch { continue; }
+      const hash = hex(bytes);
+      const blob = path.join(dir, hash);
+      try {
+        if (!fs.existsSync(blob)) fs.writeFileSync(blob, bytes, { mode: 0o600 });
+      } catch { continue; }
+      files[path.relative(root, abs).split(path.sep).join('/')] = hash;
+      count++;
+    }
+  };
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    walk(root);
+    const index: SnapshotIndex = { root, taken: Date.now(), files };
+    writeIndex(dir, index);
+    return index;
+  } catch { return null; }
+}
+
+// One capture per root at a time: the walk is the expensive part, and the panel may
+// ask on a key press while it is already running.
+const capturing = new Map<string, Promise<SnapshotIndex | null>>();
+
+// Captures the root's baseline, or answers the one it already has: the first capture
+// sticks across refreshes, sessions and restarts, so a file that was dirty before the
+// panel was ever opened is still reviewed against what it held then. `null` — the
+// root is not a directory, or its store cannot be written.
+export async function ensureSnapshot(root: string): Promise<{ taken: number } | null> {
+  let real: string;
+  let st: fs.Stats;
+  try {
+    real = fs.realpathSync(root);
+    st = fs.statSync(real);
+  } catch { return null; }
+  if (!st.isDirectory()) return null;
+  const dir = snapshotDir(real);
+  const existing = readIndex(dir);
+  if (existing) return { taken: existing.taken };
+  let job = capturing.get(real);
+  if (!job) {
+    job = captureSnapshot(real, dir).finally(() => capturing.delete(real));
+    capturing.set(real, job);
+  }
+  const made = await job;
+  return made ? { taken: made.taken } : null;
+}
+
+// The baseline's date as the section's label says it, in the person's own time zone.
+function snapshotDate(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// One current file against the index. `null` — unchanged, or not a file the snapshot
+// sees at all (a link, a junk name, no longer there).
+function snapshotFile(root: string, dir: string, index: SnapshotIndex, rel: string, st: fs.Stats): FileDiff | null {
+  const known = index.files[rel];
+  const status = known === undefined ? 'A' : 'M';
+  // A file that was already past the cap when the baseline was taken is not part of
+  // it, so being that big is not a change.
+  if (st.size > MAX_FILE_BYTES) {
+    return known === undefined ? null : { status, path: rel, added: 0, removed: 0, hunks: '', note: 'too large' };
+  }
+  let bytes: Buffer;
+  try { bytes = fs.readFileSync(path.resolve(root, rel)); } catch {
+    return { status, path: rel, added: 0, removed: 0, hunks: '', note: 'binary' };
+  }
+  if (known !== undefined && hex(bytes) === known) return null;
+  // The bytes differ, and a file the panel cannot show as text is named, not guessed at.
+  const read = decodeText(bytes);
+  if (!read || 'note' in read) {
+    return { status, path: rel, added: 0, removed: 0, hunks: '', note: 'binary' };
+  }
+  const before = known === undefined ? null : blobText(dir, known);
+  if (before && 'note' in before) {
+    return { status, path: rel, added: 0, removed: 0, hunks: '', note: before.note };
+  }
+  // A byte-level change the lines do not show (a trailing newline) still reads as a
+  // modification, as a pure rename does in a git section.
+  const d = unifiedDiff(before ? before.text : '', read.text, FULL_DIFF);
+  return { status, path: rel, added: d.added, removed: d.removed, hunks: d.diff };
+}
+
+// One file the tree no longer holds: its text from the baseline, diffed to nothing.
+function deletedSnapshotFile(dir: string, rel: string, hash: string): FileDiff {
+  const before = blobText(dir, hash);
+  if (before && 'note' in before) {
+    return { status: 'D', path: rel, added: 0, removed: 0, hunks: '', note: before.note };
+  }
+  const d = unifiedDiff(before ? before.text : '', '', FULL_DIFF);
+  return { status: 'D', path: rel, added: d.added, removed: d.removed, hunks: d.diff };
+}
+
+// The root's leftover paths against its persistent snapshot, captured here on the
+// first look. A path a git top claims is that top's on BOTH sides of the comparison:
+// a file that moved into a repository since the capture is not the snapshot's
+// deletion, and a nested repository's own files stay out of the leftover section
+// however much of them the baseline holds.
+async function snapshotSection(root: string, scan: RootScan): Promise<DiffSection | null> {
+  // A top at or above the root claims every path under it, so this section can never
+  // hold one; capturing would only hash a repository for nobody.
+  if (scan.tops.some((t) => within(root, t))) return null;
+  if (!(await ensureSnapshot(root))) return null;
+  const dir = snapshotDir(root);
+  const index = readIndex(dir);
+  if (!index) return null;
+  const own = (rel: string): boolean => {
+    const abs = path.resolve(root, rel);
+    return scan.tops.some((t) => within(abs, t));
+  };
+  const base = (rel: string): string => rel.slice(rel.lastIndexOf('/') + 1);
+  const current = new Set<string>();
+  const files: FileDiff[] = [];
+  for (const rel of scan.files) {
+    if (own(rel) || JUNK.has(base(rel))) continue;
+    let st: fs.Stats;
+    try { st = fs.lstatSync(path.resolve(root, rel)); } catch { continue; }
+    if (st.isSymbolicLink() || !st.isFile()) continue;
+    current.add(rel);
+    const file = snapshotFile(root, dir, index, rel, st);
+    if (file) files.push(file);
+  }
+  for (const [rel, hash] of Object.entries(index.files)) {
+    if (current.has(rel) || own(rel) || JUNK.has(base(rel))) continue;
+    files.push(deletedSnapshotFile(dir, rel, hash));
+  }
+  if (!files.length) return null;
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { root, baseline: 'snapshot', label: `vs snapshot (taken ${snapshotDate(index.taken)})`, files };
 }
 
 async function rootSections(given: string): Promise<DiffSection[]> {
@@ -360,7 +565,7 @@ async function rootSections(given: string): Promise<DiffSection[]> {
       // of the panel — its snapshot — rather than an error.
     }
   }
-  const snapshot = await snapshotSection(root, scan.files);
+  const snapshot = await snapshotSection(root, scan);
   if (snapshot) out.push(snapshot);
   return out;
 }
