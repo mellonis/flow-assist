@@ -212,13 +212,13 @@ test('a model the catalogue does not name still runs, on the window ai.contextWi
     (`default (default-model)`, `deep → big-model`, `big-model`), `window` the catalogue's.
   - `modelRows(ai: unknown): ModelRow[]` — `default` first (its label names `baseModel(ai)`),
     then one row per role (`ai.roles`, in the order the keys come), then ids of `ai.models`
-    no role names. A role and an id of the same name appear once, as the role's row — and
-    `modelChoice` accepts exactly the names these rows carry, no others.
+    no role maps to. A role and an id of the same name appear once, as the role's row; the
+    rows are what a panel draws, not the whole vocabulary a name may come from.
   - `modelChoice(ai: unknown, name: unknown): { model: string | null } | { error: string }`
-    — `default` → `{ model: null }` (clear the session's own); a role → its id; an id of
-    `ai.models` → itself; anything else → `{ error: 'no model or role "<name>" here (/model lists them)' }`.
-    A role wins over an id of the same name. Built over `modelRows`, so the two cannot
-    disagree.
+    — `default` → `{ model: null }` (clear the session's own); a role → its id; any id of
+    `ai.models` → itself, an id a role maps to included; anything else →
+    `{ error: 'no model or role "<name>" here (/model lists them)' }`.
+    A role wins over an id of the same name.
 
 - [ ] **Step 1: Write the failing tests** in `src/assistant/__tests__/model-roles.test.ts`
   (the file's existing `ai` fixtures): `modelChoice` resolves `fast` to `small-model`, a

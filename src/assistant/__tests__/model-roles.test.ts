@@ -55,9 +55,14 @@ describe('the chooser', () => {
     expect(modelChoice(clash, 'deep')).toEqual({ model: 'big-model' });
     expect(modelRows(clash).filter((r) => r.name === 'deep')).toEqual([{ name: 'deep', model: 'big-model', label: 'deep → big-model', window: 512_000 }]);
   });
-  test('the chooser accepts the rows and nothing else', () => {
-    const names = modelRows(catalogue).map((r) => r.name);
-    for (const n of names) expect('model' in modelChoice(catalogue, n)).toBe(true);
+  test('a catalogue id is a name even when a role maps to it', () => {
+    // `deep → big-model`: the row is the role's, and `big-model` is still an id the person
+    // may name — the rows are the display, not the vocabulary.
+    expect(modelChoice(catalogue, 'big-model')).toEqual({ model: 'big-model' });
+    expect(modelChoice(catalogue, 'small-model')).toEqual({ model: 'small-model' });
+  });
+  test('every row is a name, and a name that is no row\'s still has to be known', () => {
+    for (const r of modelRows(catalogue)) expect(modelChoice(catalogue, r.name)).toEqual({ model: r.model });
     expect(modelChoice(catalogue, 'fast → small-model')).toEqual({ error: 'no model or role "fast → small-model" here (/model lists them)' });
   });
 });

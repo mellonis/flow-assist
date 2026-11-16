@@ -31,11 +31,26 @@ const AI = {
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const CTRL_RIGHT_BRACKET = { name: ']', ctrl: true };
 const press = async (ui: UI, key: { name: string; ctrl?: boolean }) => { ui.backend.press(key); await settle(); };
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
-const command = async (ui: UI, text: string) => { await ui.type(text); await ui.press('return'); await settle(); };
-const say = async (ui: UI, text: string) => { await ui.type(text); await ui.press('return'); await settle(20); };
-// How many rows of the frame say exactly this — a note is said once.
+// How many rows of the frame say this — a note is said once.
 const said = (ui: UI, text: string) => ui.backend.lastFrame.split('\n').filter((l) => l.includes(text)).length;
+// Wait for a state the app reaches, rather than for a number of ticks: a loaded machine
+// makes a ticking wait a flake. `settle(1)` is well under a millisecond of work, so the
+// bound is generous.
+const settleUntil = async (ok: () => boolean, n = 2000) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const command = async (ui: UI, text: string) => { await ui.type(text); await ui.press('return'); await settle(); };
+// A question: wait for the request it sends, so nothing below races the stream's end.
+const ask = async (model: ScriptedModel, ui: UI, text: string) => {
+  const before = model.requests.length;
+  await ui.type(text);
+  await ui.press('return');
+  await settleUntil(() => model.requests.length > before);
+  await settle();
+};
+// A note is one row: wait for the render that draws it, and hold it to exactly one.
+const noteOnce = async (ui: UI, text: string) => {
+  await settleUntil(() => said(ui, text) === 1);
+  expect(said(ui, text)).toBe(1);
+};
 // The one session's file in a directory of the test's own.
 const stateFile = (dir: string) => {
   const names = sessionFiles(dir);
@@ -57,26 +72,55 @@ test('/model deep names a role, says it once, and the next request carries its m
   model.script([{ text: 'one' }], [{ text: 'two' }]);
   const ui = await boot(model);
   await command(ui, '/model deep');
-  expect(said(ui, 'model: deep → big-model')).toBe(1);
+  await noteOnce(ui, 'model: deep → big-model');
   expect(ui.backend.lastFrame).not.toContain('small-model');
-  await say(ui, 'which model is this?');
+  await ask(model, ui, 'which model is this?');
   expect(model.requests.at(-1)?.model).toBe('big-model');
   ui.app.unmount();
 });
 
-test('a catalogue id is a name of its own, and the session file keeps it', async () => {
+// The id a role maps to is an id the person may name: `modelChoice` takes any id of
+// `ai.models`, and the note names it as the catalogue does.
+test('an id a role maps to is a name too, and the session file keeps it', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'one' }], [{ text: 'two' }]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
   const ui = await boot(model, dir);
-  await say(ui, 'first');
+  await ask(model, ui, 'first');
+  expect(model.requests.at(-1)?.model).toBe('default-model');
+  await command(ui, '/model big-model'); // a role's target, not a row's name
+  await noteOnce(ui, 'model: big-model');
+  const state = stateFile(dir);
+  expect(state.read().model).toBe('big-model');
+  await ask(model, ui, 'second');
+  expect(model.requests.at(-1)?.model).toBe('big-model');
+  ui.app.unmount();
+});
+
+test('a catalogue id no role maps to is a name of its own, and the session file keeps it', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'one' }], [{ text: 'two' }]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
+  const ui = await boot(model, dir);
+  await ask(model, ui, 'first');
   expect(model.requests.at(-1)?.model).toBe('default-model');
   await command(ui, '/model other-model');
-  expect(said(ui, 'model: other-model')).toBe(1);
+  await noteOnce(ui, 'model: other-model');
   const state = stateFile(dir);
   expect(state.read().model).toBe('other-model');
-  await say(ui, 'second');
+  await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('other-model');
+  ui.app.unmount();
+});
+
+// `/model` alone says where things stand in the vocabulary `/model` takes — the row the
+// conversation runs — and sends nothing.
+test('/model alone says the row the conversation runs, and sends no request', async () => {
+  const model = new ScriptedModel();
+  const ui = await boot(model);
+  await command(ui, '/model');
+  await noteOnce(ui, 'model: default (default-model) · /model <name> to change');
+  expect(model.requests).toHaveLength(0);
   ui.app.unmount();
 });
 
@@ -87,14 +131,14 @@ test('/model default clears the session\'s own model, and the next request follo
   model.script([{ text: 'one' }], [{ text: 'two' }], [{ text: 'three' }]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
   const ui = await boot(model, dir);
-  await say(ui, 'first');
+  await ask(model, ui, 'first');
   await command(ui, '/model deep');
   expect(model.requests).toHaveLength(1); // a switch sends nothing
   await command(ui, '/model default');
-  expect(said(ui, 'model: default (default-model)')).toBe(1);
+  await noteOnce(ui, 'model: default (default-model)');
   const state = stateFile(dir);
   expect(Object.hasOwn(state.read(), 'model')).toBe(false);
-  await say(ui, 'second');
+  await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('default-model');
   // Nothing is pinned: a later change of ai.model is what this session runs. The chat
   // goes away first, so `:` is the host's line and not a character in the field.
@@ -105,22 +149,26 @@ test('/model default clears the session\'s own model, and the next request follo
   await settle();
   expect(ui.backend.lastFrame).toContain('"big-model" · session');
   await ui.press('F');
-  await say(ui, 'third');
+  await ask(model, ui, 'third');
   expect(model.requests.at(-1)?.model).toBe('big-model');
   ui.app.unmount();
 });
 
-test('an unknown name is refused with the list, and nothing changes', async () => {
+test('an unknown name is refused with the list, the line stays, and nothing changes', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'one' }], [{ text: 'two' }]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-model-e2e-'));
   const ui = await boot(model, dir);
-  await say(ui, 'first');
+  await ask(model, ui, 'first');
   await command(ui, '/model nope');
   expect(ui.backend.lastFrame).toContain('no model or role "nope" here (/model lists them)');
+  // A typo leaves the line as typed, as /auto, /notes and /mode do.
+  expect(ui.backend.lastFrame).toContain('› /model nope');
   expect(said(ui, 'model: ')).toBe(0);
   expect(Object.hasOwn(stateFile(dir).read(), 'model')).toBe(false);
-  await say(ui, 'second');
+  await ui.press('escape'); // the field is cleared, so the next question is its own
+  await settle();
+  await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('default-model');
   ui.app.unmount();
 });
@@ -136,11 +184,11 @@ test('a switch while an answer streams leaves the running turn on its model, the
   await settleUntil(() => model.held && ui.backend.lastFrame.includes('Started'));
   expect(model.requests).toHaveLength(1);
   await command(ui, '/model deep');
-  expect(said(ui, 'model: deep → big-model')).toBe(1);
+  await noteOnce(ui, 'model: deep → big-model');
   expect(model.requests[0]?.model).toBe('default-model');
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Started and finished.'));
-  await say(ui, 'again');
+  await ask(model, ui, 'again');
   expect(model.requests.at(-1)?.model).toBe('big-model');
   ui.app.unmount();
 });

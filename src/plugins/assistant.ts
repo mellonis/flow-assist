@@ -1645,18 +1645,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // choice is the session's and is saved with it, never written back to the
                 // config.
                 const name = arg.trim();
-                setField('');
                 const ai = conv.deps.config().ai;
                 if (!name) {
                   // Said where things stand — in the chat, as a note (display only, like
                   // /memory's list): a toast is drawn under a chat that covers the whole
-                  // terminal.
-                  conv.pushNote(`model: ${conv.effectiveModel() ?? 'the provider\'s default'} · /model <name> to change`);
+                  // terminal. The state is said in the vocabulary /model takes: the row
+                  // the conversation runs, else the id itself.
+                  setField('');
+                  const row = modelRows(ai).find((r) => r.model === (conv.model ?? null));
+                  conv.pushNote(`model: ${row?.label ?? conv.effectiveModel() ?? 'the provider\'s default'} · /model <name> to change`);
                   host.notify();
                   return;
                 }
                 const got = modelChoice(ai, name);
+                // A typo leaves the line as typed, as /auto, /notes and /mode do.
                 if ('error' in got) { setError(got.error); return; }
+                setField('');
                 conv.model = got.model ?? undefined; // `null` — back to ai.model
                 conv.save();
                 const row = modelRows(ai).find((r) => r.name === name);

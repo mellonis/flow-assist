@@ -89,13 +89,16 @@ export function modelRows(ai: unknown): ModelRow[] {
   return rows;
 }
 
-// What a typed name chooses: the row's model — null for the reset, a role's id, or a
-// catalogue id — or the line that sends the person to the list. Built over `modelRows`,
-// so the two cannot disagree about which names exist.
+// What a typed name chooses: the reset, the id a role runs, or an id of the catalogue —
+// an id a role maps to is still an id the person may name. Anything else is the line that
+// sends them to the list.
 export function modelChoice(ai: unknown, asked: unknown): { model: string | null } | { error: string } {
   const key = typeof asked === 'string' ? asked.trim() : '';
-  const row = modelRows(ai).find((r) => r.name === key);
-  if (row) return { model: row.model };
+  if (key === RESET) return { model: null };
+  const role = roleModel(ai, key);
+  if (role) return { model: role };
+  const catalogue = new Set(keysOf(asAi(ai).models).map(name).filter((id): id is string => !!id));
+  if (catalogue.has(key)) return { model: key };
   const shown = typeof asked === 'string' ? key : String(asked ?? '');
   return { error: `no model or role "${shown}" here (/model lists them)` };
 }
