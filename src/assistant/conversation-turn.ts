@@ -28,7 +28,7 @@ import { SKILL_TOOL } from './skill-file.js';
 import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
-import { answerAt, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
+import { answerAt, frameSteered, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -333,7 +333,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
               // In the journal as the person's message, where it reached the model.
               c.journalTo(journalId, { t: 'row', role: 'user', text: m.text, midTurn: true });
             }
-            delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: m.text })));
+            // The model reads each framed as steered in; the row and the journal keep it as typed.
+            delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: frameSteered(m.text, false) })));
             c.setRows((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
             c.deps.notify();
           }

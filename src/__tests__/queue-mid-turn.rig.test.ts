@@ -34,15 +34,39 @@ test('a queued message reaches the model after the current step, as the person\'
   await turn;
   // Delivered at the boundary: after the call and its result, in the same turn.
   const sent = messages(1);
-  expect(sent.at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
+  const wire = sent.at(-1)!;
+  expect(wire.role).toBe('user');
+  // The model reads it framed as steered in mid-turn.
+  expect(String(wire.content).startsWith('not there, the other file\n\n')).toBe(true);
+  expect(String(wire.content)).toContain('steered in mid-turn');
   expect(sent.at(-2)!.role).toBe('tool');
   // No second turn was started for it.
   await rig.idle();
   expect(model.requests).toHaveLength(2);
-  // And it stays in the model's history for the next turn.
+  // And it stays in the model's history for the next turn, framed as it was sent.
   model.script([{ text: 'ok' }]);
   await rig.conv.send('next');
   expect(JSON.stringify(messages(2))).toContain('not there, the other file');
+  expect(JSON.stringify(messages(2))).toContain('steered in mid-turn');
+});
+
+test('a delivered queued message goes to the model framed as steered in, and the row keeps it as typed', async () => {
+  const { model, rig, turn, messages } = await heldTurn();
+  model.release();
+  await turn;
+  const sent = messages(1);
+  const wire = sent.at(-1) as Msg;
+  expect(wire.role).toBe('user');
+  expect(String(wire.content)).toContain('not there, the other file');
+  expect(String(wire.content)).toContain('steered in mid-turn');
+  // The screen row and the journal keep the text as typed.
+  const row = rig.conv.messages.find((m) => m.role === 'user' && m.content === 'not there, the other file');
+  expect(row).toEqual({ role: 'user', content: 'not there, the other file' });
+  const rows = rig.journal().filter((e) => e.t === 'row' && e.role === 'user' && e.text === 'not there, the other file');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ midTurn: true });
+  expect(JSON.stringify(rig.conv.messages)).not.toContain('steered in mid-turn');
+  expect(JSON.stringify(rig.journal())).not.toContain('steered in mid-turn');
 });
 
 test('↑ takes a queued message back before it is delivered', async () => {
@@ -78,7 +102,10 @@ test('⇥ holds only the message it was pressed on: a correction typed after it 
   await turn;
   await rig.until(() => rig.conv.lastAnswer() === 'Now the note.');
   // The correction went in at the boundary, the held note waited for the end.
-  expect(messages(1).at(-1)).toEqual({ role: 'user', content: 'and a correction' });
+  const wire = messages(1).at(-1)!;
+  expect(wire.role).toBe('user');
+  expect(String(wire.content).startsWith('and a correction\n\n')).toBe(true);
+  expect(String(wire.content)).toContain('steered in mid-turn');
   expect(JSON.stringify(messages(1))).not.toContain('not there');
   expect(messages(2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
 });
