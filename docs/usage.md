@@ -756,16 +756,17 @@ stays. A y/n or a question is answered first — the panel waits under it and co
 It closes with the conversation it shows: `/clear`, `/new`, `/resume`, the sessions
 picker and a switch of session.
 
-**What it compares against** is named at the top. A repository is diffed against `HEAD`,
-and a directory outside git against a snapshot of it taken the first time the panel was
-opened there (`vs snapshot (taken 2026-11-16)`) — one per directory, kept, so a file that
-was already modified before you ever asked is still reviewed against what it held then.
-**What it shows is the repository the shell is in** — its whole working tree at or above
+**What it compares against** is `HEAD`, named at the top. **What it shows is the
+repository the shell is in** — its whole working tree at or above
 the shell's directory, as `git status` reads it from a subdirectory — and it follows you
 from one repository to the next as you `cd`; the folders beside it along `shell.roots` are
-never in it. A repository nested under it is a section of its own, in walk order, a
-nested one before its parent; `.gitignore` decides what git shows, a file over 2 MB and a
-binary file are named and not drawn. It refreshes while the panel is up, and only then.
+never in it, and a repository wider than `shell.roots` still shows whole: the fence is
+where the assistant may read and write, and this is your own screen. Outside git there is
+no "before" that would mean anything, so the panel says
+`not a git repository` and draws nothing. A repository nested under it is a section of its
+own, drawn after the section of the repository it stands under; sibling sections come in
+walk order. `.gitignore` decides what git shows, a file over 2 MB and a binary file are
+named and not drawn. It refreshes while the panel is up, and only then.
 
 It is a view and nothing more: nothing on it reaches the model, the session or the
 journal, and the assistant never runs git to produce it. A docked chat too small to hold

@@ -1028,6 +1028,7 @@ async function diffFrame(props: {
   cursor: string | null;
   palette?: Record<string, string | undefined>;
   loading?: boolean;
+  gitless?: boolean;
 }) {
   const backend = new TestBackend(80, 24);
   const handle = await render(h(renderDiffPanel, { ...props, wrap: 74, bg: 'black' }), backend);
@@ -1037,7 +1038,7 @@ async function diffFrame(props: {
 
 test('the diff panel lists a file with its hunks and folds what is collapsed', async () => {
   const section: DiffSection = {
-    root: '/r', baseline: 'head', label: 'vs HEAD',
+    root: '/r',
     files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
   };
   const key = diffFileKey('/r', 'a.txt');
@@ -1076,11 +1077,22 @@ test('the diff panel says the tree is clean when there is nothing to show', asyn
   none.handle.unmount();
 
   // A section that holds no files is the same nothing: no header, no rows.
-  const empty: DiffSection = { root: '/r', baseline: 'snapshot', label: 'vs snapshot (taken 2026-01-01)', files: [] };
+  const empty: DiffSection = { root: '/r', files: [] };
   const blank = await diffFrame({ sections: [empty], collapsed: new Set(), cursor: null });
   expect(blank.frame).toContain('no changes in the working tree');
   expect(blank.frame).not.toContain('diff ·');
   blank.handle.unmount();
+});
+
+test('the diff panel distinguishes no repository from a clean tree, and says what a walk does', async () => {
+  const none = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, gitless: true });
+  expect(none.frame).toContain('not a git repository');
+  expect(none.frame).not.toContain('no changes in the working tree');
+  none.handle.unmount();
+
+  const loading = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
+  expect(loading.frame).toContain('reading the working tree…');
+  loading.handle.unmount();
 });
 
 test('a file the panel cannot show says why, in its row and under it when open', async () => {
@@ -1088,7 +1100,7 @@ test('a file the panel cannot show says why, in its row and under it when open',
     { status: 'M', path: 'img.png', added: 0, removed: 0, hunks: '', note: 'binary' },
     { status: 'M', path: 'dump.sql', added: 0, removed: 0, hunks: '', note: 'too large' },
   ];
-  const section: DiffSection = { root: '/r', baseline: 'head', label: 'vs HEAD', files };
+  const section: DiffSection = { root: '/r', files };
   const open = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null });
   expect(open.frame).toMatch(/▾ M img\.png · binary, not shown/);
   expect(open.frame).toMatch(/▾ M dump\.sql · too large, not shown/);
@@ -1107,18 +1119,18 @@ test('a file the panel cannot show says why, in its row and under it when open',
 test('two sections keep their own header, totals and fold', async () => {
   const sections: DiffSection[] = [
     {
-      root: '/a', baseline: 'head', label: 'vs HEAD',
+      root: '/a',
       files: [{ status: 'M', path: 'a.txt', added: 2, removed: 1, hunks: '@@ -1 +1 @@\n-x\n+y\n+z' }],
     },
     {
-      root: '/b', baseline: 'snapshot', label: 'vs snapshot (taken 2026-01-01)',
+      root: '/b',
       files: [{ status: 'A', path: 'a.txt', added: 3, removed: 0, hunks: '@@ -0,0 +1,3 @@\n+p\n+q\n+r' }],
     },
   ];
   const folded = await diffFrame({ sections, collapsed: new Set([diffFileKey('/a', 'a.txt')]), cursor: null });
-  // Each section sums its own files, under its own label.
+  // Each section sums its own files, under its own header.
   expect(folded.frame).toContain('diff · 1 file +2 −1 · vs HEAD');
-  expect(folded.frame).toContain('diff · 1 file +3 −0 · vs snapshot (taken 2026-01-01)');
+  expect(folded.frame).toContain('diff · 1 file +3 −0 · vs HEAD');
   // The same relative path is two rows, and folding one leaves the other open.
   expect(folded.frame).toMatch(/▸ M a\.txt/);
   expect(folded.frame).toMatch(/▾ A a\.txt/);
@@ -1134,7 +1146,7 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   expect(fileDiffCounts({ added: 0, removed: 0, note: 'too large' })).toBe('· too large, not shown');
 
   const section: DiffSection = {
-    root: '/r', baseline: 'head', label: 'vs HEAD',
+    root: '/r',
     files: [{ status: 'M', path: 'src/app.ts', added: 12, removed: 3, hunks: '@@ -1,3 +1,12 @@\n-gone\n+here' }],
   };
   const drawn = await diffFrame({
@@ -1167,7 +1179,7 @@ test('a hunk longer than the chat\'s 80-line cap is drawn whole', async () => {
   // draws every row the section holds, however tall.
   const added = Array.from({ length: 100 }, (_, i) => `+line ${i + 1}`).join('\n');
   const section: DiffSection = {
-    root: '/r', baseline: 'head', label: 'vs HEAD',
+    root: '/r',
     files: [{ status: 'M', path: 'big.txt', added: 100, removed: 0, hunks: `@@ -0,0 +1,100 @@\n${added}` }],
   };
   const backend = new TestBackend(80, 130);
@@ -1183,7 +1195,7 @@ test('a hunk longer than the chat\'s 80-line cap is drawn whole', async () => {
 
 test('the cursor file\'s row is drawn inverse, and a reader without colour still sees it', async () => {
   const section: DiffSection = {
-    root: '/r', baseline: 'head', label: 'vs HEAD',
+    root: '/r',
     files: [
       { status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' },
       { status: 'A', path: 'b.txt', added: 1, removed: 0, hunks: '@@ -0,0 +1 @@\n+new' },
@@ -1206,7 +1218,7 @@ test('the cursor file\'s row is drawn inverse, and a reader without colour still
 
 test('the file row\'s lead and counts are chrome: a drag takes the path, and the hunks still copy', async () => {
   const section: DiffSection = {
-    root: '/r', baseline: 'head', label: 'vs HEAD',
+    root: '/r',
     files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
   };
   const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null });
@@ -1224,11 +1236,11 @@ test('the file row\'s lead and counts are chrome: a drag takes the path, and the
   drawn.handle.unmount();
 });
 
-test('a panel with nothing to show yet says it is capturing, then that the tree is clean', async () => {
-  const capturing = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
-  expect(capturing.frame).toContain('capturing baseline…');
-  expect(capturing.frame).not.toContain('no changes');
-  capturing.handle.unmount();
+test('a panel with nothing to show yet says a walk is running, not that the tree is clean', async () => {
+  const walking = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, loading: true });
+  expect(walking.frame).toContain('reading the working tree…');
+  expect(walking.frame).not.toContain('no changes');
+  walking.handle.unmount();
 });
 
 // ─── /diff: the split ─────────────────────────────────────────────────────────
@@ -1237,7 +1249,7 @@ test('a panel with nothing to show yet says it is capturing, then that the tree 
 // field. The panel's rows and its ↑/↓ order come from ONE walk (`diffPanelBody`), which
 // is what keeps a drawn row and the cursor's index from disagreeing.
 const splitSections: DiffSection[] = [{
-  root: '/r', baseline: 'head', label: 'vs HEAD',
+  root: '/r',
   files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
 }];
 const splitPanel = { sections: splitSections, collapsed: new Set<string>(), cursor: diffFileKey('/r', 'a.txt') };

@@ -1937,6 +1937,7 @@ export function renderChatModal({
           collapsed: diffPanel.collapsed,
           cursor: diffPanel.cursor,
           loading: diffPanel.loading,
+          gitless: diffPanel.gitless,
           wrap: panelWrap,
           bg: m.bg,
           palette: m,
@@ -2554,6 +2555,7 @@ export interface DiffPanelView {
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   loading?: boolean;
+  gitless?: boolean;
 }
 
 // The files the panel shows, in the order ↑/↓ walk them: root by root, as drawn.
@@ -2572,6 +2574,7 @@ export function diffPanelBody(p: {
   cursor: string | null;
   wrap: number; // the panel's inner width
   loading?: boolean;
+  gitless?: boolean;
   palette?: Record<string, string | undefined>;
 }): { rows: ReactNode[]; cursorRow: number } {
   const m = p.palette ?? {};
@@ -2580,9 +2583,11 @@ export function diffPanelBody(p: {
   let cursorRow = -1;
   const total = p.sections.reduce((n, s) => n + s.files.length, 0);
   if (!total) {
-    // A walk still running says so; a tree with nothing in it says that.
+    // A walk still running says what it is doing; a tree with nothing changed in a
+    // repository says that; a place with no repository at all says so — the three are
+    // different answers to the one empty panel.
     rows.push(h(Text, { key: 'none', dim: true, wrap: 'truncate', selectable: false },
-      p.loading ? 'capturing baseline…' : 'no changes in the working tree'));
+      p.loading ? 'reading the working tree…' : p.gitless ? 'not a git repository' : 'no changes in the working tree'));
     return { rows, cursorRow };
   }
   p.sections.forEach((s, si) => {
@@ -2591,7 +2596,7 @@ export function diffPanelBody(p: {
     const added = s.files.reduce((n, f) => n + f.added, 0);
     const removed = s.files.reduce((n, f) => n + f.removed, 0);
     rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
-      cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · ${s.label}`, inner)));
+      cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · vs HEAD`, inner)));
     s.files.forEach((f, fi) => {
       const key = diffFileKey(s.root, f.path);
       const folded = p.collapsed.has(key);
@@ -2691,6 +2696,7 @@ export function renderDiffPanel(p: {
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   wrap: number; // the panel's inner width
+  gitless?: boolean;
   bg: string | undefined;
   palette?: Record<string, string | undefined>;
   loading?: boolean;

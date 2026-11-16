@@ -12,10 +12,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   `↑`/`↓` choose one, `⏎` folds it, and a fold outlives a refresh while the tree changes
   under it (a write by the turn, a command you ran, your own editor). It reads the
   repository the shell is in — its whole working tree, wherever in it the shell stands —
-  and follows you as you `cd`, never the folders beside it along `shell.roots`. A
-  repository is compared with `HEAD`, a directory outside git with a snapshot taken the
-  first time the panel was opened there, and the header says which. It is a view: nothing
-  on it reaches the model, the session or the journal. A y/n or a question is answered
+  and follows you as you `cd`, never the folders beside it along `shell.roots`. Each file
+  is compared with `HEAD`; outside git there is nothing to compare against that would
+  mean anything, and the panel says `not a git repository`. It is a view: nothing on it
+  reaches the model, the session or the journal. A y/n or a question is answered
   first and the panel waits under it; `Esc` (or `/diff` again) closes it, and while a turn
   runs `Esc` stops the turn and keeps the panel.
 

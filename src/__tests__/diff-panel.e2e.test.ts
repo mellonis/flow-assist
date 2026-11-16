@@ -313,6 +313,23 @@ const workspaceTree = () => {
   return umbrella;
 };
 
+test('/diff outside git says there is no repository', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-plain-')));
+  fs.writeFileSync(path.join(root, 'note.txt'), 'hello\n');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('not a git repository'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('not a git repository');
+  // Nothing is invented for the files the directory holds: no section, no baseline.
+  expect(frame).not.toContain('no changes in the working tree');
+  expect(frame).not.toContain('vs snapshot');
+  expect(frame).not.toContain('diff ·');
+  ui.app.unmount();
+});
+
 test('/diff shows the repository the shell is in, not its neighbours', async () => {
   const umbrella = workspaceTree();
   const model = new ScriptedModel();
@@ -346,11 +363,13 @@ test('an open panel follows a cd', async () => {
   expect(ui.backend.lastFrame).toContain('+alpha-change');
   await ui.type('/cd projB');
   await ui.press('return');
-  // The walk after the move is the new one: B's tree alone, with no key of its own.
+  // The walk after the move is the new one: B's tree alone, with no key of its own. The
+  // refresh is the poll's (a second, debounced), so the window is wide on purpose.
   await settleUntil(
     () => ui.backend.lastFrame.includes('+beta-change')
       && !ui.backend.lastFrame.includes('+alpha-change')
       && !ui.backend.lastFrame.includes('+outer-change'),
+    8000,
   );
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('diff · 1 file');
