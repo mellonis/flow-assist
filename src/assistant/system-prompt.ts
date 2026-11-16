@@ -22,9 +22,14 @@ export function roundCapTurn(rounds: number, lastStep?: string, tokens?: number)
 // What the model's history says of a turn the host stopped because the answer fell
 // into a loop: in the model's voice, what was cut and that the work is unfinished — so
 // a "continue" after it reads as picking up from the head that was kept, and the dropped
-// repetition is never offered back as something it said.
-export function loopTurn(dropped: number): string {
-  return `(The host stopped this turn because my answer fell into a loop: the ${dropped} characters after the repeat began were dropped, and the text above is where it stopped. The work is not finished: on "continue" I pick up from there.)`;
+// repetition is never offered back as something it said. `kept` says whether any of the
+// answer survived the cut: a loop caught from the answer's first characters leaves
+// nothing, and a line pointing at "the text above" would then claim text that is not
+// there — the same lie the person does not see, in the history the model reads next.
+export function loopTurn(dropped: number, kept: boolean): string {
+  return kept
+    ? `(The host stopped this turn because my answer fell into a loop: the ${dropped} characters after the repeat began were dropped, and the text above is where it stopped. The work is not finished: on "continue" I pick up from there.)`
+    : `(The host stopped this turn because my answer fell into a loop from its first characters: all ${dropped} of them were dropped and nothing of it was kept. The work is not finished: on "continue" I write it again from the start.)`;
 }
 export function failedTurn(message: unknown): string {
   const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);

@@ -641,8 +641,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // host's line saying where, and the person is offered ⏎ continue.
       ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined, limitTokens) } as ChatMessage] : []),
       // Stopped for looping: the kept head is the answer, closed by the host's line
-      // saying what was cut — the dropped repetition never goes back to the model.
-      ...(loopedInfo ? [{ role: 'assistant', content: loopTurn(loopedInfo.dropped) } as ChatMessage] : []),
+      // saying what was cut — the dropped repetition never goes back to the model. No
+      // head kept (`at === 0`) is said as that, never as "the text above".
+      ...(loopedInfo ? [{ role: 'assistant', content: loopTurn(loopedInfo.dropped, c.content.trim() !== '') } as ChatMessage] : []),
     ];
     if (roundLimit || loopedInfo) c.setContinueOffer(true);
     // The calls are already in the turn, where they were made (`onToolRun`).
