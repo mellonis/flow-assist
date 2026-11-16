@@ -94,6 +94,19 @@ test('the id works without @, and agents.maxAuto raises the cap', async () => {
   } finally { spy.mockRestore(); }
 });
 
+test('an agent file\'s auto mode is set over the inherited one: a starter at all and a file at ask leave the child at ask', async () => {
+  const { model, child, rig } = rigFor('GO-CAP');
+  project(rig, 'job', doc('auto: ask\n', 'GO-CAP go'));
+  child.script([{ hold: true }, { text: 'ok' }]);
+  rig.conv.setAutoMode('all', false);
+  const answer = await call(rig, model, { agent: '@job' });
+  expect(answer).toContain('Background task started (job)');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.autoMode)).toEqual(['ask']);
+  child.release();
+  await childDone(rig);
+});
+
 test('an agent task may write under the person\'s y/n, as a task started with write: true does', async () => {
   const { model, child, rig } = rigFor('GO-W');
   project(rig, 'job', doc('', 'GO-W go'));

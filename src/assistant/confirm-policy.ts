@@ -41,9 +41,10 @@ export interface ConfirmScope { conv: Conversation; journalId: string; task?: st
 
 // A child's policy from its writes capability and its starter's word: `deny` is read-only
 // whatever the starter is — a denied child never gets writes back; `allow` runs each write
-// and says it, but only where the starter may vouch for the person's yes; anything a child
-// asks for without that vouch is a run with nobody to ask, which declines. `say` is where
-// `allow`'s writes are said as they run.
+// the auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or
+// a plugin's `run_command` — but only where the starter may vouch for the person's yes, and
+// says it in the log; anything a child asks for without that vouch is a run with nobody to
+// ask, which declines. `say` is where `allow`'s writes are said as they run.
 export function childPolicy(writes: TaskWrites, mayVouch: boolean, say: (line: string) => void): ConfirmPolicy {
   if (writes === 'deny') return { kind: 'always-no', reason: 'read-only' };
   if (!mayVouch) return { kind: 'always-no', reason: 'cannot-ask' };

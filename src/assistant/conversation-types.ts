@@ -235,8 +235,10 @@ export interface ConversationDeps {
 // `model`: the model id the child runs, resolved from its role at the start (absent: the
 // conversation's own).
 export interface AgentRef { id: string; source: 'project' | 'person' | 'plugin'; path: string; hash: string }
-// What a child may change, as a capability: `'allow'` runs each write and says it in the
-// log, `'ask'` waits for the person's yes on each, `'deny'` declines every write.
+// What a child may change, as a capability: `'allow'` runs each write the auto mode with
+// `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's
+// `run_command` — and says it in the log, `'ask'` waits for the person's yes on each,
+// `'deny'` declines every write.
 export type TaskWrites = 'allow' | 'ask' | 'deny';
 export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; writes?: TaskWrites; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[]; head?: string; model?: string }
 // How a child's run ended, as the tool that started it reports it.

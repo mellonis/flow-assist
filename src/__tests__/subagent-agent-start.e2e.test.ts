@@ -242,12 +242,13 @@ async function modeOf(file: string | null, maxAuto: string | null): Promise<stri
 
 test('the child\'s auto mode is the lower of the file\'s auto and agents.maxAuto (default reads)', async () => {
   // Each expect names the modes the child is given in order: the starting
-  // conversation's own first, then the agent file's cap where one applies.
+  // conversation's own first, then the agent file's cap — `ask` included, where it
+  // overtakes the inherited mode.
   expect(await modeOf('all', null)).toEqual(['ask', 'reads']);
   expect(await modeOf('all', 'all')).toEqual(['ask', 'all']);
-  expect(await modeOf('reads', 'ask')).toEqual(['ask']);
+  expect(await modeOf('reads', 'ask')).toEqual(['ask', 'ask']);
   expect(await modeOf('reads', 'all')).toEqual(['ask', 'reads']);
-  expect(await modeOf(null, 'all')).toEqual(['ask']);
+  expect(await modeOf(null, 'all')).toEqual(['ask', 'ask']);
 });
 
 // ── the tools

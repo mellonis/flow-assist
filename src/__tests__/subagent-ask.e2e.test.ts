@@ -374,7 +374,6 @@ test('--auto answers a write by itself, with no block: the subagent\'s journal s
   await settleUntil(() => frameOf(ui).includes('◆ autoy-one-do finished:'));
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(fs.existsSync(a!.file)).toBe(true);
-  await new Promise((r) => setTimeout(r, 300));
   expect(await confirms(sessions, 'autoy-one-do')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });
@@ -399,7 +398,6 @@ test('the conversation\'s own /auto all reaches a subagent started without the f
   await settleUntil(() => frameOf(ui).includes('◆ parent-one-do finished:'));
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(fs.existsSync(a!.file)).toBe(true);
-  await new Promise((r) => setTimeout(r, 300));
   expect(await confirms(sessions, 'parent-one-do')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });

@@ -2155,8 +2155,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The start, for a prompt and for an agent file: the parent's own journal takes
                 // the child's lines (its session is made here when nobody has spoken,
                 // `keepPersonWork`). A subagent the person starts may write under each
-                // write's y/n, and can raise its inherited auto mode before the
-                // schedule's timer lets its first turn go.
+                // write's y/n, and the `--auto` flag or the agent file's capped mode sets
+                // its auto mode over the inherited one before the schedule's timer lets
+                // its first turn go.
                 const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head' | 'model'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
@@ -2165,7 +2166,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     { startChild: (s) => conv.startChild(s, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
                   );
                   if ('refused' in started) { setError(`/subagent: ${started.refused}`); return false; }
-                  if (mode && mode !== 'ask') started.child.setAutoMode(mode);
+                  // The agent file's capped mode — or `--auto`'s `all` — is set over the
+                  // inherited one; a plain prompt with no flag keeps the inherited mode
+                  // (`mode` is null then).
+                  if (mode) started.child.setAutoMode(mode);
                   setField('');
                   say(`subagent «${spec.label}» started`);
                   if (notes) conv.pushNote(notes);

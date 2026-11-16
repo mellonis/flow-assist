@@ -3412,8 +3412,10 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
   `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy
   `childPolicy` makes from its writes capability (`ChildSpec.writes`, absent reads as
-  `'ask'`): `deny` is `always-no` read-only and never lifts, `allow` runs each write and
-  says it in the log, `ask` waits for the person's yes on each (the `subagent` tool's
+  `'ask'`): `deny` is `always-no` read-only and never lifts, `allow` runs each write the
+  auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a
+  plugin's `run_command` — and says it in the log, `ask` waits for the person's yes on each
+  (the `subagent` tool's
   `write` argument starts a `task` with `writes: 'ask'`: `ai.taskRounds` rounds, the worker
   prompt, its y/n offered to the session like a subagent's — `write` absent or false is
   `writes: 'deny'`) — where the host's root can ask at all (`canAsk`; with nobody to ask the

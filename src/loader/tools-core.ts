@@ -839,14 +839,16 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
         // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
         // itself (AGENTS.md (child schedule)) is one function the slash commands share.
-        // An agent task may write under the person's y/n, as one started with `write: true`
-        // does; whether it can ask is `startChild`'s rule.
+        // An agent task may write under the person's y/n, as one started with
+        // `writes: 'ask'` does; whether it can ask is `startChild`'s rule.
         const writes = args.write === true || !!named;
         const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', writes: writes ? 'ask' : 'deny', ...(started.model ? { model: started.model } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills, head: named.head } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;
-        if (named && named.mode !== 'ask') scheduled.child.setAutoMode(named.mode);
+        // The file's capped auto mode is SET on the child, over the mode it inherits —
+        // `ask` included, where the file wants every write asked.
+        if (named) scheduled.child.setAutoMode(named.mode);
         const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? ''].filter(Boolean).join('\n');
         return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
