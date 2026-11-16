@@ -147,10 +147,12 @@ test('a result arriving while the person has a message queued is read in that me
   expect(model.requests).toHaveLength(4);
   const sent = messages(model, 3);
   const result = sent.findIndex((m) => m.role === 'user' && text(m).includes('result D'));
-  const mine = sent.findIndex((m) => m.role === 'user' && text(m) === 'and also this');
+  // The person's message is the last thing sent, framed as written while the previous turn ran.
+  const mine = sent.findIndex((m) => m.role === 'user' && text(m).startsWith('and also this'));
   expect(result).toBeGreaterThan(-1);
   expect(mine).toBe(sent.length - 1);
   expect(result).toBeLessThan(mine);
+  expect(text(sent[mine]!)).toContain('previous turn was running');
   const frame = ui.backend.lastFrame;
   expect(frame.indexOf('First answer.')).toBeLessThan(frame.indexOf('result D'));
   expect(frame.indexOf('result D')).toBeLessThan(frame.indexOf('and also this'));

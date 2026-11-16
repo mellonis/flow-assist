@@ -1773,7 +1773,9 @@ export class Conversation {
         if (!next) { this.takeInbox(); return; }
         this.syncQueue();
         if (!this.confirm && !this.question) this.landInbox();
-        void this.send(next.text);
+        // The model reads it framed as written while the turn that just ended ran
+        // (`frameSteered`, previous-turn variant); the row and the journal keep the text.
+        void this.send(next.text, { steered: true });
       }, 0);
     } else if (ok && !atLimit) setTimeout(() => this.takeInbox(), 0);
     else this.takeInbox('rows');

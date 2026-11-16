@@ -136,6 +136,7 @@ export interface SendOptions {
   skill?: { id: string; source: string; path: string; hash: string; framed: string }; // the person's `/skill`: the message goes to the model as `framed` (the body, then the person's text); the screen row and the journal keep the line as typed, and a `skill-load` line records which content it was
   preloaded?: readonly string[]; // an agent's first message: the ids of the skills its text carries, marked on the message for the compaction line
   framed?: string;               // with `fromInbox`: the item as the model reads it (`frameItem`); the screen row and the journal keep the plain text
+  steered?: boolean;             // a queued message going out as its own turn after the turn it was written during: the model reads it framed (`frameSteered`, previous-turn variant); the screen row and the journal keep the line as typed
 }
 
 // What a chat draws of a conversation (`Conversation.getSnapshot`). The same object until
