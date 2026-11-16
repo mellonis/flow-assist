@@ -9,7 +9,7 @@ import { CANNOT_ASK_DECLINE, READ_ONLY_TASK_DECLINE, confirmFor, parkedAt } from
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
-import { llmOpts, withModel } from './llm-endpoint.js';
+import { answerCeiling, llmOpts, withModel } from './llm-endpoint.js';
 import { retryClock, retryLabel, type RetryInfo } from './llm-retry.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
@@ -143,6 +143,15 @@ export function subagentPrompt(task: string): string {
   return `${WORKER_PROMPT}The person's task: ${task}`;
 }
 
+// The ceiling this conversation's answer may take (`answerCeiling`): its own model's
+// entry in the catalogue when the person gave one, else the room that model's window
+// leaves after what the last measurement said was already sent. A conversation that has
+// measured nothing yet sends no `inputTokens` and gets the whole window's room.
+export function answerCeilingFor(c: Conversation, ai: Record<string, any>): number {
+  const inputTokens = c.usage?.promptTokens;
+  return answerCeiling(ai, { model: c.model, ...(inputTokens ? { inputTokens } : {}) });
+}
+
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
 // an interactive `!!command`, "look at what it printed") — drawn as the host's,
 // never kept in ↑/↓.
@@ -274,6 +283,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   try {
     const chatResult = await c.deps.chatLLM(wire, {
       ...withModel(llmOpts(ai), c.model),
+      // The ceiling this answer may take, over the one `llmOpts` resolved without a
+      // model or a measurement to go on.
+      maxTokens: answerCeilingFor(c, ai),
       signal: abort.signal,
       // A request that failed for a reason that passes waits to be made again: a log
       // line, and on a session's status line the countdown.
@@ -813,7 +825,7 @@ export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.paren
 // asked, and the summary folded under it.
 export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], signal: AbortSignal): ReturnType<typeof compactConversation> {
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
-  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
+  const result = await c.deps.compact(history, { ...withModel(llmOpts(ai), c.model), maxTokens: answerCeilingFor(c, ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   // The skills the history loaded are named after the summary: their text goes with it. The
   // person's loads are read from the kept history, where their mark is (the model's view drops it).

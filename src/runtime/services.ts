@@ -14,7 +14,7 @@ import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import { toolLoadingMode } from '../assistant/tool-loading.js';
 import { toolResultCapFromConfig } from '../assistant/tool-result-cap.js';
 import { imageLimits } from '../assistant/images.js';
-import { llmOpts } from '../assistant/llm-endpoint.js';
+import { answerCeiling, llmOpts } from '../assistant/llm-endpoint.js';
 import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
 import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
 import type { PluginRepo } from '../loader/repo.js';
@@ -240,6 +240,10 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
       maxRounds: maxRoundsOf(config.ai),
       maxTurnTokens: maxTurnTokensOf(config.ai),
       ...llmOpts(config.ai),
+      // A caller that names a model gets that model's own ceiling (`answerCeiling`): its
+      // catalogue entry, else the room its window leaves. The caller's own `maxTokens`,
+      // when it has one, wins below — a turn knows what it has already sent.
+      maxTokens: answerCeiling(config.ai, { model: typeof opts?.model === 'string' ? opts.model : undefined }),
       ...opts,
       logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun,
     }),

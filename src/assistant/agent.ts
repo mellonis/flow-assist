@@ -384,6 +384,9 @@ function clip(s: unknown, n = 6000): string {
 // accumulated list.
 // Base URLs that refused `stream_options` — not asked again in this process.
 const noUsage = new Set<string>();
+// Base URLs that refused `max_tokens` by name — not asked again in this process. A
+// provider may know only `max_completion_tokens`, or no ceiling at all.
+const noMaxTokens = new Set<string>();
 
 // A message as the OpenAI wire takes it: the Anthropic round's kept blocks are not an
 // API field, and a strict server refuses a field it does not know.
@@ -471,6 +474,7 @@ type RoundOpts = {
   model?: string;
   token?: string;
   tokenEnv?: string;
+  maxTokens?: number;
   tools?: ToolDef[];
   onDelta?: (d: string) => void;
   onReasoning?: (d: string) => void;
@@ -489,6 +493,7 @@ async function openAiRound(
     model,
     token,
     tools,
+    maxTokens,
     onDelta = () => {},
     onReasoning = () => {},
     onToolCalls = () => {},
@@ -501,30 +506,37 @@ async function openAiRound(
   // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
   // refusal that NAMES the field is retried once without it, and that base URL is not
   // asked again. Usage is a nicety; a chat that stops working over it is not.
-  const post = (withUsage: boolean) => {
+  //
+  // The ceiling on one answer goes the same way, as `max_tokens`: a server that answers
+  // 400 naming it is asked once without it, and not with it again in this process.
+  const post = (withUsage: boolean, withCeiling: boolean) => {
     const url = `${baseUrl}/chat/completions`;
     const init: RequestInit = {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withCeiling ? { max_tokens: maxTokens } : {}), ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
     };
     return reach(() => fetch(url, init), signal);
   };
-  const askUsage = !noUsage.has(String(baseUrl));
-  let res = await post(askUsage);
+  let askUsage = !noUsage.has(String(baseUrl));
+  let askCeiling = typeof maxTokens === 'number' && !noMaxTokens.has(String(baseUrl));
+  let res = await post(askUsage, askCeiling);
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
+    let body = await res.text().catch(() => '');
     if (askUsage && res.status === 400 && /stream_options|include_usage/i.test(body)) {
       noUsage.add(String(baseUrl));
-      res = await post(false);
-      if (!res.ok) {
-        const again = await res.text().catch(() => '');
-        throw failedRequest(res, again, { model });
-      }
-    } else {
-      throw failedRequest(res, body, { model });
+      askUsage = false;
+      res = await post(askUsage, askCeiling);
+      if (!res.ok) body = await res.text().catch(() => '');
     }
+    if (askCeiling && res.status === 400 && /max_tokens|max_completion_tokens/i.test(body)) {
+      noMaxTokens.add(String(baseUrl));
+      askCeiling = false;
+      res = await post(askUsage, askCeiling);
+      if (!res.ok) body = await res.text().catch(() => '');
+    }
+    if (!res.ok) throw failedRequest(res, body, { model });
   }
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
@@ -1390,16 +1402,28 @@ export async function compactConversation(
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
     const url = `${baseUrl}/chat/completions`;
-    const init: RequestInit = {
-      method: 'POST',
-      signal,
-      headers: LLM_HEADERS(token as string),
-      body: JSON.stringify({ model, messages: sent }),
+    // The ceiling on the handoff, as the chat's own requests carry it — and a provider
+    // that refuses the field by name gets the request once without it, remembered for
+    // this process alongside the chat's (`noMaxTokens`).
+    const post = (withCeiling: boolean) => {
+      const init: RequestInit = {
+        method: 'POST',
+        signal,
+        headers: LLM_HEADERS(token as string),
+        body: JSON.stringify({ model, messages: sent, ...(withCeiling ? { max_tokens: maxTokens } : {}) }),
+      };
+      return reach(() => fetch(url, init), signal);
     };
-    const res = await reach(() => fetch(url, init), signal);
+    const askCeiling = typeof maxTokens === 'number' && !noMaxTokens.has(String(baseUrl));
+    let res = await post(askCeiling);
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw failedRequest(res, body, { model });
+      let body = await res.text().catch(() => '');
+      if (askCeiling && res.status === 400 && /max_tokens|max_completion_tokens/i.test(body)) {
+        noMaxTokens.add(String(baseUrl));
+        res = await post(false);
+        if (!res.ok) body = await res.text().catch(() => '');
+      }
+      if (!res.ok) throw failedRequest(res, body, { model });
     }
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data?.choices?.[0]?.message?.content ?? '';
