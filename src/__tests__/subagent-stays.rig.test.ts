@@ -166,6 +166,24 @@ test('the system prompt of every turn carries the original task, never a later m
   expect(rig.sent(-1).at(-1)).toEqual({ role: 'user', content: 'something quite different' });
 });
 
+test('a message sent to a resting subagent is the person\'s own words, unframed', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'plain');
+  sub.script([{ text: 'resting' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const child = scheduled(rig, spec('plain', 'plain'));
+  await rig.until(() => child.idle);
+  await quiet(rig);
+  child.receive('something quite different');
+  await rig.until(() => sub.requests.length === 2);
+  await rig.until(() => child.idle);
+  // A later turn of a subagent is not a queued message: the wire carries the person's text
+  // and nothing around it — neither steering nor previous-turn wording.
+  const wire = sub.requests[1]!.messages.filter((m) => m.role === 'user').at(-1)!;
+  expect(wire).toEqual({ role: 'user', content: 'something quite different' });
+  expect(String(wire.content)).not.toContain('Written while');
+});
+
 test('an idle subagent keeps its session from parking, and reads as the session does, not as work; one with a task running below it reads working', async () => {
   const model = new ScriptedModel();
   subScript(model, 'rest').script([{ text: 'resting' }]);
@@ -384,6 +402,10 @@ test('a message to a working subagent is queued and reaches it at its next step'
   expect(child.queue).toEqual([]);
   expect(sub.requests).toHaveLength(2);
   expect(JSON.stringify(sub.requests[1]!.messages)).toContain('also mind this');
+  // Mid-turn: framed as steered in, never with the drain's wording.
+  const mid = sub.requests[1]!.messages.filter((m) => m.role === 'user').at(-1)!;
+  expect(String(mid.content)).toContain('steered in mid-turn');
+  expect(String(mid.content)).not.toContain('previous turn');
   // It reached the running turn: no turn of its own followed.
   expect(lines(rig).map((e) => e.event)).toEqual(['start', 'answered']);
 });
@@ -408,6 +430,15 @@ test('a message that waits past the turn\'s last step starts the next turn throu
   expect(child.lastAnswer()).toBe('then this');
   expect(lines(rig).map((e) => e.event)).toEqual(['start', 'answered', 'answered']);
   expect(bgRows(rig.conv)).toEqual(['late finished:\nonly']);
+  // The message that sat in its queue went out as a turn of its own, framed as written
+  // while the previous turn ran; its row and its journal keep it as typed.
+  const wire = sub.requests[1]!.messages.filter((m) => m.role === 'user').at(-1)!;
+  expect(String(wire.content).startsWith('afterwards\n\n')).toBe(true);
+  expect(String(wire.content)).toContain('previous turn was running');
+  expect(String(wire.content)).not.toContain('steered in mid-turn');
+  expect(child.rows().filter((m) => m.role === 'user').map((m) => m.content)).toContain('afterwards');
+  expect(rig.subJournal('late').filter((e) => e.t === 'row' && e.role === 'user' && e.text === 'afterwards')).toHaveLength(1);
+  expect(JSON.stringify(rig.subJournal('late'))).not.toContain('previous turn');
 });
 
 test('a message that waits past the turn\'s last step is admitted only after that turn has settled: its answer is logged and its phase is back to idle first', async () => {

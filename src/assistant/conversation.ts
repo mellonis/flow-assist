@@ -1282,7 +1282,9 @@ export class Conversation {
     // waited landed as rows just ahead of it; with no message, a follow-up on the inbox.
     const afterAnswer = (ok: boolean): void => {
       const next = child.takeQueued();
-      if (next !== null) child.resume?.(next, { readResult: child.landInboxAhead() });
+      // A message that sat in its queue reaches it framed as written while the turn that just
+      // ended ran (`frameSteered`, previous-turn variant); rows and journal keep the text.
+      if (next !== null) child.resume?.(next, { readResult: child.landInboxAhead(), options: { steered: true } });
       else if (!child.takeInbox(ok ? 'turn' : 'rows', true)) child.rest();
     };
     // The answer of a turn goes to `home` as this child's result: the first answer, and a
@@ -1781,7 +1783,9 @@ export class Conversation {
         if (!next) { this.takeInbox(); return; }
         this.syncQueue();
         if (!this.confirm && !this.question) this.landInbox();
-        void this.send(next.text);
+        // The model reads it framed as written while the turn that just ended ran
+        // (`frameSteered`, previous-turn variant); the row and the journal keep the text.
+        void this.send(next.text, { steered: true });
       }, 0);
     } else if (ok && !atLimit) setTimeout(() => this.takeInbox(), 0);
     else this.takeInbox('rows');

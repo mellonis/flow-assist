@@ -80,7 +80,11 @@ test('Enter while an answer is streaming queues the message, and it is sent when
 
   // The queued message went out on its own, after the first turn — in order.
   expect(model.requests).toHaveLength(2);
-  expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'and is CI green' });
+  // Framed for the model as written while the previous turn ran; the row kept it as typed.
+  const wire = model.requests[1]!.messages.at(-1) as { role: string; content: string };
+  expect(wire.role).toBe('user');
+  expect(wire.content.startsWith('and is CI green\n\n')).toBe(true);
+  expect(wire.content).toContain('previous turn was running');
   expect(ui.backend.lastFrame).toContain('CI is green.');
   expect(ui.backend.lastFrame).not.toMatch(/queued/);
   ui.app.unmount();

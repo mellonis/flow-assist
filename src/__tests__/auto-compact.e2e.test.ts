@@ -160,5 +160,8 @@ test('a message queued in the crossing turn is delivered first, then the compact
   const after = (model.requests[4] as { messages: { role: string; content: unknown }[] }).messages;
   expect(after.map((m) => m.role)).toEqual(['system', 'user', 'user']);
   expect(String(after[1]!.content)).toContain('what time is it?');
-  expect(after[2]).toEqual({ role: 'user', content: 'in UTC please' });
+  // The delivered message goes after the question, framed as steered in mid-turn.
+  expect(after[2]!.role).toBe('user');
+  expect(String(after[2]!.content).startsWith('in UTC please\n\n')).toBe(true);
+  expect(String(after[2]!.content)).toContain('steered in mid-turn');
 });

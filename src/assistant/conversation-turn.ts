@@ -28,7 +28,7 @@ import { SKILL_TOOL } from './skill-file.js';
 import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
-import { answerAt, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
+import { answerAt, frameSteered, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -196,9 +196,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // The images the text names, in the order it names them. A background result
   // is the model's writing and carries none.
   const images = opts.fromInbox || opts.hostAsk || !shape.images ? [] : imagesInText(q, c.images);
-  // A follow-up turn for the inbox sends the item framed (`frameItem`); the screen row and
-  // the journal row below keep its plain text.
-  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(opts.skill ? { skill: opts.skill.id } : {}), ...(opts.preloaded?.length ? { skills: [...opts.preloaded] } : {}), ...(images.length ? { images } : {}) };
+  // A follow-up turn for the inbox sends the item framed (`frameItem`); a queued message going
+  // out as its own turn after the turn it was written during is framed as written while that
+  // turn ran (`frameSteered`). The screen row and the journal row below keep its plain text.
+  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.steered ? frameSteered(q, true) : opts.fromInbox ? opts.framed ?? q : q, ...(opts.skill ? { skill: opts.skill.id } : {}), ...(opts.preloaded?.length ? { skills: [...opts.preloaded] } : {}), ...(images.length ? { images } : {}) };
   apiMsgs.push(asked);
   // What goes to the provider: every image of the history as a part — read now,
   // not kept in the history, which holds its ref.
@@ -334,7 +335,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
               // In the journal as the person's message, where it reached the model.
               c.journalTo(journalId, { t: 'row', role: 'user', text: m.text, midTurn: true });
             }
-            delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: m.text })));
+            // The model reads each framed as steered in; the row and the journal keep it as typed.
+            delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: frameSteered(m.text, false) })));
             c.setRows((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
             c.deps.notify();
           }

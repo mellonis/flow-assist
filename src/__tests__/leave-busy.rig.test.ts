@@ -64,7 +64,8 @@ test('a queued message goes out after a left turn ends; the park comes only afte
   await rig.until(() => a.closed, 10_000);
   expect(a.closeReason).toBe('park');
   expect(model.requests.length).toBe(3);
-  expect(sub.requests.map((r) => r.messages.filter((m) => m.role === 'user').map((m) => String(m.content)).at(-1))).toContain('and one more thing');
+  const lastUser = (r: (typeof sub.requests)[number]) => r.messages.filter((m) => m.role === 'user').map((m) => String(m.content)).at(-1) ?? '';
+  expect(sub.requests.map(lastUser).some((t) => t.startsWith('and one more thing\n\n') && t.includes('previous turn was running'))).toBe(true);
   expect(contents(rig, a)).toContain('Answer to the queued one.');
 });
 

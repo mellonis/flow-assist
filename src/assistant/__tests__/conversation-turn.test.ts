@@ -62,7 +62,11 @@ test('while busy a send is refused; a queued message goes out after the turn, fr
   await first;
   expect(asked).toEqual(['one']);
   await new Promise((r) => setTimeout(r, 5));
-  expect(asked).toEqual(['one', 'two']);
+  // The drain turn's message is framed as written while the previous turn ran.
+  expect(asked).toHaveLength(2);
+  expect(asked[1]!.startsWith('two\n\n')).toBe(true);
+  expect(asked[1]).toContain('previous turn was running');
+  expect(asked[1]).not.toContain('steered in mid-turn');
 });
 
 test('a stopped turn closes in the model\'s voice and tells the chat to take the queue back', async () => {
@@ -145,7 +149,10 @@ test('a queued message carries the inbox: its rows land just ahead of it, and no
   release();
   await turn;
   await new Promise((r) => setTimeout(r, 20));
-  expect(asked).toEqual(['go', 'next']);
+  expect(asked).toHaveLength(2);
+  expect(asked[0]).toBe('go');
+  expect(asked[1]!.startsWith('next\n\n')).toBe(true);
+  expect(asked[1]).toContain('previous turn was running');
   const roles = c.rows().map((m) => m.role);
   expect(roles.indexOf('bg')).toBe(roles.lastIndexOf('user') - 1);
   c.clearInbox();
