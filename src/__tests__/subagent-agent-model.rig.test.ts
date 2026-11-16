@@ -153,6 +153,24 @@ test('a named call\'s answer says what the file decides: no demotion note, the f
   await childDone(rig);
 });
 
+test('a named agent with `writes: deny` is read-only whatever the call says', async () => {
+  const { model, child, rig } = rigFor('GO-DD');
+  project(rig, 'job', doc('writes: deny\n', 'GO-DD go'));
+  child.script([{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ hold: true }, { text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'allow' });
+  // The file's `deny` is what the child gets and the call grants nothing: its writes are
+  // declined by its policy — no y/n is offered, the file is not made, and the decline is
+  // journaled as the background's.
+  expect(answer).not.toContain('may ask the person');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['always-no']);
+  expect(rig.conv.offered()).toBeNull();
+  expect(fs.existsSync(path.join(rig.root, 'denied.txt'))).toBe(false);
+  expect(rig.journal().some((e) => e.t === 'confirm' && e.answer === 'no' && e.by === 'background')).toBe(true);
+  child.release();
+  await childDone(rig);
+});
+
 test('a second start while the first runs is labeled job-2', async () => {
   const { model, child, rig } = rigFor('GO-C');
   project(rig, 'job', doc('', 'GO-C go'));
@@ -205,6 +223,15 @@ test('refusals are the tool\'s answer, worded for the model, and nothing starts'
   expect(await said({ agent: 'job' })).toBe('subagent: @job needs ticket, branch');
   expect(await said({ agent: 'job', args: { ticket: 'a', branch: 'b', nope: 'x' } })).toContain('@job has no parameter «nope»');
   expect(await said({ agent: 'loose', args: { ticket: 'a' } })).toBe('subagent: @loose is not trusted here — ask the person to start @loose once');
+  expect(child.requests).toHaveLength(0);
+  expect(rig.journal().filter((e) => e.t === 'task-start')).toHaveLength(0);
+});
+
+test('a named call with an unknown writes value is the tool\'s error and starts nothing', async () => {
+  const { model, child, rig } = rigFor('GO-EW');
+  project(rig, 'job', doc('', 'GO-EW go'));
+  const answer = await call(rig, model, { agent: 'job', writes: 'nope' });
+  expect(answer).toContain('is not one of allow, ask, deny');
   expect(child.requests).toHaveLength(0);
   expect(rig.journal().filter((e) => e.t === 'task-start')).toHaveLength(0);
 });

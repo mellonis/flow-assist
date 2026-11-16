@@ -490,7 +490,7 @@ a note says so at the start. A subagent or task the agent starts has the same gr
 your y/n on every write and command, `deny` makes a read-only run (write tools and
 run_command are declined), and `allow` runs each write the auto mode with `shell.autoRun`
 answers — never `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and
-says each one in the log. When the assistant starts the agent by name, the file's
+says each one in the log. Wherever the agent is started by name, the file's
 `writes` is what the work gets: its own `writes` argument does not move it. Only your
 file grants `allow`; a model asking for `allow` in a plain task is answered as `ask`.
 

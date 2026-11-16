@@ -1416,7 +1416,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - a background task with `writes: 'deny'`, or one where nobody can answer — declines:
     its conversation has the policy
     `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label. A child with `writes` other than `'deny'` (`ChildSpec.writes`,
-    and every subagent the person starts) has the policy `ask` (`allow-writes` when it
+    and a prompt the person starts) has the policy `ask` (`allow-writes` when it
     is `'allow'`), where the host has a person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
@@ -3640,7 +3640,8 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   (Esc, an empty answer or a dismissed question gives the typed line back), the trust
   question for a project file (below), then `begin` — the same start the prompt form
   uses. The prompt is `fillPrompt(agent, values)`; the label is the agent's id made
-  unique among the live children (`uniqueLabel`).
+  unique among the live children (`uniqueLabel`); the child's writes are the agent
+  file's own `writes:`, omitted — `'ask'`.
 - **Agent files** (`src/assistant/agent-file.ts` the reader, `agent-find.ts` discovery,
   `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
   docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two

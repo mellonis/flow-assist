@@ -2154,11 +2154,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (!slots) { setError('/subagent: subagents are unavailable here'); return; }
                 // The start, for a prompt and for an agent file: the parent's own journal takes
                 // the child's lines (its session is made here when nobody has spoken,
-                // `keepPersonWork`). A subagent the person starts may write under each
-                // write's y/n, and the `--auto` flag or the agent file's capped mode sets
-                // its auto mode over the inherited one before the schedule's timer lets
-                // its first turn go.
-                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head' | 'model'>, mode: AutoMode | null, notes: string): boolean => {
+                // `keepPersonWork`). What the child may change is the agent file's own
+                // `writes` (omitted — `ask`); a plain prompt starts one that may write
+                // under each write's y/n. The `--auto` flag or the agent file's capped mode
+                // sets its auto mode over the inherited one before the schedule's timer
+                // lets its first turn go.
+                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head' | 'model' | 'writes'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
                     { kind: 'subagent', by: 'person', writes: 'ask', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
@@ -2210,7 +2211,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     const loaded = asks ? preloadSkills(agent.skills, id, skillsFound) : early;
                     if (!loaded.ok) { setError(`/subagent: ${loaded.message}`); return; }
                     // The file is recorded once the start took place: a refused start trusts nothing.
-                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), ...(loaded.skills.length ? { head: fillPrompt(agent, values) } : {}), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}), ...(started.model ? { model: started.model } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills), started.note ?? ''].filter(Boolean).join('\n'))) recordAgentStart(agent);
+                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), ...(loaded.skills.length ? { head: fillPrompt(agent, values) } : {}), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}), ...(started.model ? { model: started.model } : {}), writes: agent.writes ?? 'ask' }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills), started.note ?? ''].filter(Boolean).join('\n'))) recordAgentStart(agent);
                   };
                   if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the

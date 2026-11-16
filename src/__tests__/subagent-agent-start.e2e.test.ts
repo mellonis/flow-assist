@@ -251,6 +251,36 @@ test('the child\'s auto mode is the lower of the file\'s auto and agents.maxAuto
   expect(await modeOf(null, 'all')).toEqual(['ask', 'ask']);
 });
 
+// ── the writes of the file
+test('the agent file\'s writes are what a start of yours gets: a writes: deny child is read-only, a writes: allow one runs its write', async () => {
+  const { agents, child, ui, root, dir } = await chat('WRITS-P');
+  write(path.join(agents, 'denier.md'), doc('writes: deny\n', 'WRITS-P deny'));
+  write(path.join(agents, 'allower.md'), doc('writes: allow\n', 'WRITS-P allow'));
+  const journalAll = () => listTree(dir).filter((n) => n.endsWith('.log.jsonl')).flatMap((n) => (readJournal(path.join(dir, n)) ?? []) as JournalEvent[]);
+  const confirms = () => journalAll().filter((e) => e.t === 'confirm');
+  child.script(
+    [{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }], [{ text: 'deny done' }],
+    [{ tool: 'run_command', args: { command: 'echo y > made.txt' } }], [{ text: 'allow done' }],
+  );
+  // A read-only child: its write is declined by the policy — no y/n is offered, the file
+  // is not made, and the decline is journaled as the background's.
+  await ask(ui, '/subagent @denier');
+  await settleUntil(() => child.requests.length >= 2);
+  await settleUntil(() => frameOf(ui).includes('deny done'));
+  expect(askUp(frameOf(ui))).toBe(false);
+  expect(fs.existsSync(path.join(root, 'denied.txt'))).toBe(false);
+  expect(confirms().filter((e) => e.answer === 'no' && e.by === 'background').length).toBe(1);
+  // An allow child: the write runs with no y/n. (What an allow run says in the log is
+  // pinned at the rig; here `L` would type into the chat's field.)
+  await ask(ui, '/subagent @allower');
+  await settleUntil(() => child.requests.length >= 4);
+  await settleUntil(() => fs.existsSync(path.join(root, 'made.txt')));
+  expect(askUp(frameOf(ui))).toBe(false);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  expect(confirms().length).toBe(1);
+  ui.app.unmount();
+});
+
 // ── the tools
 const group = (g: string) => `tools: ${g}\n`;
 

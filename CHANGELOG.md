@@ -10,7 +10,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   each write and command, `deny` declines each one, `allow` runs each write the auto mode
   with `shell.autoRun` answers (never `config_set`, an unlisted `web_fetch` or a plugin's
   `run_command`) and says each one in the log. For a named agent the file's `writes` is
-  what the work gets — the `subagent` call's own `writes` argument does not move it. A
+  what the work gets wherever the agent is started (the model's `subagent` call or your
+  own `/subagent @`) — the call's own `writes` argument does not move it. A
   `writes:` value outside the three fails the file, as any other malformed header line.
 
 - **`subagent` takes `writes`, and a bare task is a worker.** A background task writes
