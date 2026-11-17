@@ -683,9 +683,10 @@ there is no `/fullscreen`.
     comes back to the end follows the answer from there — the list stops again only
     if the answer's first row is still in view then and later crosses the top. The
     row is the round streaming now (`liveMark`) or the answer's `first` row — never a
-    step's, and never one from before the person's last `user`/`shell` message, so a
-    `!command`'s output does not stop on an older answer; the turn's steps and trail
-    above it scroll away with the question. A held round that turns out to carry a
+    step's, and never one from before the turn's question: the person's last
+    `user`/`shell` message (a `!command`'s output does not stop on an older answer) or
+    a landed result's `bg` row (a follow-up turn never stops above the result it
+    follows); the turn's steps and trail above it scroll away with the question. A held round that turns out to carry a
     call folds into its step row under the held position, and the box keeps that
     position through the shrink, so the next round's answer grows under it (a test
     holds this: it rests on flowtty's box keeping its offset). It counts only for a
