@@ -158,6 +158,33 @@ test('answered question rows carry the ask ground', async () => {
   again.unmount();
 });
 
+// A question or an answer wider than the column wraps: every row of the pair keeps the
+// band, out to the column's edge — not only the first row of each.
+test('a wrapped question paints the ask ground on every continuation row', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      theme: { modals: { chat } },
+      messages: [{ role: 'ask', content: 'q'.repeat(160), answer: 'a'.repeat(160) }],
+    }),
+    backend,
+  );
+  const lines = backend.lastFrame.split('\n');
+  const rowsOf = (ch: string) => lines.map((row, i) => ({ row, i })).filter(({ row }) => row.includes(ch.repeat(3)));
+  const pair = [...rowsOf('q'), ...rowsOf('a')];
+  const q = rowsOf('q').length;
+  expect(q).toBeGreaterThan(1);
+  expect(rowsOf('a').length).toBeGreaterThan(1);
+  for (const { row, i } of pair) {
+    const border = row.lastIndexOf('│');
+    const right = border >= 0 ? border - 2 : row.trimEnd().length - 1;
+    expect(backend.lastBuffer!.get(right, i).style.bg).toBe(chat.askBg);
+  }
+  handle.unmount();
+});
+
 // The gutter marker on a command block's first row: dim/pulsing while it runs, then
 // coloured for how it ended — never a code to decode, the way the tail beside it reads.
 test("a command block's gutter marker is dim while it runs, ok on exit 0, the error colour otherwise", async () => {

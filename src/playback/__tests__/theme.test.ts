@@ -129,6 +129,15 @@ test('the ask ground lands in every palette', () => {
     expect(chat.askBg).toBeString();
     expect(chat.askInk).toBeString();
   }
+  // A quiet tint, not a second ground or a second ink: on the schemes that ship colours
+  // of their own it tells apart from the chat's `bg`, from the person's bubble, and the
+  // ink from the ground it is read on.
+  for (const scheme of ['light', 'dark'] as const) {
+    const chat = modalsOf(resolveAppTheme(undefined, [], {}, scheme)).chat;
+    expect(chat.askBg).not.toBe(chat.bg);
+    expect(chat.askBg).not.toBe(chat.userBg);
+    expect(chat.askInk).not.toBe(chat.askBg);
+  }
   // Either token is the person's like every other chat colour: the override reaches it
   // through the same palette path, with no value baked into the render.
   const mine = resolveAppTheme(undefined, [], { plugins: { chat: { colors: { askBg: 'red', askInk: 'white' } } } }, 'light');

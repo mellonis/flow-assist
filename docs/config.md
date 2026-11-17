@@ -30,7 +30,9 @@ assistant may set or save".
   no mark for it. The chat's own colours live at `theme.modals.chat`: `accent`, `shell`,
   `assistantAccent`, `userBg` (the person's messages), `bgAccent`/`bgBg` (a background
   result), `askBg`/`askInk` (a kept question and the answer it got), `fieldBg`, `warn`,
-  `ok` and `idleBorder`. The same keys are what `config.plugins.chat.colors` overrides.
+  `ok` and `idleBorder`. A `theme` record cannot set a per-modal token — a value at
+  `theme.modals.chat.<key>` is inert (it nests one level down); `config.plugins.chat.colors`
+  is the path.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

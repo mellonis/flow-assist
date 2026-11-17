@@ -327,7 +327,8 @@ there is no `/fullscreen`.
   pair reads as one band in the transcript; a dismissed answer keeps the ground and dims
   its ink. Colours come from `theme.modals.chat` (`accent`, `assistantAccent`, `userBg`,
   `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`, `askBg`, `askInk`) and are overridable via
-  `config.plugins.assistant.colors`.
+  `config.plugins.chat.colors` — the resolver merges `config.plugins[<modal name>].colors`,
+  and this modal is named `chat`.
 - A marker is ONE narrow-width code point: flowtty's grid measures display width per
   grapheme cluster and reads an East-Asian-ambiguous glyph (`∮`, `≈`, most of
   Mathematical Operators) as one cell, so it shifts the row in a terminal that draws
