@@ -1054,9 +1054,13 @@ up to the `shell.roots` entry holding it, outermost first and the nearest last, 
 nearer file wins where two disagree. They go into its instructions as a section of
 their own, each file under its path, read again whenever the directory moves; a line
 in the chat says which files were picked up (`Project instructions: ~/src/app/
-AGENTS.md`). A file over 32 KiB is cut at a line, with a note saying how many lines
-were left out; there is no cap on the whole, so five nested files cost up to five
-times that. The files are quoted as the repository's words: they never override your
+AGENTS.md`). A file over `project.instructionsCap` (32 768 bytes when unset) is cut
+at a line, with a note saying how many lines were left out; set it to `0` and the
+files are read whole, with no cut at all. There is no cap on the whole, so five
+nested files cost up to five times that. When the chain grows to a large share of
+the model's context window, the chat says so and points at `/context`, which shows
+its share under `instructions`. The files are quoted as the repository's words:
+they never override your
 requests. Nothing outside `shell.roots` is read — with no roots set, nothing is. A
 background task and a one-shot `flow-assist "<prompt>"` read them the same way for
 their own directory.
