@@ -691,6 +691,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             now: Date.now(),
             palette: ((host.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
             onViewFail,
+            // A question waits: the run that led into it is drawn unfolded and lit
+            // (a display flag — the folds are not touched). `conv.question` is the
+            // live value, as it is for the field-place block.
+            askPending: !!convRef.current?.question,
           });
           // Put a row at the top of the conversation, once the rows have changed —
           // under the pin (`pin: true`) so an opened block's own first row is never

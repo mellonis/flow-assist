@@ -835,6 +835,17 @@ there is no `/fullscreen`.
     are measured the same way. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
     `n`), a step's own calls included, so an id means the same in both modes.
+  - **A waiting question lights the run that led into it.** While `conv.question` is
+    pending — one question or a wizard, whatever the block's shape — the turn's LAST
+    run, the narration the `ask_user` call follows, draws unfolded and at full ink: its
+    steps in full and no `quiet`, so the question is read against what brought it on.
+    The turn's older runs, its reasoning blocks and its ✎ diffs keep the look they had.
+    The flag is `RowOpts.askPending`, set while the question waits and dropped the moment
+    it is answered (the same predicate the field-place block uses) — DISPLAY only, not
+    fold state: `folds.ts` is untouched and the run keeps its `foldId`, so a click or
+    `^o` still decides the folds. Only the list's last message may draw this way, and
+    the bit is in the `rowCache` key: the message object does not change when a question
+    arrives.
   - **`open` draws every step in full, in the normal colour** — steps do not fold, and
     each step's calls are a trail line under it. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
     a conversation starts, `/notes [step|open]` moves it, nothing is saved, and

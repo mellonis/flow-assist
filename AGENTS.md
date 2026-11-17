@@ -582,8 +582,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
   (a category layout would move a round's text above every diff of the turn).
   A round's text never moves: while it streams it is dim under a live mark;
   the moment a tool-call fragment arrives it is a step, in its run. `step` (the
-  default) folds each run to ONE dim row; `open` draws every step in full. The
-  `Next:` token is never drawn; its sentence is the step. The reasoning is a
+  default) folds each run to ONE dim row; `open` draws every step in full. While a
+  question waits, the run that led into it draws in full at full ink (a display
+  flag, not fold state — `folds.ts` untouched). The `Next:` token is never drawn;
+  its sentence is the step. The reasoning is a
   block of its own, where the model thought it. Round bookkeeping lives
   outside the state updaters. A round cut off keeps its text where it was
   drawn. Under the answer only the quiet line stays: how long, what it cost

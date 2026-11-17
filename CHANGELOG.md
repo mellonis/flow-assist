@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The narration above a waiting question reads in full.** While `ask_user` waits on an
+  answer — one question or a wizard — the run of steps that led into the call draws
+  unfolded and at full ink, so the question is read against what brought it on; the
+  turn's older runs, its thoughts and its ✎ diffs keep the look they had. The moment the
+  question is answered everything folds again. It is a display condition, not fold
+  state: `^o` and a click still decide the folds as they did.
+
 - **Several questions are walked page by page and answered at a submit screen.** When
   the assistant asks more than one question in a call, the block shows one page per
   question and a `Submit` page last, with a one-row tab strip naming them (a tick marks

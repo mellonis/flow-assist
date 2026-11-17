@@ -807,6 +807,67 @@ test("a folded run's ✗ carries the trail's tone: warn when the same tool recov
   expect(markOf([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).toBe('error');
 });
 
+// ─── The lead-in above a pending question (ticket 5) ─────────────────────────
+// The narration that led into an `ask_user` call is the context the question is read
+// against, so while the question waits its last run draws unfolded and at full ink. A
+// display condition only: the fold state is untouched, and the moment the question is
+// answered the run folds again with the turn's older runs.
+const LEAD_PARTS = [
+  { kind: 'text', text: 'Read the log first.' },
+  { kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] },
+  { kind: 'reasoning', text: 'Weighing the branch.' },
+  { kind: 'text', text: 'The branch is unclear.' },
+  // A round that wrote nothing before the ask: its calls are a segment of their own.
+  { kind: 'text', text: '' },
+  { kind: 'tools', runs: [{ name: 'ask_user', outcome: 'ok' }] },
+];
+const leadMsg = { role: 'assistant', content: '', parts: LEAD_PARTS };
+const leadOpts = (askPending?: boolean): RowOpts => ({
+  wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o',
+  renderers: {}, now: 0, palette: {}, ...(askPending ? { askPending } : {}),
+});
+
+test('the run before a pending question draws open and lit', async () => {
+  // Folded: two chrome rows — one per run — and the thought between them.
+  const folded = chatRows([leadMsg] as never, leadOpts());
+  const foldedText = folded.map(rowText);
+  expect(foldedText).toContain('▸ Read the log first.');
+  expect(foldedText).toContain('▸ The branch is unclear.');
+  expect(folded.some((r) => r.reasonHeader)).toBe(true);
+  expect(folded.some((r) => r.reason)).toBe(false);
+
+  // The question waits: the last run — the one the ask follows — draws each step in
+  // full at full ink. The older run and the thought keep their folded look.
+  const lit = chatRows([leadMsg] as never, leadOpts(true));
+  const litText = lit.map(rowText);
+  expect(litText).toContain('The branch is unclear.');
+  const lead = lit.find((r) => rowText(r) === 'The branch is unclear.');
+  expect(lead?.quiet).not.toBe(true);
+  expect(lead?.step).not.toBe(true);
+  expect(litText).toContain('▸ Read the log first.');
+  expect(lit.some((r) => r.reasonHeader)).toBe(true);
+  expect(lit.some((r) => r.reason)).toBe(false);
+
+  // On the screen, one question or a wizard alike (the block takes the field's place
+  // and says nothing about the rows): the lead-in's rows are at full ink, the folded
+  // run beside them is dim.
+  const backend = new TestBackend(120, 30);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 120, height: 30, messages: [leadMsg],
+    pendingQuestion: askStart([{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }]),
+  } as never), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean } } } }).lastBuffer;
+  const dimAt = (text: string) => {
+    const y = lines.findIndex((l) => l.includes(text));
+    return y < 0 ? null : grid.get(lines[y]!.indexOf(text), y).style.dim === true;
+  };
+  expect(dimAt('The branch is unclear.')).toBe(false);
+  expect(dimAt('▸ Read the log first.')).toBe(true);
+  expect(dimAt('▸ thought')).toBe(true);
+  handle.unmount();
+});
+
 test('the chat title that fits by clusters is not cut', async () => {
   // 46 cells by clusters, 106 summed per code point; the title has 72.
   const subject = FAMILY.repeat(15);

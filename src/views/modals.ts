@@ -591,6 +591,12 @@ export interface RowOpts {
   now: number;
   palette: Record<string, string | undefined>;
   onViewFail?: (kind: string, why: string) => void;
+  // A question waits for an answer (`conv.question`): the last run of the turn — the
+  // narration the `ask_user` call follows — draws unfolded and at full ink, so the
+  // question is read against what led into it. A display condition, not fold state
+  // (`src/assistant/folds.ts` is not touched): the run keeps its fold id, and the
+  // moment the question is answered the rows are built again without the flag.
+  askPending?: boolean;
 }
 
 function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
@@ -626,7 +632,7 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // `viewRevision()`: a renderer's late answer (views.ts) — a done view's rows are
   // otherwise laid out once, and its placeholder would stay. Only a message that has
   // views reads it: every other message would gain a cache entry per late answer.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending ? 1 : 0}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
@@ -822,6 +828,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         }
       };
       const segs = turnSegments(parts);
+      // The run a waiting question is read against: the last one of the turn's parts,
+      // which the `ask_user` call follows and lands in (the call itself is not a part
+      // of the turn — the question's block is). Only the message being written can be
+      // the one asking, so only the list's last message may draw it this way.
+      const leadRun = o.askPending === true && last ? segs.reduce((n, s, i) => (s.kind === 'run' ? i : n), -1) : -1;
       for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'reasoning') {
           // Each thought is its own block where the model wrote it: folded in `step`,
@@ -855,7 +866,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           continue;
         }
         const id = foldId(at, 'steps', seg.n);
-        if (notes === 'step' && !isOpen(folds, id)) {
+        const lead = si === leadRun;
+        if (notes === 'step' && !isOpen(folds, id) && !lead) {
           // The run folded: ONE dim row where it began, saying the newest step and
           // how many there are. Chrome — the host's account of what was said. Its
           // marks say what happened inside without a click: `✗` a call failed or was
@@ -872,12 +884,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           rows.push({ role, step: true, fold: id, foldLine: true, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
-          // its rows folds the run again), the normal colour in `open`. Under each,
-          // the calls it made: in `step` a line per call, part of the run; in `open`
-          // the trail line the calls have anywhere else.
+          // its rows folds the run again), the normal colour in `open` — and, while a
+          // question waits, the normal colour for the run that led into it, which is
+          // the whole of what the question is read against. Under each, the calls it
+          // made: in `step` a line per call, part of the run; in `open` the trail line
+          // the calls have anywhere else.
           seg.steps.forEach((text, si) => {
             if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
-            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { quiet: true, fold: id } : {}));
+            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' && !lead ? { quiet: true, fold: id } : {}));
             const calls = seg.calls[si];
             if (!calls) return;
             if (notes === 'step') {
@@ -1338,7 +1352,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     () => chatRows(messages, { ...rowOpts, renderers, onViewFail: (kind, why) => onViewFailRef.current?.(kind, why) }),
     // The palette by its values: the theme object is updated in place. A renderer's
     // late answer bumps `viewRevision()` (views.ts) and changes nothing else.
-    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, renderers, liveSeconds, rowPaletteKey, viewRevision()],
+    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, rowOpts.askPending, renderers, liveSeconds, rowPaletteKey, viewRevision()],
   );
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
@@ -1969,7 +1983,7 @@ export function renderChatModal({
     // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and the
     // wheel are the pager's, and the conversation stays where it was left. With `/diff`
     // drawn they are the panel's body's.
-    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
+    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending: !!pendingQuestion }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
     // The pager, in the conversation's place: the block's rows at the conversation's
     // width, with a scroll of their own.
     pager
