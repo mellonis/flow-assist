@@ -44,10 +44,12 @@ const walking = (input: string, walk: TabWalk | null): walk is TabWalk => !!walk
 
 const named = (c: string, labels: Record<string, string> | undefined) => (labels?.[c] ? `${c} ${labels[c]}` : c);
 
+// A caret past either end of the line is the line's own end: the views are total
+// whatever the line's text did to the caret.
+const caretAt = (input: string, caret: number): number => Math.max(0, Math.min(input.length, caret));
+
 export function lineView(input: string, caret: number, walk: TabWalk | null, complete: Complete): LineView {
-  // A caret past either end is the line's own end: the view is total whatever the
-  // line's text did to the caret.
-  const at = Math.max(0, Math.min(input.length, caret));
+  const at = caretAt(input, caret);
   if (!input.trim()) return { caret: at, ghost: '', label: '', others: [] };
   if (walking(input, walk)) {
     // The candidates of the walk, taken from where it STARTED — from the line as it
@@ -194,10 +196,12 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 }
 
 // The line as drawn: the list's selection as the inline rest, or the inline view alone
-// while no list is open.
+// while no list is open. Both belong to the line's LAST word, so they hold only while
+// the caret is at the end: mid-line the rows, the ⏎/Tab take and the rest would all
+// target the wrong word, and the rest would be spliced in at the caret.
 export function lineViewWithList(input: string, caret: number, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
   const once = lastOnly(complete);
-  const list = openList(input, state, once);
-  const at = Math.max(0, Math.min(input.length, caret));
+  const at = caretAt(input, caret);
+  const list = at === input.length ? openList(input, state, once) : null;
   return list ? { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, caret, walk, once), list: null };
 }

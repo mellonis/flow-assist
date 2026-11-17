@@ -230,6 +230,19 @@ test('with a list open the line is drawn with the selected rest and the label, n
   expect(one.list).toBeNull();
 });
 
+test('the list and its ghost hold only while the caret is at the end of the line', () => {
+  // `c` has four candidates; the list belongs to the line's LAST word, so a caret
+  // moved into the middle of the line takes it away — the rows, the ⏎/Tab take and
+  // the inline rest would all target the wrong word there.
+  const st = newListState();
+  expect(openList('c', st, complete)?.total).toBe(4);
+  const mid = lineViewWithList('c', 0, null, st, complete);
+  expect(mid.list).toBeNull();
+  expect(mid.view).toMatchObject({ caret: 0, ghost: '' });
+  // Back at the end it is the same list again.
+  expect(lineViewWithList('c', 1, null, st, complete).list?.selected).toBe('cache');
+});
+
 test('a draw or a key runs the completer once for the line', () => {
   let calls = 0;
   const counted = (text: string): CompleteResult => { calls++; return many(1)(text); };

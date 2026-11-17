@@ -11,7 +11,7 @@
 
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
-import { editorReducer, nextGrapheme, type Backend } from '@flowtty/core';
+import { editorReducer, nextGrapheme, type Backend, type Key } from '@flowtty/core';
 import { Fragment, createContext, createElement as h, useContext, useEffect, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
@@ -938,9 +938,11 @@ export function renderApp(
       if (cmdline.current.open) {
         // The completion list, while two or more candidates match: ↑/↓ and ⇧⇥ move its
         // selection, ⇥ and ⏎ take it (⏎ never runs the line then), Esc closes the list
-        // and keeps the text. Ahead of the keys below, whose Esc closes the line and
-        // whose ↑/↓ walk the history — with no list open they are all theirs.
-        if (!key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
+        // and keeps the text. It belongs to the line's last word, so it holds keys only
+        // while the caret is at the end — as the chat's field. Ahead of the keys below,
+        // whose Esc closes the line and whose ↑/↓ walk the history — with no list open
+        // they are all theirs.
+        if (cmdline.current.caret === cmdline.current.input.length && !key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
           const step = listKey(cmdline.current.input, cmdline.current.list, { name, shift: !!key.shift }, completeLine);
           if (step.handled) {
             if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.caret = step.input.length; cmdline.current.walk = null; }
@@ -1007,10 +1009,17 @@ export function renderApp(
         const value = cmdline.current.input;
         // A paste goes in whole, colons and all, a line break or other control character
         // as a space: the line is one row, and a pasted newline must not run the command.
-        const typed = name === 'paste'
-          ? { ...key, text: String((key as { text?: unknown }).text ?? '').replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ') }
-          : key;
-        const act = editorReducer({ value, cursor: cmdline.current.caret }, typed as unknown as Parameters<typeof editorReducer>[1], { multiline: false, width: Math.max(1, region.width - 2) });
+        // The reducer reads `width` only for a multiline field's wrapped motion; the line
+        // is one row, so this is the row's width and nothing wraps.
+        const editorKey: Key = {
+          name,
+          sequence: '',
+          ctrl: !!key.ctrl,
+          meta: !!key.meta,
+          shift: !!key.shift,
+          ...(name === 'paste' ? { text: String((key as { text?: unknown }).text ?? '').replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ') } : {}),
+        };
+        const act = editorReducer({ value, cursor: cmdline.current.caret }, editorKey, { multiline: false, width: Math.max(1, region.width - 2) });
         if (act.kind === 'edit') {
           cmdline.current.input = act.state.value;
           cmdline.current.caret = act.state.cursor;
@@ -1282,10 +1291,11 @@ export function renderApp(
     const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.caret, cmdline.current.walk, cmdline.current.list, completeLine) : null;
     const line = shownLine?.view ?? null;
     // The line as drawn: the text before the caret, the caret cell — the whole cluster
-    // under it, or a space at the end — and the text after it.
+    // under it, or a space at the end — and the text after it. With an offer the caret
+    // sits on the first offered character instead, so there is no cell of its own.
     const lineInput = cmdline.current.input;
     const lineCaret = line?.caret ?? 0;
-    const caretCell = lineInput.slice(lineCaret, nextGrapheme(lineInput, lineCaret));
+    const caretCell = line && !line.ghost ? lineInput.slice(lineCaret, nextGrapheme(lineInput, lineCaret)) : '';
     // The runtime's panel as it is drawn: its rows as they are now, redacted — a
     // plugin's settings and its links' places may hold what should not be on screen.
     const hostView = hostPanel.current ? (() => {
