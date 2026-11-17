@@ -154,22 +154,39 @@ const withDraft = (state: AskState, patch: Partial<AskDraft>): AskState => {
 
 // A page commits what its draft holds and the wizard moves on: to the next question,
 // past the last one to the submit page — or, for a single question, the call is
-// answered then and there. An answer the page can be shown and sent is written into
-// `answers`; an empty one writes nothing, so a question nobody answered stays
-// unanswered and is said as such.
+// answered then and there. The field closes behind an answer (a free-text question's
+// page IS its field and stays open). An answer the page can be shown and sent is
+// written into `answers`; an empty one deletes whatever the page had, so `answers`
+// never holds words the draft does not — a question nobody answered stays unanswered
+// and is said as such.
 function commit(state: AskState, patch: Partial<AskDraft>): AskState {
   const i = state.index;
   const q = state.questions[i]!;
   const many = state.questions.length > 1;
-  const d: AskDraft = { ...state.drafts[i]!, ...patch };
+  const d: AskDraft = { ...state.drafts[i]!, typing: freeText(q), ...patch };
   const drafts = [...state.drafts];
   drafts[i] = d;
-  const got = taken(d) ? entryOf(q, d) : undefined;
-  const answers = [...state.answers];
-  if (got) answers[i] = got;
+  const answers: AskAnswer[] = [];
+  state.questions.forEach((x, j) => {
+    const a = (j === i ? (taken(d) ? entryOf(x, d) : undefined) : state.answers[j]);
+    if (a) answers[j] = a;
+  });
   return many
     ? { ...state, drafts, answers, index: Math.min(i + 1, state.questions.length) }
     : { ...state, drafts, answers, done: true };
+}
+
+// A dismissal answers nothing and is not consent to anything. What was answered
+// stands — re-read from its draft, so words the person changed or erased are never
+// kept as their answer — and a page that never held one reads as it always did:
+// dismissed.
+function dismissed(state: AskState): AskState {
+  const answers: AskAnswer[] = [];
+  state.questions.forEach((q, i) => {
+    const d = state.drafts[i]!;
+    if (state.answers[i] && taken(d)) answers[i] = entryOf(q, d);
+  });
+  return { ...state, answers, done: true, cancelled: true };
 }
 
 // Picking a row answers the question in its own words and replaces whatever the
@@ -202,7 +219,7 @@ function fieldKey(state: AskState, key: AskKey, width: number): AskState {
   // Esc leaves the field for the list; a free-text question has no list, so there it
   // dismisses the question (the whole call, as on any other page). The reducer would
   // answer `cancel` — the closest thing first is this file's rule.
-  if (key.name === 'escape') return freeText(q) ? { ...state, done: true, cancelled: true } : withDraft(state, { typing: false });
+  if (key.name === 'escape') return freeText(q) ? dismissed(state) : withDraft(state, { typing: false });
   const k = key.name === 'paste' ? { ...key, text: onePasteLine(key.text ?? '') } : key;
   const act = editorReducer({ value: d.text, cursor: d.caret }, k as Parameters<typeof editorReducer>[1], { multiline: false, width });
   if (act.kind === 'submit') {
@@ -230,7 +247,7 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
       const answers = state.questions.map((q, i) => entryOf(q, state.drafts[i]!));
       return { ...state, answers, done: true };
     }
-    if (name === 'escape') return { ...state, done: true, cancelled: true };
+    if (name === 'escape') return dismissed(state);
     if (name === 'left') return { ...state, index: Math.max(0, state.index - 1) };
     return state;
   }
@@ -242,7 +259,7 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
 
   if (d.typing) return fieldKey(state, key, width);
 
-  if (name === 'escape') return { ...state, done: true, cancelled: true };
+  if (name === 'escape') return dismissed(state);
   if (name === 'up') return withDraft(state, { cursor: Math.max(0, d.cursor - 1) });
   if (name === 'down') return withDraft(state, { cursor: Math.min(otherRow, d.cursor + 1) });
   // `left`/`right` walk the pages (a wizard's pages clamp at both ends — no wrap); a
@@ -304,9 +321,10 @@ export function askResult(state: AskState): string {
   if (state.cancelled) {
     return 'The user dismissed the question without answering. Do not assume an answer: either proceed without it and say which assumption you made, or stop and explain what you need.';
   }
-  const lines = state.answers.map((a) => {
+  const lines = state.questions.map((q, i) => {
+    const a = state.answers[i] ?? { question: q.question, labels: [] };
     const parts = [...a.labels, ...(a.other ? [`(their own words) ${a.other}`] : [])];
-    return `- ${a.question} → ${parts.length ? parts.join(', ') : 'no answer given'}`;
+    return `- ${q.question} → ${parts.length ? parts.join(', ') : 'no answer given'}`;
   });
   return `The user answered:\n${lines.join('\n')}`;
 }

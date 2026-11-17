@@ -296,6 +296,29 @@ test('page keys do not fight the field', () => {
   expect(press(end, 'right').index).toBe(askPageCount(end) - 1);
 });
 
+test('the words a person erased are not kept as their answer', () => {
+  // The kept rows read the drafts as the call goes: words committed and then erased
+  // read as the empty page they left — dismissed — never as words they took back.
+  let s = press(askStart(two), '2'); // q1's pick stands, on to q2
+  s = press(type(press(s, '3'), 'abc'), 'return'); // the words answer it, and the wizard moves on
+  expect(s.answers[1]).toEqual({ question: 'Second?', labels: [], other: 'abc' });
+  s = press(s, 'left', 'return'); // back on q2, the field reopens on the draft
+  expect(s.drafts[1]!.text).toBe('abc');
+  s = press(s, 'backspace', 'backspace', 'backspace', 'return'); // the words are gone, the empty page left behind
+  expect(s.index).toBe(askPageCount(s) - 1);
+  s = press(s, 'escape');
+  expect(askShown(s)[1]).toEqual({ title: 'Second?', answer: 'dismissed', dismissed: true });
+  expect(s).toMatchObject({ done: true, cancelled: true });
+
+  // The same rule for edits left with the page key and no Enter: what the kept row
+  // shows is what stood in the draft when the call went.
+  let t = press(askStart(two), '2');
+  t = press(type(press(t, '3'), 'abc'), 'return');
+  t = press(t, 'left', 'return', 'backspace', 'backspace', 'backspace');
+  t = press(type(t, 'rst'), 'escape', 'right', 'escape');
+  expect(askShown(t)[1]).toEqual({ title: 'Second?', answer: 'rst' });
+});
+
 test('the page strip reads the drafts and the page on screen', () => {
   // One question answers with no strip at all.
   expect(askTabs(askStart(one.questions))).toEqual([]);
