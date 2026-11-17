@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { estimateTokens, percent, short } from './context-meter.js';
 import { realOf, shellRoots, tildePath, within } from './shell.js';
 
 export const INSTRUCTIONS_FILE = 'AGENTS.md';
@@ -176,10 +177,22 @@ export function instructionsSummary(p: ProjectInstructions): string {
 }
 
 // What the chat says when the files picked up change — null when they have not. A
-// move between directories that share the same files says nothing.
-export function instructionsNote(prev: ProjectInstructions, next: ProjectInstructions): string | null {
+// move between directories that share the same files says nothing. With the window
+// the conversation measures against, the note also names the chain's share of it once
+// that share is large: the growth is SAID in chat instead of left to the cut.
+export const INSTRUCTIONS_WARN_SHARE = 0.15;
+export function instructionsNote(prev: ProjectInstructions, next: ProjectInstructions, window?: number): string | null {
   const key = (p: ProjectInstructions) => p.files.map((f) => `${f.path}:${f.cut}`).join('\n');
   if (key(prev) === key(next)) return null;
-  if (next.files.length) return `Project instructions: ${instructionsSummary(next)}`;
-  return next.root ? `Project instructions: none — no ${INSTRUCTIONS_FILE} between ${tildePath(next.dir)} and its root` : 'Project instructions: none — the shell is outside the roots';
+  const head = next.files.length
+    ? `Project instructions: ${instructionsSummary(next)}`
+    : next.root
+      ? `Project instructions: none — no ${INSTRUCTIONS_FILE} between ${tildePath(next.dir)} and its root`
+      : 'Project instructions: none — the shell is outside the roots';
+  if (!window || !next.files.length) return head;
+  const tokens = estimateTokens(instructionsBlock(next));
+  const share = tokens / window;
+  return share >= INSTRUCTIONS_WARN_SHARE
+    ? `${head} · ~${short(tokens)} tokens — ${percent(share)} of the window · /context`
+    : head;
 }

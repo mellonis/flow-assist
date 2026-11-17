@@ -1931,7 +1931,7 @@ export class Conversation {
   // the files picked up changed.
   refreshProject(): void {
     const next = findInstructions(this.deps.config() as Record<string, unknown>, this.shell.cwd());
-    const note = instructionsNote(this.project, next);
+    const note = instructionsNote(this.project, next, this.contextWindow());
     this.project = next;
     if (!note) return;
     if (this.inTurn) this.projectNote = note;
