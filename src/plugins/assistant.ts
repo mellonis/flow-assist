@@ -2539,6 +2539,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ownHeld = (): boolean => claimHeld() && !!convRef.current!.question;
           // Any question the grace holds back — the session's own or a subagent's.
           const questionHeld = (): boolean => claimHeld() && (!!convRef.current!.question || childAskNow()?.kind === 'ask');
+          // A key the chat took for the person's own composition is typing: it puts the
+          // claim a further ASK_GRACE_MS away, and the tick re-arms the one-shot timer. A
+          // key another holder took — a block, a picker, a panel, the pager, a watch —
+          // reaches neither (the handler stamps after those branches, before its own).
+          const stampTyping = (): void => {
+            lastKeyAt.current = askClock.now();
+            if (convRef.current!.question || childAskNow()) setGraceTick((n) => n + 1);
+          };
           // What the collapsed panel says of the running turn — on the plugin's bottom row
           // (the App draws it there) or on the one row a bottom panel keeps. The key that
           // brings the panel back, from its binding.
@@ -2662,7 +2670,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               });
             }
             // A held question stands in the field's place no more than its block would:
-            // the field and the strip under it are what the person sees.
+            // the field and the strip above it are what the person sees. A y/n up at the
+            // same time keeps that place instead — the question is drawn nowhere while the
+            // grace holds it, and the keys go to the y/n — so `pendingChatRows` counts its
+            // block and drops this notice, which is the shape the render draws.
             const held = !!conv.question && ownHeld();
             const draft = held ? Math.min(5, inputVisualRows(inputRef.current, cursorRef.current, chatFieldWidth(w, true)).length) : 0;
             return pendingChatRows({
@@ -2693,6 +2704,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The guard counts a block only while the chat has the keyboard: with the plugin,
           // the runtime's panel or the `:` line holding the keys, it is told nothing is
           // shown, and getting the keyboard back arms afresh.
+          // A child's ask the typing grace holds back is still handed over as shown: only
+          // its placement waits, and the guard's own last-key rule (`press` at every key)
+          // still keeps the first key from answering sooner than `ASK_ARM_MS` after it.
           const guardSees = (c: Offered | null): object | null => (c && focusedRef.current && !hostKeys().panel && !hostKeys().line ? c.request : null);
           const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
           // A watched child's request is shown the same way: one request at a time.
@@ -2978,6 +2992,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
+              // ── From here the key is the person's own composition: the bang level, an
+              // attached image, completion, history, the folds, the field's editing and its
+              // Esc. Every one of them is typing and re-arms the grace a waiting question
+              // owes the sentence; the holders above — a question, a y/n, the tree, a
+              // subagent's ask, a panel, the picker, the pager, a watch, the other side —
+              // returned before this line and re-arm nothing.
+              stampTyping();
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
               // ── Bang level: `!` on an EMPTY field steps it UP (0 → 1 shell mode →
@@ -3174,11 +3195,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // pasted newline does not send and pasted letters fire no binding), and
               // the newline keys — Shift+Enter, Alt+Enter, backslash-then-Enter. It says
               // `submit` for a plain Enter; what that means here is the chat's business.
-              // A key that reaches the field is the person's typing, and it re-arms the grace
-              // a waiting question owes the sentence; a key a block, a picker, a panel or a
-              // reader took returned above and is no typing at all.
-              lastKeyAt.current = askClock.now();
-              if (convRef.current!.question || childAskNow()) setGraceTick((n) => n + 1);
+              // The typing itself was stamped at `stampTyping` above.
               const act = editorReducer(
                 { value: inputRef.current, cursor: cursorRef.current },
                 key as unknown as Parameters<typeof editorReducer>[1],
@@ -3186,7 +3203,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               );
               if (act.kind === 'submit') {
                 // The sentence went, and so did the field's text: a question that parked
-                // behind it may take the keys at once.
+                // behind it takes the keys at once rather than a grace later. An Enter on
+                // an empty field ends it too — the person pressed it to send, and a
+                // question waiting has nothing to lose from the field's place.
                 lastKeyAt.current = Number.NEGATIVE_INFINITY;
                 if (convRef.current!.question || childAskNow()) setGraceTick((n) => n + 1);
                 const cmd = inputRef.current.trim();
@@ -3350,7 +3369,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: watching ? null : pendingAsk ?? (shownChild?.kind === 'confirm' && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
             // A question the grace holds back is not drawn in the field's place: the field
-            // keeps its draft and a strip under it says what waits (ask-children-spec.md
+            // keeps its draft and a strip above it says what waits (ask-children-spec.md
             // (subagent y/n)).
             askNotice: ownHeldNow || childHeld
               ? '? a question is waiting'

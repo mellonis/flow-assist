@@ -1,7 +1,8 @@
 // The typing grace (ask-children-spec.md (subagent y/n)): a question that parks while the person
 // is still typing waits out the sentence — the field keeps the keys and says so — and
-// takes the keyboard once the typing stops. The clock is `askClock`, which the tests move
-// instead of sleeping.
+// takes the keyboard once the typing stops. Timing is split: `askClock` is faked and moved
+// by hand, and the one-shot timer is a real `setTimeout`, so a test that crosses the grace
+// polls in `settle`'s 4 ms steps (up to ~2.4 s) for the real 600 ms timer to fire.
 import { afterEach, expect, test } from 'bun:test';
 import { ASK_GRACE_MS, askClock } from '../assistant/child-ask-guard.ts';
 import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
@@ -37,6 +38,7 @@ const boards = (make: any) => [make('boards', {
   components: { view: (api: any) => function View() { return api.ui.h(api.ui.Text, null, 'BOARD-SURFACE'); } },
 })];
 const CHAT_KEY = { name: ']', ctrl: true };
+const COLLAPSE_KEY = { name: '\\', ctrl: true };
 
 // A chat whose first turn is held before it asks: a test types into the field and lets
 // the question park while the person is still in the sentence.
@@ -119,5 +121,71 @@ test('a question parks at once when nobody is typing', async () => {
   await settleUntil(() => frameOf(ui).includes(BLOCK));
   expect(frameOf(ui)).toContain(BLOCK);
   expect(frameOf(ui)).not.toContain(HELD);
+  ui.app.unmount();
+});
+
+test('a key the field takes without the editor still holds the question off', async () => {
+  const { model, ui } = await booted();
+  await ui.type('half');
+  model.release();
+  await settleUntil(() => parked() && frameOf(ui).includes(HELD));
+  expect(frameOf(ui)).toContain(HELD);
+
+  // Completion is typing even though the editor reducer never sees the key: the Tab
+  // re-arms the grace, so 700 ms after the last CHARACTER — and only 200 ms after the
+  // key — the question is still held.
+  clock.t += ASK_GRACE_MS - 100;
+  await ui.press('tab');
+  expect(rowsOf(ui).some((r) => r.includes('› half'))).toBe(true);
+  clock.t += 200;
+  // A render with no keystroke of its own: the chat folds away and comes back.
+  ui.backend.press(COLLAPSE_KEY);
+  await settle();
+  ui.backend.press(COLLAPSE_KEY);
+  await settle();
+
+  expect(frameOf(ui)).toContain(HELD);
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  expect(rowsOf(ui).some((r) => r.includes('› half'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a message sent during the grace queues and survives the takeover', async () => {
+  const { model, ui } = await booted();
+  await ui.type('half');
+  model.release();
+  await settleUntil(() => parked() && frameOf(ui).includes(HELD));
+  expect(frameOf(ui)).toContain(HELD);
+
+  // Sending is ordinary: the turn runs, so the drafted message queues — and the sentence
+  // went with it, so the question takes the field at once.
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('queued'));
+  expect(frameOf(ui)).toContain('half');
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(frameOf(ui)).not.toContain(HELD);
+
+  // The queued message is not lost behind the block: it reaches the model at the turn's
+  // next request once the question is answered.
+  await ui.press('2');
+  await settleUntil(() => (model.requests.at(-1)?.messages ?? []).some((m) => String(m.content).includes('half')));
+  expect((model.requests.at(-1)?.messages ?? []).some((m) => String(m.content).includes('half'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a collapsed chat names the question that waits', async () => {
+  const { model, ui } = await booted('panel');
+  await ui.type('half');
+  model.release();
+  await settleUntil(() => parked() && frameOf(ui).includes(HELD));
+  expect(frameOf(ui)).toContain(HELD);
+
+  // Folded away, the strip is gone with the field: the status row the App draws says the
+  // same words.
+  ui.backend.press(COLLAPSE_KEY);
+  await settle();
+  expect(frameOf(ui)).toContain('? a question is waiting');
+  expect(frameOf(ui)).not.toContain('? waiting for you');
+  expect(frameOf(ui)).not.toContain(BLOCK);
   ui.app.unmount();
 });
