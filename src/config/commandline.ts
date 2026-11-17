@@ -5,9 +5,11 @@
 // inline rest shows the selected candidate. The list keeps one height while it is open,
 // so typing does not move the screen by a row at a time. While the list is closed (Esc)
 // Tab still takes the offer and walks the other candidates, one per press. A line
-// recalled from ↑/↓ history is not one being typed: it opens no list and draws no rest
+// recalled from ↑/↓ history is not one being typed: it opens no list and shows no rest
 // until a content edit — a typed character or a paste — clears the mark beside its
-// state (`ListState.fromHistory`).
+// state (`ListState.fromHistory`). The hint the field draws beside it — the candidate's
+// label and the others Tab walks — stays on a recalled line, so a Tab that rewrites the
+// line is never silent.
 //
 // Pure: what to draw and what a key does are computed from the text and the list's
 // state, so both are tested without a terminal. The chat's field goes through the same
@@ -101,8 +103,8 @@ export const LIST_ROWS = 8;
 // candidates (-1: the completer's best), `moved` whether an arrow moved it since the
 // list opened or the text changed, `closed` is Esc, and `height` the rows the list has
 // needed since it opened, so it never shrinks while it is open. `fromHistory` is a line
-// the person recalled with ↑/↓ — not one being typed — and it offers nothing until a
-// content edit clears the mark.
+// the person recalled with ↑/↓ — not one being typed — which opens no list and shows no
+// rest until a content edit clears the mark.
 export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number; fromHistory: boolean }
 export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0, fromHistory: false });
 
@@ -204,12 +206,13 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 // while no list is open. Both belong to the line's LAST word, so they hold only while
 // the caret is at the end: mid-line the rows, the ⏎/Tab take and the rest would all
 // target the wrong word, and the rest would be spliced in at the caret. A line recalled
-// from history offers nothing at all — no rows, no rest — until it is edited.
+// from history offers neither the rows nor the rest; the hint beside it stays, so Tab's
+// rewriting is never silent.
 export function lineViewWithList(input: string, caret: number, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
   const once = lastOnly(complete);
   const at = caretAt(input, caret);
   const list = at === input.length ? openList(input, state, once) : null;
   if (list) return { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list };
-  const view = state.fromHistory ? { caret: at, ghost: '', label: '', others: [] } : lineView(input, caret, walk, once);
-  return { view, list: null };
+  const view = lineView(input, caret, walk, once);
+  return { view: state.fromHistory && view.ghost ? { ...view, ghost: '' } : view, list: null };
 }

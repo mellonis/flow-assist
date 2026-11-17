@@ -918,6 +918,15 @@ export function renderApp(
     // tracker-agnostic host — consumes the key, defers the URL to a tracker).
     // One completer for what is drawn and for what Tab does, so they cannot disagree.
     const completeLine = (text: string) => completeCommand(text, commandRegistry as never, config, hostConfigSchema);
+    // A line recalled from history: the caret after it, and the list marked
+    // `fromHistory` (src/config/commandline.ts) — no list and no rest until a content
+    // edit clears the mark; the Tab hint stays.
+    const recallLine = (text: string) => {
+      if (text !== cmdline.current.input) cmdline.current.list.fromHistory = true;
+      cmdline.current.input = text;
+      cmdline.current.caret = text.length;
+      notify();
+    };
     const hostFallback = (key: InputKey): boolean => {
       const name = key.name ?? '';
       // `:` OPENS the command line (when it is closed). It never toggles it closed
@@ -969,18 +978,13 @@ export function renderApp(
         // Up walks back toward the oldest entry, Down toward the newest; past the
         // newest you land back on the live edit buffer. historyIdx starts at
         // history.length (buffer), so Up immediately recalls the newest entry. A
-        // recalled line puts the caret after it, ready to be typed on at the end,
-        // and marks the list `fromHistory`: a recalled line opens no suggestions
-        // until a content edit clears the mark.
+        // recalled line puts the caret after it, ready to be typed on at the end
+        // (`recallLine`).
         if (name === 'up') {
           const h = cmdline.current.history;
           if (h.length && cmdline.current.historyIdx > 0) {
             cmdline.current.historyIdx -= 1;
-            const recalled = h[cmdline.current.historyIdx]!;
-            if (recalled !== cmdline.current.input) cmdline.current.list.fromHistory = true;
-            cmdline.current.input = recalled;
-            cmdline.current.caret = recalled.length;
-            notify();
+            recallLine(h[cmdline.current.historyIdx]!);
           }
           return true;
         }
@@ -988,11 +992,7 @@ export function renderApp(
           const h = cmdline.current.history;
           if (cmdline.current.historyIdx < h.length) {
             cmdline.current.historyIdx += 1;
-            const recalled = h[cmdline.current.historyIdx] ?? '';
-            if (recalled !== cmdline.current.input) cmdline.current.list.fromHistory = true;
-            cmdline.current.input = recalled;
-            cmdline.current.caret = recalled.length;
-            notify();
+            recallLine(h[cmdline.current.historyIdx] ?? '');
           }
           return true;
         }
@@ -1027,8 +1027,8 @@ export function renderApp(
         };
         const act = editorReducer({ value, cursor: cmdline.current.caret }, editorKey, { multiline: false, width: Math.max(1, region.width - 2) });
         if (act.kind === 'edit') {
-          // A content edit ends a history recall: suggestions belong to a line being
-          // typed, and a moved caret alone does not bring them back.
+          // A content edit ends the history recall (`ListState.fromHistory`), and only a
+          // value change counts: a moved caret alone brings no list back.
           if (act.state.value !== value) cmdline.current.list.fromHistory = false;
           cmdline.current.input = act.state.value;
           cmdline.current.caret = act.state.cursor;

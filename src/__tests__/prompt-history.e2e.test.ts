@@ -108,20 +108,35 @@ test('walking history never opens suggestions', async () => {
   // clears the field.
   await ui.press('escape', 'escape');
   expect(ui.backend.lastFrame).not.toContain('› /mo');
-  // ↑ recalls it. A recalled line is not one being typed: no list rows, no rest.
+  // ↑ recalls it. A recalled line is not one being typed: no list rows, no inline rest —
+  // but the hint beside the field still names what Tab would take, so Tab is no secret.
   await ui.press('up');
   expect(fieldRow()).toContain('› /mo');
+  expect(fieldRow()).not.toContain('› /mode');
   expect(ui.backend.lastFrame).not.toContain('the chat\'s layout');
   expect(ui.backend.lastFrame).not.toContain('the model this conversation runs');
-  // One character typed is a content edit: the list is back.
+  expect(ui.backend.lastFrame).toContain('⇥ model');
+  // Tab takes the offer on a recalled line as it always did, and its hint follows the
+  // walk: the line holds `/mode`, the hint names `/model`; then the line holds `/model`
+  // and the hint names `/mode`.
+  await ui.press('tab');
+  expect(fieldRow()).toContain('› /mode');
+  expect(ui.backend.lastFrame).toContain('⇥ model');
+  await ui.press('tab');
+  expect(fieldRow()).toContain('› /model');
+  expect(ui.backend.lastFrame).toContain('⇥ mode');
+  // Back to the empty field, recalled again: one character typed is a content edit, and
+  // the list is back.
+  await ui.press('escape');
+  await ui.press('up');
   await ui.type('d');
   expect(fieldRow()).toContain('› /mod');
   expect(ui.backend.lastFrame).toMatch(/mode +the chat's layout/);
   expect(ui.backend.lastFrame).toMatch(/model +the model this conversation runs/);
   ui.app.unmount();
 
-  // The `:` line is the same one rule: ↑ recalls a command, and the offer comes back
-  // only with the first character typed into it.
+  // The `:` line is the same one rule: ↑ recalls a command with no rows and no rest, the
+  // hint beside the line stays, and Tab rewrites the line to the candidate it names.
   const line = await bootApp(new ScriptedModel(), 100, 24);
   await line.press(':');
   await line.type('c');
@@ -131,8 +146,12 @@ test('walking history never opens suggestions', async () => {
   await line.press('up');
   expect(line.backend.lastFrame).toContain(': c');
   expect(line.backend.lastFrame).not.toMatch(/cache +Turn the cache on or off/);
-  await line.type('a');
+  expect(line.backend.lastFrame).not.toContain(': cache');
+  expect(line.backend.lastFrame).toContain('⇥ ');
+  expect(line.backend.lastFrame).toContain('clear');
+  await line.press('tab');
   expect(line.backend.lastFrame).toContain(': cache');
+  expect(line.backend.lastFrame).toMatch(/⇥ .*clear/);
   line.app.unmount();
 });
 

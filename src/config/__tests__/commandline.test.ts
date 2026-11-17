@@ -243,19 +243,31 @@ test('the list and its ghost hold only while the caret is at the end of the line
   expect(lineViewWithList('c', 1, null, st, complete).list?.selected).toBe('cache');
 });
 
-test('a recalled line offers no list', () => {
+test('a recalled line offers no list and no rest, but keeps the Tab hint', () => {
   const two = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'item00', candidates: ['item00', 'item01'] });
   const st = newListState();
-  // ↑ recalled the line from history: the mark rides beside the list's state, so the
-  // line offers nothing — neither the rows nor the inline rest.
+  // ↑ recalled the line from history: the mark rides beside the list's state, so no rows
+  // open and the offer is not drawn — but the hint beside the line names the candidate
+  // Tab would walk to, so Tab is never silent.
   st.fromHistory = true;
   const recalled = lineViewWithList('item0', 5, null, st, two);
   expect(recalled.list).toBeNull();
-  expect(recalled.view).toEqual({ caret: 5, ghost: '', label: '', others: [] });
+  expect(recalled.view).toEqual({ caret: 5, ghost: '', label: '', others: ['item01'] });
+  // Mid-line too: no list, and the hint stays.
+  const mid = lineViewWithList('item0', 2, null, st, two);
+  expect(mid.list).toBeNull();
+  expect(mid.view).toEqual({ caret: 2, ghost: '', label: '', others: ['item01'] });
   // Every list key is the line's own then: ↑ walks the history again.
   expect(listKey('item0', st, { name: 'down' }, two)).toEqual({ handled: false });
-  // The next content edit (`editorReducer` `edit` from typing or a paste) brings them
-  // back: the field clears the mark as it takes the edited text.
+  // Tab walks a recalled line as it always does, its hint following the walk.
+  const tabbed = lineTab('item0', null, two);
+  expect(tabbed.input).toBe('item00');
+  expect(lineViewWithList(tabbed.input, tabbed.input.length, tabbed.walk, st, two)).toEqual({
+    view: { caret: 6, ghost: '', label: '', others: ['item01'] },
+    list: null,
+  });
+  // The next content edit (`editorReducer` `edit` from typing or a paste) brings the list
+  // and the rest back: the field clears the mark as it takes the edited text.
   st.fromHistory = false;
   const edited = lineViewWithList('item0', 5, null, st, two);
   expect(edited.list?.total).toBe(2);

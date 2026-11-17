@@ -3031,8 +3031,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const { level, cmd: shown } = decodeBangLine(raw);
                   histShown.current = shown;
                   setBangLevel(level);
-                  // A recalled line is not one being typed: it opens no completion list
-                  // and draws no rest until a content edit clears the mark.
+                  // No list and no rest on a recalled line (`ListState.fromHistory`).
                   if (shown !== inputRef.current) listRef.current.fromHistory = true;
                   setField(histShown.current);
                   return true;
@@ -3114,8 +3113,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return true;
               }
               if (act.kind === 'edit') {
-                // A content edit ends a history recall: suggestions belong to a line
-                // being typed, and a moved caret alone does not bring them back.
+                // A content edit ends the history recall (`ListState.fromHistory`); a
+                // moved caret alone brings no list back.
                 if (act.state.value !== inputRef.current) { tabRef.current = null; disarmEsc(); listRef.current.fromHistory = false; }
                 setInput(act.state.value); inputRef.current = act.state.value;
                 setCursor(act.state.cursor); cursorRef.current = act.state.cursor;
