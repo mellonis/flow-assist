@@ -68,7 +68,7 @@ import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPa
 import { workRows, type WorkJob, type WorkSub } from '../assistant/work-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
-import { Conversation, parentAskDestination, workHome } from '../assistant/conversation.js';
+import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { startStateFiles, stateSources, type StateFileInput } from '../assistant/state-file.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
@@ -1805,12 +1805,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               walk(asked);
               return map;
             };
-            // The kill question stands until its job is gone from the registry.
-            const killPending = (): string | null => {
-              const up = askedKill !== null && shells().has(askedKill) ? askedKill : null;
-              askedKill = up;
-              return up;
-            };
+            // The kill question's job, while the registry still holds it. Pure — read at
+            // every draw, never written from a read.
+            const killPending = (): string | null => (askedKill !== null && shells().has(askedKill) ? askedKill : null);
             const rows = (): PanelRow[] => {
               // The subagents: the live tree as rows, with the label path each node sits
               // on (the depth-first walk rebuilds it from the stack) and the state words
@@ -1822,8 +1819,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (n.shell) continue;
                 while (stack.length && stack[stack.length - 1]!.depth >= n.depth) stack.pop();
                 stack.push({ depth: n.depth, label: n.label });
+                // One row's `asking` is the SAME predicate Enter closes on
+                // (`offeredWithin` — a request parked in the node or below it reaching
+                // the person): a row marked `? waiting for you` always lands the
+                // keyboard on that request, and an unmarked one always watches.
                 const who = asked.nodeByKey(n.key);
-                const asking = !!who && (!!who.confirm || (!!who.parentAsk && parentAskDestination(who) === 'person'));
+                const asking = !!who && !!asked.offeredWithin(who);
                 subs.push({
                   key: n.key,
                   path: stack.map((s) => s.label),
@@ -1894,21 +1895,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return undefined;
               },
             };
-            // The question's keys. A `y` counts for the row the question stands on only:
-            // a cursor moved elsewhere never kills the job it names.
+            // The question's keys. A `y` answers the question on screen — it names its
+            // job — wherever the cursor is; `n` or the `ctrl+d` that asked drops it, and
+            // that chord stays the panel's through the whole exchange.
             const answerKeys: PanelKeyDef[] = [
               {
                 key: 'y', label: 'yes',
-                run: (id) => {
+                run: () => {
                   const job = killPending();
                   askedKill = null;
-                  const found = job !== null && id === `shell:${job}` ? shells().get(job) : undefined;
+                  const found = job !== null ? shells().get(job) : undefined;
                   if (found) found.owner.killJob(found.job, 'person');
                   host.notify();
                   return undefined;
                 },
               },
               { key: 'n', label: 'no', run: () => { askedKill = null; return undefined; } },
+              { key: 'ctrl+d', label: 'cancel', run: () => { askedKill = null; return undefined; } },
             ];
             openPanel({
               title: 'Work',

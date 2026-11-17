@@ -29,6 +29,7 @@ afterEach(() => {
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
+const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 const pause = () => { clock.t += 700; };
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 // The tool results a request carried — what a subagent's answer reached it as.
@@ -36,12 +37,19 @@ const results = (req: { messages: { role: string; content?: unknown }[] } | unde
   (req?.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content).replace(/^OK: /, ''));
 
 // A subagent the person starts: held at its first step, then its request of the kind.
+// `outer` starts a task of its own (`beta one`) whose first command asks the person y/n —
+// a request parked BELOW the subagent.
 const labelOf = (mark: string) => `${mark.toLowerCase()}-go`;
-interface Kid { mark: string; kind: 'run' | 'ask' }
+interface Kid { mark: string; kind: 'run' | 'ask' | 'outer' }
 const requestOf = (kid: Kid, root: string) => (kid.kind === 'ask'
   ? { tool: 'ask_parent', args: { question: `Q-${kid.mark}?` } }
-  : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
+  : kid.kind === 'outer'
+    ? { tool: 'subagent', args: { task: 'beta one' } }
+    : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
 const scriptOf = (kid: Kid, root: string): Turn[] => [[{ hold: true as const }, requestOf(kid, root)], [{ text: `${kid.mark} settled` }]];
+// The task `outer`'s subagent tool starts: matched by the task text in its prompt. Its
+// first step asks the person to approve a command.
+const TASK_TURN = (root: string): Turn[] => [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(root, 'beta.txt')}` } }], [{ text: 'BETA settled' }]];
 
 interface Rig { ui: UI; children: ScriptedModel[]; kids: Kid[] }
 async function boot(kids: Kid[] = []): Promise<Rig> {
@@ -54,6 +62,11 @@ async function boot(kids: Kid[] = []): Promise<Rig> {
     child.script(...scriptOf(kid, root));
     return child;
   });
+  if (kids.some((k) => k.kind === 'outer')) {
+    const task = model.when((req) => firstUser(req).includes('beta one'));
+    task.script(...TASK_TURN(root));
+    children.push(task);
+  }
   const ui = await bootApp(model, 130, 34, undefined, {
     sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-s-')) },
     shell: { roots: [root] },
@@ -120,8 +133,8 @@ test('enter opens what is under the cursor', async () => {
   await spawn(rig, 0);
   await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
   await openByKey(rig.ui);
-  // The subagent row: the picker closes and its watch is on, Esc back to the chat.
-  await rig.ui.press('down');
+  // The subagent row (the cursor starts on the first row a key runs): the picker closes
+  // and its watch is on, Esc back to the chat.
   await rig.ui.press('return');
   await settleUntil(() => !frameOf(rig.ui).includes('Flow Assist · Work'));
   expect(frameOf(rig.ui)).toMatch(/Flow Assist \(scripted\) · hyn-go/);
@@ -129,7 +142,7 @@ test('enter opens what is under the cursor', async () => {
   await settleUntil(() => frameOf(rig.ui).includes('○ sh-1'));
   // The shell row: its output pager is up over the kept tail.
   await openByCommand(rig.ui);
-  await rig.ui.press('down', 'down', 'down');
+  await rig.ui.press('down', 'down');
   await rig.ui.press('return');
   await settleUntil(() => frameOf(rig.ui).includes('│ up'));
   expect(frameOf(rig.ui)).toContain('│ up');
@@ -140,8 +153,9 @@ test('ctrl+d kills a shell after its own y/n', async () => {
   const rig = await boot();
   await rig.ui.press('F');
   await shell(rig.ui, 'sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'sleep 60 &', '○ sh-2');
   await openByKey(rig.ui);
-  await rig.ui.press('down', 'down', 'down');
+  // The cursor starts on the first row a key runs — sh-1; ctrl+d asks in its row's place.
   await rig.ui.backend.press({ name: 'd', ctrl: true });
   await settle();
   expect(frameOf(rig.ui)).toMatch(/kill sh-1\? y yes · n no/);
@@ -150,12 +164,25 @@ test('ctrl+d kills a shell after its own y/n', async () => {
   await settleUntil(() => !frameOf(rig.ui).includes('kill sh-1'));
   expect(frameOf(rig.ui)).toContain('sh-1 · sleep 60');
   expect(frameOf(rig.ui)).toContain('running — this chat');
-  // ctrl+d again, `y`: the job ends through the registry's own kill, and the row follows.
+  // ctrl+d again asks, and ctrl+d drops the question the same key asked: the chord
+  // stays the panel's through the whole exchange — nothing arms the exit, and the job
+  // is alive.
   await rig.ui.backend.press({ name: 'd', ctrl: true });
   await settleUntil(() => frameOf(rig.ui).includes('kill sh-1'));
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => !frameOf(rig.ui).includes('kill sh-1'));
+  expect(frameOf(rig.ui)).toContain('sh-1 · sleep 60');
+  // ctrl+d, a row away, `y`: the question is answered for the job it NAMES — sh-1 dies
+  // and sh-2 goes on (a cursor moved elsewhere never kills the wrong job).
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => frameOf(rig.ui).includes('kill sh-1'));
+  await rig.ui.press('down');
   await rig.ui.press('y');
-  await settleUntil(() => frameOf(rig.ui).includes('killed (person) — this chat'));
-  expect(frameOf(rig.ui)).toContain('killed (person) — this chat');
+  await settleUntil(() => rowsOf(rig.ui).some((r) => r.includes('sh-1 · sleep 60') && r.includes('killed (person)')));
+  const row1 = rowsOf(rig.ui).find((r) => r.includes('sh-1 · sleep 60')) ?? '';
+  const row2 = rowsOf(rig.ui).find((r) => r.includes('sh-2 · sleep 60')) ?? '';
+  expect(row1).toContain('killed (person)');
+  expect(row2).toContain('running');
   // Ctrl+D was the panel's, not the exit arm's: nothing armed, nothing exited.
   expect(frameOf(rig.ui)).not.toContain('^d again');
   expect(rig.ui.exits()).toBe(0);
@@ -174,7 +201,6 @@ test('enter on a waiting subagent lands on its request', async () => {
   expect(frameOf(rig.ui)).not.toContain('? from «ask-go»');
   pause();
   // Enter closes the picker and the request block takes the keyboard.
-  await rig.ui.press('down');
   await rig.ui.press('return');
   await settleUntil(() => frameOf(rig.ui).includes('? from «ask-go»'));
   expect(frameOf(rig.ui)).not.toContain('Flow Assist · Work');
@@ -184,5 +210,29 @@ test('enter on a waiting subagent lands on its request', async () => {
   await rig.ui.press('return');
   await settleUntil(() => rig.children[0]!.requests.length >= 2);
   expect(results(rig.children[0]!.requests[1])).toEqual(['The person answered: fine']);
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('a sub whose grandchild waits on you is marked too, and Enter lands on that request', async () => {
+  const rig = await boot([{ mark: 'ALPHA', kind: 'outer' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await ask(rig.ui, '/work');
+  await settleUntil(() => frameOf(rig.ui).includes('Flow Assist · Work'));
+  // The task the subagent started parks its y/n while the picker is up: the request
+  // waits BELOW `alpha-go`, and the marker names who waits on you — both rows.
+  await released(rig, 0);
+  await settleUntil(() => rig.children[1]!.held);
+  await released(rig, 1);
+  await settleUntil(() => rowsOf(rig.ui).some((r) => r.includes('beta one') && r.includes('waiting for you')));
+  const taskRow = rowsOf(rig.ui).find((r) => r.includes('beta one')) ?? '';
+  const subRow = rowsOf(rig.ui).find((r) => r.includes('alpha-go') && !r.includes('beta one')) ?? '';
+  expect(taskRow).toContain('? waiting for you');
+  expect(subRow).toContain('? waiting for you');
+  // Enter lands on that request: the picker closes with no watch, and the request block —
+  // the grandchild's y/n — takes the keyboard.
+  await rig.ui.press('return');
+  await settleUntil(() => frameOf(rig.ui).includes('Confirm write: run_command'));
+  expect(frameOf(rig.ui)).not.toContain('Flow Assist · Work');
   rig.ui.app.unmount();
 }, 20_000);

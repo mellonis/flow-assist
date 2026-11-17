@@ -415,8 +415,9 @@ chat; `config set keys.work <key>` moves the capital.
 
 One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
 it says `none`. A subagent's row is its label path with what it is doing
-(`main › review · running — reading src/`), and one that waits on you — a question of its,
-or a y/n — is marked `? waiting for you`. A shell's row is its id and command
+(`main › review · running — reading src/`), and one that waits on you — its own question
+or y/n, or one parked in a conversation below it — is marked `? waiting for you`. A
+shell's row is its id and command
 (`sh-3 · bun run dev`) with its state and who owns it (`running — fix-tests`, or the
 chat's own as `this chat`); a shell you killed sinks below the running ones and reads
 `killed (person) — this chat`. The rows are read again at every draw, so a state is what

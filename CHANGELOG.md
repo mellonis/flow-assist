@@ -7,8 +7,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **The work picker: subagents and shells in one place.** `J` opens one panel listing
   everything that runs beside the conversation — every live subagent and task (its label
-  path, `running — <what it is doing>`, `? waiting for you` when a question or a y/n of
-  its waits on you) under **Subagents**, every background shell (`sh-3 · bun run dev —
+  path, `running — <what it is doing>`, `? waiting for you` when a question or a y/n
+  waits on you in it or one below it) under **Subagents**, every background shell (`sh-3 · bun run dev —
   <who owns it>`, running or ended) under **Shells**; a group with nothing in it says
   `none`, and the rows follow the live state while the panel is up. Enter opens what is
   under the cursor: a subagent's conversation (the existing watch), or a shell's kept

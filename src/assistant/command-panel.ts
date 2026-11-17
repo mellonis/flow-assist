@@ -62,7 +62,18 @@ export type PanelState = { stack: PanelSpec[]; cursor: number; notice: string; a
 // The keys the panel keeps for itself; a plugin's key of the same name is never run.
 export const PANEL_OWN_KEYS = ['up', 'down', 'escape'];
 
-export const panelStart = (spec: PanelSpec): PanelState => ({ stack: [spec], cursor: 0, notice: '' });
+export const panelStart = (spec: PanelSpec): PanelState => {
+  // The cursor starts on the first row a key can run on — a group header is nobody's
+  // row. A `rows()` that throws is left at the first row and drawn as its error at
+  // every draw, as it would be anyway.
+  let cursor = 0;
+  try {
+    const rows = spec.rows();
+    const at = rows.findIndex((r) => r && r.kind !== 'group');
+    cursor = at >= 0 ? at : 0;
+  } catch { /* the error is rows()'s own; the cursor starts at the top */ }
+  return { stack: [spec], cursor, notice: '' };
+};
 
 export const panelTop = (state: PanelState): PanelSpec => state.stack[state.stack.length - 1]!;
 
