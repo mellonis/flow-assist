@@ -230,15 +230,21 @@ export interface ConversationDeps {
 
 // A child a conversation starts: the `subagent` tool's task, or a subagent. `summary` is
 // the parent's summary handed to a subagent as the start of its own.
-// `write`: the child may change things, each write asking the person (a subagent the person
-// starts always may); without it a child declines every write.
+// `writes`: what the child may change (`TaskWrites`), absent reads as `'ask'`; the child's
+// policy is made from it (`childPolicy`, src/assistant/confirm-policy.ts), and a child that
+// is not `'deny'` also starts in the auto mode of the conversation that started it.
 // `agent`: the agent file it was started from, recorded in the journal's start lines.
 // `toolGroups`: the tool groups it may use besides the core group (absent: every group).
 // `skills`: the skills of the agent file already in `prompt`; the first message carries their ids as a mark, and a `skill-load` line records each. `head`: the prompt without the skills' text, which rides the child's system prompt in place of `prompt` (the bodies are sent once, in the first message).
 // `model`: the model id the child runs, resolved from its role at the start (absent: the
 // conversation's own).
 export interface AgentRef { id: string; source: 'project' | 'person' | 'plugin'; path: string; hash: string }
-export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[]; head?: string; model?: string }
+// What a child may change, as a capability: `'allow'` runs each write the auto mode with
+// `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's
+// `run_command` — and says it in the log, `'ask'` waits for the person's yes on each,
+// `'deny'` declines every write.
+export type TaskWrites = 'allow' | 'ask' | 'deny';
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; writes?: TaskWrites; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[]; head?: string; model?: string }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';

@@ -27,6 +27,31 @@ What each version of flow-assist brought, newest first. The version is the one i
   silent loop costs the session. `/export` says `stopped (the answer looped)`; the journal
   keeps the count and the start of the loop (up to 2 000 characters).
 
+- **An agent file states its writes.** A `writes: allow | ask | deny` line in the header
+  (omitted: `ask`) says what a run of that agent may change: `ask` waits for your y/n on
+  each write and command, `deny` declines each one, `allow` runs each write the auto mode
+  with `shell.autoRun` answers (never `config_set`, an unlisted `web_fetch` or a plugin's
+  `run_command`) and says each one in the log. For a named agent the file's `writes` is
+  what the work gets wherever the agent is started (the model's `subagent` call or your
+  own `/subagent @`) — the call's own `writes` argument does not move it. A
+  `writes:` value outside the three fails the file, as any other malformed header line.
+
+- **`subagent` takes `writes`, and a bare task is a worker.** A background task writes
+  and runs commands through the person's y/n (the session's auto mode answers). The
+  call's `writes` is `allow`, `ask` (the default) or `deny`: `writes: 'deny'` narrows a
+  task to read-only (write tools are not offered, and a write behind another name is
+  declined), and a call may not grant its own `allow` — it reads as `ask`, said in the
+  answer. `write:` remains as
+  the deprecated spelling — `true` reads as `ask`, `false` as `deny` — and `writes`
+  wins when both are given.
+
+- **A read-only task sees no write tools at all.** A task started `writes: 'deny'` — the
+  call's own `writes`, or a `writes: deny` agent file — is offered none of the write tools
+  (`write_file`, `edit_file`, `workspace_write`, `run_command`, `shell_kill`): a call for
+  one is answered `Unknown tool` and nothing runs, and a write behind a name the list
+  cannot hide is declined with one pinned sentence that says the run is read-only and how
+  to have it again (started with `writes: ask`). Reads and the rest of `core` run as ever.
+
 - **`/diff`: the working tree, live, beside the chat.** `/diff` splits the chat — the
   conversation on the left, every file you have changed on the right, the field across the
   bottom — and stacks the panel under the field where the terminal is narrow. Each file

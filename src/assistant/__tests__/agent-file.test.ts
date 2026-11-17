@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { agentHash, fillPrompt, paramsText, parseAgentFile } from '../agent-file.ts';
+import { planAgentStart } from '../agent-model.ts';
+import type { FoundAgent } from '../agent-find.ts';
 
 const FULL = `---
 description: Start a ticket from a title
@@ -67,6 +69,35 @@ test('a placeholder the header does not declare is an error on its own body line
 
 test('a declared parameter the body never uses is an error on the params line', () => {
   expect(errorsOf('---\ndescription: d\nparams: a, b\n---\nonly {{a}}')).toEqual([{ path: P, line: 3, message: 'parameter "b" is never used in the body' }]);
+});
+
+test('an agent file with writes: deny parses to deny', () => {
+  const r = parseAgentFile('/a/b.md', '---\ndescription: d\nwrites: deny\n---\nbody');
+  expect(r.ok).toBe(true);
+  if (r.ok) expect(r.agent.writes).toBe('deny');
+});
+
+test('an omitted writes key means ask', () => {
+  // a header without the key → agent.writes === null; planAgentStart's result .writes === 'ask'
+  const parsed = parseAgentFile('/x/agents/job.md', '---\ndescription: d\n---\nb\n', { kind: 'plugin', plugin: 'p' });
+  expect(parsed.ok).toBe(true);
+  if (!parsed.ok) return;
+  expect(parsed.agent.writes).toBeNull();
+  const agent: FoundAgent = { ...parsed.agent, id: parsed.agent.name };
+  const plan = planAgentStart({
+    found: () => ({ agents: [agent], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/x' }),
+    cap: () => 'reads',
+    loaded: () => new Set<string>(),
+    labels: () => [],
+  }, { agent: agent.id, args: undefined, prompt: '' });
+  if (!plan.ok) throw new Error(`plan refused: ${plan.message}`);
+  expect(plan.writes).toBe('ask');
+});
+
+test('a writes key with an unknown value is an error naming the three', () => {
+  // `writes: maybe` → { ok: false, errors: [...] } with 'allow, ask, deny' in the message
+  const errors = errorsOf('---\ndescription: d\nwrites: maybe\n---\nbody');
+  expect(errors[0]).toMatchObject({ path: P, line: 3, message: expect.stringContaining('allow, ask, deny') });
 });
 
 test('single braces are left alone, and a malformed double-brace is an error', () => {

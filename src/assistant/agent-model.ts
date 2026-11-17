@@ -8,7 +8,7 @@ import { resolveAgent, type FoundAgent, type FoundAgents } from './agent-find.js
 import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
 import { roleStart } from './model-roles.js';
 import type { AutoMode } from './auto.js';
-import type { AgentRef } from './conversation-types.js';
+import type { AgentRef, TaskWrites } from './conversation-types.js';
 import { uniqueLabel } from './subagent-command.js';
 import { preloadNote, withPreload, type Preload, type PreloadedSkill } from './agent-skills.js';
 
@@ -34,7 +34,7 @@ export const AGENTS_LISTED_MAX = 20;
 
 export type AgentStartPlan =
   | { ok: false; message: string }
-  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; head: string; note: string; model?: string; roleNote: string };
+  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; head: string; note: string; writes: TaskWrites; model?: string; roleNote: string };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -74,6 +74,9 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
     prompt: extra ? `${body}\n\n${AGENT_FOLLOW_UP}\n${extra}` : body,
     head: extra ? `${filled}\n\n${AGENT_FOLLOW_UP}\n${extra}` : filled,
     mode: agentAutoMode(agent.auto, starter.cap()),
+    // What a run of the agent may change: the file's own `writes`, the worker default
+    // where the key is omitted.
+    writes: agent.writes ?? 'ask',
     agent: agentRef(agent, id),
     toolGroups: groups.groups,
     absent: groups.absent,

@@ -6,10 +6,14 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { askClock } from '../assistant/child-ask-guard.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import type { Sent as WireMessage } from './helpers/conversation';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const realNow = askClock.now;
+afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-e2e-')));
@@ -222,24 +226,75 @@ test('Esc during a confirmed run_command stops the command with the answer', asy
   ui.app.unmount();
 });
 
-test('a background task cannot run a command — nobody is there to say yes', async () => {
+test("a background task's command waits for the person, and their yes runs it", async () => {
   const root = rootDir();
+  // The pause before a child's y/n takes a key, moved as the clock rather than slept.
+  const clock = { t: 10_000 };
+  askClock.now = () => clock.t;
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'subagent', args: { task: 'create a file' } }],
     [{ text: 'Started it in the background.' }],
     [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
+    [{ text: 'Made it.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('make a file in the background');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  // A bare call is a worker: its command waits for the person's yes, and nothing runs
+  // before it.
+  expect(ui.backend.lastFrame).toContain('create a file');
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(path.join(root, 'made.txt')));
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a `writes: \'deny\'` background task cannot run a command — it is read-only', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'subagent', args: { task: 'create a file', writes: 'deny' } }],
+    [{ text: 'Started it in the background.' }],
+    [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Looping"]', scope: 'session' } }],
     [{ text: 'Could not.' }],
   );
   const ui = await boot(model, root);
   await ui.type('make a file in the background');
   await ui.press('return');
-  await settleUntil(() => model.requests.length === 4);
+  await settleUntil(() => model.requests.length === 5);
   await settle(20);
   await wait(100);
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
-  const nested = model.requests[3]!.messages as Sent;
-  expect(String(nested.find((m) => m.role === 'tool')?.content)).toContain('declined');
+  // What the model is told per call it made — one call's own result, not the whole
+  // transcript. Call ids repeat across rounds, so each request's results are paired
+  // with its calls in order rather than by id.
+  const resultOf = (want: string) => {
+    const out: string[] = [];
+    for (const r of model.requests) {
+      const pending: string[] = [];
+      for (const m of r.messages as WireMessage[]) {
+        if (m.role === 'assistant' && m.tool_calls?.length) pending.push(...m.tool_calls.map((c) => c.function.name));
+        else if (m.role === 'tool') {
+          const name = pending.shift();
+          if (name === want) out.push(String(m.content ?? ''));
+        }
+      }
+    }
+    return out.join('\n');
+  };
+  // (a) The read-only task is offered no write tools at all: its run_command call is
+  // answered as one to a tool that does not exist, and nothing runs.
+  expect(resultOf('run_command')).toContain('Unknown tool: run_command');
+  expect(resultOf('run_command')).not.toContain('declined');
+  // (b) A write outside the hidden set is declined with the pinned sentence; its
+  // session-scope target changes nothing (no OK result, and no file above).
+  expect(resultOf('config_set')).toContain(READ_ONLY_TASK_DECLINE);
+  expect(resultOf('config_set')).not.toContain('OK:');
   ui.app.unmount();
 });
 
@@ -540,12 +595,15 @@ test('the directory survives a restart', async () => {
   b.app.unmount();
 });
 
-test('a background run does not move the chat\'s directory', async () => {
+// The task is read-only (`writes: 'deny'`): its `cd` is behind a name the write-tool list
+// hides, so nothing moves it to move the chat. The claim about a `cd` that runs — a
+// child's own move not moving the parent's — is `task-child.rig`'s directory test.
+test('a read-only background task leaves the chat\'s directory where it is', async () => {
   const root = rootDir();
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'subagent', args: { task: 'go elsewhere' } }],
+    [{ tool: 'subagent', args: { task: 'go elsewhere', writes: 'deny' } }],
     [{ text: 'Started.' }],
     [{ tool: 'run_command', args: { command: 'cd ..' } }],
     [{ text: 'Could not.' }],

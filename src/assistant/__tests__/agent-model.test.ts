@@ -8,7 +8,7 @@ import type { FoundAgent } from '../agent-find.ts';
 afterEach(() => { fs.rmSync(agentTrustPath(), { force: true }); });
 
 const agent = (name: string, description: string, kind: 'project' | 'plugin' = 'plugin', model?: string): FoundAgent => ({
-  id: name, name, description, params: [], tools: null, skills: [], auto: 'ask', body: 'b', path: path.join('/x', `${name}.md`),
+  id: name, name, description, params: [], tools: null, skills: [], auto: 'ask', writes: null, body: 'b', path: path.join('/x', `${name}.md`),
   source: kind === 'plugin' ? { kind: 'plugin', plugin: 'p' } : { kind: 'project' }, hash: 'h', ...(model ? { model } : {}),
 });
 
@@ -99,7 +99,19 @@ test('no role anywhere: no model and no note', () => {
   expect(plan.roleNote).toBe('');
 });
 
+test('the start plan carries the writes of its file', () => {
+  expect(okPlan({ ...agent('a', 'd'), writes: 'allow' }).writes).toBe('allow');
+  expect(okPlan({ ...agent('a', 'd'), writes: 'deny' }).writes).toBe('deny');
+});
+
 test('the trust question names the role the file gives the work, and nothing when it names none', () => {
   expect(agentTrustRequest(agent('a', 'd', 'project', 'fast'), 'a', 'reads', false).line).toContain('model: fast (a role from ai.roles)');
   expect(agentTrustRequest(agent('b', 'd', 'project'), 'b', 'reads', false).line).not.toContain('model: ');
+});
+
+test('the trust question carries the writes of its file — the loudest grant the person is consenting to', () => {
+  expect(agentTrustRequest({ ...agent('a', 'd', 'project'), writes: 'allow' }, 'a', 'reads', false).line).toContain('writes: allow');
+  expect(agentTrustRequest({ ...agent('b', 'd', 'project'), writes: 'deny' }, 'b', 'reads', false).line).toContain('writes: deny');
+  // The key omitted reads as `ask`, and the request says that too.
+  expect(agentTrustRequest(agent('c', 'd', 'project'), 'c', 'reads', false).line).toContain('writes: ask');
 });

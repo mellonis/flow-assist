@@ -1043,9 +1043,14 @@ there is no `/fullscreen`.
 instructions from the conversation that started you:`; without `agent` it is required. A refusal is the tool's answer, worded for the model, and starts nothing:
 the resolve message, `@id is not trusted here — ask the person to start @id once`
 (checked first, `agentTrusted`), an `args` that is not an object, an unknown parameter
-(naming what it takes), a missing required one. The agent runs as a `task` with
-`write: true` (each write asks the person), the file's tool groups and the capped auto
-mode. **`model` names a ROLE from `ai.roles`** (`roleStart`), never a model id — on an
+(naming what it takes), a missing required one. The agent runs as a `task` whose
+writes are the file's own `writes:` (omitted: the worker `ask` — each write asks the
+person; `deny` declines each one; `allow` runs each write the auto mode with
+`shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's
+`run_command` — and is said in the log), the file's tool groups and the capped auto
+mode. The call's `writes` does not move a named agent's writes; a plain task takes the
+call's — a worker by default, `writes: 'deny'` read-only, and a call's `allow` read as
+`ask` with a note (`taskWritesOf`). **`model` names a ROLE from `ai.roles`** (`roleStart`), never a model id — on an
 agent call (the call's role wins over the file's) and a plain task alike; a role nothing
 defines degrades as a file's does (models): one note, and the work starts on the
 conversation's model. The system prompt of every kind that is offered `subagent` ends with a list of
@@ -1398,7 +1403,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
   auto mode, then the person's y/n), `always-no` (every write declined, journaled
-  `by: 'background'` — a background task's conversation), `none` (nobody to ask:
+  `by: 'background'`), `none` (nobody to ask:
   no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
   confirmation).
   `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
@@ -1408,11 +1413,11 @@ A saved history that holds calls under the name `background` is sent as it is. T
   running — the one-shot prompt withholds `subagent` and `remind`, which
   have nothing to deliver to without the app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
-  - a background task — declines: a background task's conversation has the policy
-    `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
-    so does a subagent the model starts (its lines are in its own journal, when it has one). A child that may write (`ChildSpec.write`, and
-    every subagent the person starts) has the policy `ask` instead, where the host has a
-    person at all (see "A conversation starts a child of its own");
+  - a background task with `writes: 'deny'`, or one where nobody can answer — declines:
+    its conversation has the policy
+    `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label. A child with `writes` other than `'deny'` (`ChildSpec.writes`,
+    and a prompt the person starts) has the policy `ask` (`allow-writes` when it
+    is `'allow'`), where the host has a person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
@@ -1473,9 +1478,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   `src/assistant/shell.ts`) and passes it into `autoConfirms` — live, not restart-only,
   since it only loosens a pause the person already chose with `/auto all`, so a
   `:config set --session shell.autoRun true` holds for the next command. A
-  background task is
-  untouched: its conversation has the policy `always-no` (a child that may write
-  keeps its own mode, which starts at `ask`), and the chat's mode never reaches it; the person's own `!command` is untouched too. The decision lives in
+  background task keeps its own auto mode: it starts as the one of the conversation
+  that started it (a `writes: 'deny'` child at `ask`), and the chat's `/auto` never
+  changes it afterwards; the person's own `!command` is untouched too. The decision lives in
   the one place the chat already pauses — the `confirmWrite` closure — and it changes
   nothing about what `agentChat` asks about: a tool never skips its own write flag.
   What ran under the mode is still shown, the ✎ diff block and the tool trail as usual.
@@ -2103,7 +2108,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
     records what was running.
   - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person` (their key), `auto`
     (the auto mode answered), `background` (a background task's run answered — the
-    `subagent` tool's task declines every write unless started with `write: true`), `stop` (Ctrl+C stopped the turn while it
+    `subagent` tool's task with `writes: 'deny'` declines every write, and so does one where
+    nobody can answer), `stop` (Ctrl+C stopped the turn while it
     was up) or `reset` (`/clear` or `/new` closed it). The call id reaches
     `confirmWrite` as `info.id`.
   - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
@@ -3422,13 +3428,22 @@ reducer filters as you type and submits on Enter, and here the line is the filte
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
-  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy `always-no` — or `ask`
-  for a subagent the person starts and for any spec with `write: true` (the `subagent` tool's
-  `write` argument starts a `task` with it: `ai.taskRounds` rounds, the worker prompt, its y/n
-  offered to the session like a subagent's — `write` absent or false is `always-no`), where the host's
-  root can ask at all (`canAsk`; with nobody to ask such a child declines) and the starter
-  can: a session, or a child that asks itself. A child that cannot ask cannot start one
-  that can, whatever its spec says. Its
+  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy
+  `childPolicy` makes from its writes capability (`ChildSpec.writes`, absent reads as
+  `'ask'`): `deny` is `always-no` read-only and never lifts, `allow` runs each write the
+  auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a
+  plugin's `run_command` — and says it in the log, `ask` waits for the person's yes on each
+  (the `subagent` tool
+  starts a `task` whose `writes` is the named agent's own `writes:` (omitted — `'ask'`) or,
+  with no `agent`, the call's own mapping: a worker `'ask'` by default, `writes: 'deny'`
+  read-only, a call's `allow` answered as `'ask'` with a note:
+  `ai.taskRounds` rounds, the worker
+  prompt, its y/n offered to the session like a subagent's — `writes` wins over the
+  deprecated `write`, `true` reading as `ask` and `false` as `deny`) — where the host's root can ask at all (`canAsk`; with nobody to ask the
+  policy is `always-no` `cannot-ask`) and the starter may vouch: a session, or a child that
+  asks itself or runs `allow`. A child that may not vouch cannot start one that may,
+  whatever its spec says. A child that is not `deny` also starts in the auto mode of the
+  conversation that started it. Its
   deps are its parent's with no sessions directory, no screens, no redraw
   (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
   asks, and `ask_user` is not in a child's tool list. It keeps no state file. A task has no
@@ -3599,9 +3614,10 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   unique among the live children (`-2`, `-3`). `--with-context` hands `conv.summary` and
   nothing else — with none, nothing starts and the line says a `/compact` makes one;
   `--auto` sets the child's own auto mode to `all` (`setAutoMode`) on the child
-  `scheduleChild` returns, before the schedule's timer lets its first turn go — the
-  starting conversation's mode is never copied (`autoConfirms` reads the asking
-  conversation's own mode, and `shell.autoRun` applies as in a session). `/subagent` alone puts a note listing
+  `scheduleChild` returns, before the schedule's timer lets its first turn go —
+  overriding the mode the child starts with, the one of the conversation that started
+  it (`autoConfirms` reads the asking conversation's own mode, and `shell.autoRun`
+  applies as in a session). `/subagent` alone puts a note listing
   the conversation's running children of both kinds, numbered (`working`, `queued`, or
   `in <time>` for a delayed task), then the ended ones (`done`, `failed`, `stopped`, the
   duration, the tokens), or `no subagents here`; `/subagent stop <n|label>` takes the
@@ -3637,16 +3653,18 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   (Esc, an empty answer or a dismissed question gives the typed line back), the trust
   question for a project file (below), then `begin` — the same start the prompt form
   uses. The prompt is `fillPrompt(agent, values)`; the label is the agent's id made
-  unique among the live children (`uniqueLabel`).
+  unique among the live children (`uniqueLabel`); the child's writes are the agent
+  file's own `writes:`, omitted — `'ask'`.
 - **Agent files** (`src/assistant/agent-file.ts` the reader, `agent-find.ts` discovery,
   `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
   docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two
   `---` lines — `description` (required), `params` (names, a trailing `?` for an optional
-  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`), `model` (a role from `ai.roles` — a ROLE, never a model id, so the file travels between machines; see (models)) —
+  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`), `model` (a role from `ai.roles` — a ROLE, never a model id, so the file travels between machines; see (models)), `writes` (allow | ask | deny (omitted: ask) — what a run of the agent may change: `ask` waits for the person's yes on each write and command, `deny` declines each one, `allow` runs each write the auto mode with `shell.autoRun` answers — not `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and is said in the log) —
   and a body; `{{name}}` in the body is replaced, single braces never. The reader is our
   own and total: every error carries the file and its 1-based line, an unknown or repeated
-  key, an undeclared `{{name}}`, a declared parameter the body never spells and a
-  malformed name each fail the file, and a failed file is never offered. A file is read at
+  key, an undeclared `{{name}}`, a declared parameter the body never spells, a `writes`
+  value outside the three and a malformed name each fail the file, and a failed file is
+  never offered. A file is read at
   each use (no cache) and hashed over its bytes (`Agent.hash`, sha-256). Three places
   (`findAgents`): the project's `.flow-assist/agents/*.md` under the git top level of the
   shell's directory (else the directory), read only when the real path of the directory and
@@ -3694,7 +3712,13 @@ reducer filters as you type and submits on Enter, and here the line is the filte
   plus the groups it names; `readTools` in `agent.ts` withholds every other tool of the
   registry, judged again on each registry revision, so a group that loads later is held
   to the list. The `core` group is not narrowed: `memory`, `config_set` and the rest of it
-  stay. The list is applied in the child's `chatLLM` wrapper (`startChild`), which every
+  stay. A child whose writes are `deny` is offered no write tools at all —
+  `WRITE_TOOLS_WITHHELD` (`conversation-turn.ts`: `write_file`, `edit_file`,
+  `workspace_write`, `run_command`, `shell_kill`) joins the `withholdTools` the wrapper
+  merges, and every descendant's calls chain through the same wrapper, so everything
+  below a `deny` child is write-blind — `deny` never lifts — `core` is whole otherwise
+  and reads run as ever, while `always-no` still declines any write a name outside the
+  set hides. The list is applied in the child's `chatLLM` wrapper (`startChild`), which every
   turn of the child and every nested run a tool starts through `ctx.chatLLM` passes
   through; a call that already carries an `allowGroups` is intersected with it, so no
   list widens the one above it. A child started by a child inherits the starter's list,
@@ -4679,7 +4703,9 @@ reducer filters as you type and submits on Enter, and here the line is the filte
     model must not promise to act on results when they arrive, only say they will come
     into the chat and it will look at them then; and that when results arrived since
     its last answer, the next answer opens with what came back, a line per task. It also
-    says the task is read-only unless `write: true`, which makes each write ask the person. The
+    says the task writes and runs commands through the person's y/n (the session's auto
+    mode answers), and `writes: 'deny'` narrows it to a read-only task, and that a named
+    agent's own `writes:` line is what its work gets. The
     call's own answer says the same (`the result appears in the chat when it ends, and
     you see it on your next turn`), and so does `config_schema`'s note for
     `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in `hostConfigSchema`'s `ai`).
@@ -5240,7 +5266,8 @@ commands; docs and hints never present either mechanism as a boundary.
     the sha-256 of the bytes the person last started (`agent-trust.ts`). A project file with
     no record, or another hash, asks at the person's start: the host's y/n slot
     (`Conversation.askAgentTrust`, `host: true`) shows the path, the description, the tool
-    groups, the auto mode after the cap and the parameters, and says `changed since you last
+    groups, the auto mode after the cap, the `writes` the file states and the parameters,
+    and says `changed since you last
     started it` when a record exists under another hash; yes records the hash and starts,
     no starts nothing, stop or reset gives the typed line back. A person's file is recorded
     at its start with no question; a plugin's has no record and is trusted with the plugin.

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec } from '../assistant/conversation-types.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import { addFact } from '../assistant/memory-store.ts';
 import { memoryTrustPath } from '../assistant/memory-trust.ts';
@@ -85,16 +86,27 @@ test('a subagent\'s request carries the framed task, the memory block and the la
 
 test('a model\'s subagent declines a write, journaled `confirm` by background, in its own file', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
+  // A deny child is offered no write tools: its run_command call is answered `Unknown
+  // tool` and never starts. The decline itself is pinned through a write outside the
+  // hidden set (`config_set`), which its always-no policy declines.
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo x > made.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+    [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model' }));
+  const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model', writes: 'deny' }));
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
-  const own = rig.subJournal('w').filter((e) => ['call-start', 'confirm', 'call'].includes(e.t));
-  expect(own.map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
+  const of = (name: string) => rig.subJournal('w').filter((e) => (['call-start', 'confirm', 'call'] as string[]).includes(e.t) && (e as { name?: string }).name === name);
+  // The hidden tool never starts: one `call` of outcome error, no confirm for it.
+  expect(of('run_command').map((e) => e.t)).toEqual(['call']);
+  expect(of('run_command')[0]).toMatchObject({ outcome: 'error' });
+  // The un-hidden write is declined by `always-no`, journaled as before.
+  expect(of('config_set').map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
+  expect(of('config_set')[1]).toMatchObject({ answer: 'no', by: 'background' });
+  expect(of('config_set')[1]!.subagent).toBeUndefined(); // in its own file the line carries no tag
+  expect(String((of('config_set')[2] as { result?: string }).result)).toContain(READ_ONLY_TASK_DECLINE);
   expect(rig.journal().filter((e) => ['call-start', 'confirm', 'call'].includes(e.t))).toEqual([]);
-  expect(own[1]).toMatchObject({ answer: 'no', by: 'background' });
-  expect(own[1]!.subagent).toBeUndefined(); // in its own file the line carries no tag
   expect(rig.journal().filter((e) => e.task)).toEqual([]);
   expect(rig.conv.confirm).toBeNull();
 });

@@ -209,11 +209,11 @@ as data another agent wrote, in a turn of its own, and answers it, asking you fi
 must. A task that gets no answer — the turn ends without one, the conversation closes or
 was left, or `ai.backgroundFollowUp` is off — goes on with its best assumption and names it in
 its result. Where the job merely leaves something open it makes an assumption without asking. Whatever would wait for your y/n (a command, a file change, a fetch off the
-allowlist) is declined, unless the assistant started the task with `write: true`: then each
-write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
-that waits does not hold one of the running places. A task started without `write: true` is
-read-only: its writes and commands are declined, and the decline tells it so, so it reports
-what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
+allowlist) stops for your yes, asked as a subagent's is (see Subagents you start), and the task
+that waits does not hold one of the running places. A task the assistant starts read-only
+(`writes: 'deny'`) is offered no write tools and has any write behind another name declined,
+and the decline tells it so, so it
+reports what it found. A task gets `ai.taskRounds` rounds (12 by default; 0 is no round cap, and then
 `ai.maxTurnTokens` bounds it); one that runs out of them says so at the end of its result
 (`stopped after 12 rounds — last: …`). Long work with many commands, each waiting for your
 yes, is better done in the conversation itself, or by an agent file you start with
@@ -456,6 +456,8 @@ Read the diff, then answer with the findings, worst first. In a code block, brac
 - `auto` is `ask`, `reads` or `all`; without it the agent asks.
 - `model` names the role the agent runs on, from your `ai.roles` (see Which model it
   runs).
+- `writes` is `allow`, `ask` or `deny`; without it each write and command waits for your
+  y/n (see What it may do).
 - The prompt spells each parameter as `{{name}}`. A `{{name}}` that `params` does not declare is
   an error, and so is a declared parameter the prompt never uses. A value left out of an
   optional parameter is the empty text. Single braces are left alone.
@@ -482,8 +484,17 @@ subagent you start (docs/safety.md, "Asking less").
 `tools` narrows the groups of tools: the agent gets the `core` group and the groups the
 file lists, and nothing else (without `tools` every group is available). It does not make the agent read-only: the `core` group stays
 whole, with `memory` and `config_set`, which asks; and a group the file lists keeps
-its writing tools, each write asking you unless its auto mode answers, as for any subagent you start. A group named in the file that is not loaded is left out, and
+its writing tools — what a run does with them is `writes`, below. A group named in the file that is not loaded is left out, and
 a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
+
+`writes` is whether the work may change anything at all: `ask` (the default) waits for
+your y/n on every write and command, `deny` makes a read-only run (the write tools and
+run_command are not offered at all, and a write behind another name is
+declined), and `allow` runs each write the auto mode with `shell.autoRun`
+answers — never `config_set`, an unlisted `web_fetch` or a plugin's `run_command` — and
+says each one in the log. Wherever the agent is started by name, the file's
+`writes` is what the work gets: its own `writes` argument does not move it. Only your
+file grants `allow`; a model asking for `allow` in a plain task is answered as `ask`.
 
 ### Which model it runs
 
@@ -508,7 +519,8 @@ An agent file is somebody else's instructions, so what you have not started does
 the assistant's word.
 
 - A **project file** asks at its first start, and again after its content changes: a y/n shows
-  the file's path, its description, the tool groups, the auto mode after the cap, the role
+  the file's path, its description, the tool groups, the auto mode after the cap, the
+  `writes` it states with what each means (see What it may do), the role
   it runs on when the file names one (`model: deep (a role from ai.roles)`), the
   parameters and the size of the prompt. `y` starts the agent and remembers this content; `n` starts nothing.
 - **Your own file** is recorded at your start and asks nothing.
@@ -528,9 +540,10 @@ project and your own that you have started with their current content, and the p
 only extra instructions, added after the prompt. Its `model` takes a role from your
 `ai.roles` too, as the file's own `model:` line does — and the call's role wins over the
 file's; a plain task may name one the same way. A role your machine does not define runs
-the work on the conversation's model, with one note (see Which model it runs). The agent runs as a background task
-that may write, each write asking you unless its auto mode answers, and its result comes back to the assistant as
-any task's does. A call that names an agent you have not started, an unknown parameter or a missing
+the work on the conversation's model, with one note (see Which model it runs). The agent runs as a background
+task whose `writes` says what it may change (see What it may do): `ask` (the default) waits for your y/n on
+every write and command, `deny` is a read-only run, `allow` runs each write unasked and says each one in
+the log. Its result comes back to the assistant as any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
 start it once yourself with `/subagent @<name>`. A file it cannot start yet (never started by you,
 or changed since) is named in one more line of the list, by `@name` and its mark only, so it can ask
@@ -972,8 +985,8 @@ for its end and is killed at its timeout. The assistant then has three more tool
 **Limits.** `shell.maxBackground` (4) shells run at once in the whole process; a fifth is
 refused, with the list of the running ones. Each keeps its last `shell.jobChars` (64000)
 characters of output, as a ring: the oldest text goes first. A subagent you started can start
-shells too; a task can only when it was started with `write: true`, and then each
-command waits for your yes.
+shells too; a task's commands wait for your yes like the chat's do, and a task started
+`writes: 'deny'` starts none.
 
 **When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
 data, to the conversation that started it, in its next turn. You see a toast

@@ -374,7 +374,6 @@ test('--auto answers a write by itself, with no block: the subagent\'s journal s
   await settleUntil(() => frameOf(ui).includes('◆ autoy-one-do finished:'));
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(fs.existsSync(a!.file)).toBe(true);
-  await new Promise((r) => setTimeout(r, 300));
   expect(await confirms(sessions, 'autoy-one-do')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });
@@ -391,16 +390,15 @@ test('--auto does not answer run_command while shell.autoRun is off: the block a
   ui.app.unmount();
 });
 
-test('the conversation\'s own /auto all does not reach a subagent started without the flag', async () => {
-  const { children: [a], ui } = await boot(['PARENT-ONE'], { autoRun: true });
+test('the conversation\'s own /auto all reaches a subagent started without the flag; with shell.autoRun its write is auto-answered', async () => {
+  const { sessions, children: [a], ui } = await boot(['PARENT-ONE'], { autoRun: true });
   await ask(ui, '/auto all');
   await settle(4);
   await ask(ui, '/subagent PARENT-ONE do it');
-  await settleUntil(() => frameOf(ui).includes(BLOCK));
-  expect(fs.existsSync(a!.file)).toBe(false);
-  pause();
-  await ui.press('y');
-  await settleUntil(() => fs.existsSync(a!.file));
+  await settleUntil(() => frameOf(ui).includes('◆ parent-one-do finished:'));
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  expect(fs.existsSync(a!.file)).toBe(true);
+  expect(await confirms(sessions, 'parent-one-do')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });
 

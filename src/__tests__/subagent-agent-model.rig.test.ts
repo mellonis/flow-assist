@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../assistant/conversation.ts';
+import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import { agentHash } from '../assistant/agent-file.ts';
 import { agentTrustPath, recordAgentStart } from '../assistant/agent-trust.ts';
@@ -76,7 +77,7 @@ test('the model starts an agent by name: the filled prompt, the id as label, the
     expect(names).toContain('datetime');
     expect(names).not.toContain('other_look');
     expect(names).not.toContain('run_command');
-    expect(modes).toEqual(['reads']);
+    expect(modes).toEqual(['ask', 'reads']);
   } finally { spy.mockRestore(); }
 });
 
@@ -90,11 +91,24 @@ test('the id works without @, and agents.maxAuto raises the cap', async () => {
     await call(rig, model, { agent: 'job' });
     await rig.until(() => child.requests.length === 1);
     await childDone(rig);
-    expect(modes).toEqual(['all']);
+    expect(modes).toEqual(['ask', 'all']);
   } finally { spy.mockRestore(); }
 });
 
-test('an agent task may write under the person\'s y/n, as a task started with write: true does', async () => {
+test('an agent file\'s auto mode is set over the inherited one: a starter at all and a file at ask leave the child at ask', async () => {
+  const { model, child, rig } = rigFor('GO-CAP');
+  project(rig, 'job', doc('auto: ask\n', 'GO-CAP go'));
+  child.script([{ hold: true }, { text: 'ok' }]);
+  rig.conv.setAutoMode('all', false);
+  const answer = await call(rig, model, { agent: '@job' });
+  expect(answer).toContain('Background task started (job)');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.autoMode)).toEqual(['ask']);
+  child.release();
+  await childDone(rig);
+});
+
+test('an agent task may write under the person\'s y/n, as a task started with `writes: ask` does', async () => {
   const { model, child, rig } = rigFor('GO-W');
   project(rig, 'job', doc('', 'GO-W go'));
   child.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'done' }]);
@@ -102,6 +116,89 @@ test('an agent task may write under the person\'s y/n, as a task started with wr
   await rig.until(() => rig.conv.offered() !== null);
   expect(rig.conv.offered()).toMatchObject({ path: ['job'] });
   rig.conv.offered()!.owner.answerConfirm(false);
+  await childDone(rig);
+});
+
+test('a named agent takes the writes of its own file, not the call\'s: an allow file runs its work where the call spelled `deny`', async () => {
+  const { model, child, rig } = rigFor('GO-WD');
+  project(rig, 'job', doc('writes: allow\n', 'GO-WD go'));
+  child.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ hold: true }, { text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'deny' });
+  // A named agent takes the writes its own file states and the call's `writes` does not
+  // move it: `allow` runs each write the auto mode with `shell.autoRun` answers and is
+  // said in the log, so no y/n is offered and the write runs. The answer says so, as the
+  // ask path names its own y/n.
+  expect(answer).not.toContain('may ask the person');
+  expect(answer).toContain("Its writes run without asking: the auto mode with shell.autoRun answers each write — never config_set, an unlisted web_fetch or a plugin's run_command — and each is said in the log.");
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['allow-writes']);
+  expect(rig.conv.offered()).toBeNull();
+  expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(true);
+  expect(rig.log.some((l) => l.includes('[write]'))).toBe(true);
+  expect(rig.journal().some((e) => e.t === 'confirm')).toBe(false);
+  child.release();
+  await childDone(rig);
+});
+
+test('an allow agent a task starts logs its writes in the ROOT log, past its starter\'s silence', async () => {
+  // The nested topology: session → plain task → named agent whose file says
+  // `writes: allow`. The reader is the root's own `pushLog` (the rig's `log`): the
+  // grandchild's unasked writes are said there, `[bg] ` over `writeLine`'s own `[write] `,
+  // whatever log a starter between them is handed.
+  const model = new ScriptedModel();
+  const outer = model.when((req) => firstUser(req).includes('outer go'));
+  const inner = model.when((req) => firstUser(req).includes('NEST'));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  project(rig, 'job', doc('writes: allow\n', 'NEST go'));
+  outer.script([{ tool: 'subagent', args: { agent: 'job' } }], [{ text: 'outer ok' }]);
+  inner.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'outer go', label: 'outer' } }], [{ text: 'Started.' }]);
+  await rig.conv.send('go');
+  await rig.idle();
+  await rig.until(() => inner.requests.length >= 1);
+  await childDone(rig);
+  expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(true);
+  expect(rig.conv.offered()).toBeNull();
+  expect(rig.log).toContain('[bg] [write] ! echo x > made.txt');
+});
+
+test('a named call\'s answer says what the file decides: no demotion note, the file\'s ask said', async () => {
+  const { model, child, rig } = rigFor('GO-WA');
+  project(rig, 'job', doc('', 'GO-WA go'));
+  child.script([{ hold: true }, { text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'allow' });
+  // The demotion note maps a call's own argument to a plain task's writes; a named
+  // agent takes the writes of its own file (the key omitted reads as `ask`), so the
+  // answer carries the ask sentence and no note about the call's `allow`.
+  expect(answer).not.toContain('own call to make');
+  expect(answer).toContain('may ask the person');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['ask']);
+  child.release();
+  await childDone(rig);
+});
+
+test('a named agent with `writes: deny` is read-only whatever the call says', async () => {
+  const { model, child, rig } = rigFor('GO-DD');
+  project(rig, 'job', doc('writes: deny\n', 'GO-DD go'));
+  // The file's `deny` is what the child gets and the call grants nothing. Its hidden
+  // write tools are answered `Unknown tool` and never start; a write outside the set
+  // is declined by its policy with the pinned sentence — no y/n is offered, the file
+  // is not made, and the decline is journaled as the background's.
+  child.script(
+    [{ tool: 'run_command', args: { command: 'echo x > denied.txt' } }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: '["Pondering"]', scope: 'session' } }],
+    [{ hold: true }, { text: 'done' }]);
+  const answer = await call(rig, model, { agent: 'job', writes: 'allow' });
+  expect(answer).not.toContain('may ask the person');
+  await rig.until(() => child.held);
+  expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['always-no']);
+  expect(rig.conv.offered()).toBeNull();
+  expect(fs.existsSync(path.join(rig.root, 'denied.txt'))).toBe(false);
+  expect(rig.journal().some((e) => e.t === 'confirm' && e.answer === 'no' && e.by === 'background')).toBe(true);
+  expect(rig.journal().filter((e) => e.t === 'confirm' && (e as { name?: string }).name === 'run_command')).toEqual([]);
+  expect(String((rig.journal().find((e) => e.t === 'call' && (e as { name?: string }).name === 'config_set') as { result?: string } | undefined)?.result)).toContain(READ_ONLY_TASK_DECLINE);
+  child.release();
   await childDone(rig);
 });
 
@@ -157,6 +254,15 @@ test('refusals are the tool\'s answer, worded for the model, and nothing starts'
   expect(await said({ agent: 'job' })).toBe('subagent: @job needs ticket, branch');
   expect(await said({ agent: 'job', args: { ticket: 'a', branch: 'b', nope: 'x' } })).toContain('@job has no parameter «nope»');
   expect(await said({ agent: 'loose', args: { ticket: 'a' } })).toBe('subagent: @loose is not trusted here — ask the person to start @loose once');
+  expect(child.requests).toHaveLength(0);
+  expect(rig.journal().filter((e) => e.t === 'task-start')).toHaveLength(0);
+});
+
+test('a named call with an unknown writes value is the tool\'s error and starts nothing', async () => {
+  const { model, child, rig } = rigFor('GO-EW');
+  project(rig, 'job', doc('', 'GO-EW go'));
+  const answer = await call(rig, model, { agent: 'job', writes: 'nope' });
+  expect(answer).toContain('is not one of allow, ask, deny');
   expect(child.requests).toHaveLength(0);
   expect(rig.journal().filter((e) => e.t === 'task-start')).toHaveLength(0);
 });

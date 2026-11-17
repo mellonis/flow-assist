@@ -39,10 +39,10 @@
 //   - `config_set` — config is the person's, and even a key the model may change
 //     changes only with their yes.
 // `web_fetch` and `config_set` are never automatic, whatever is set.
-// A background task is not covered here at all: one started read-only declines writes by
-// construction — it is given a confirmation that always answers no — and one started with
-// `write: true` asks the person for each write; the chat's mode never reaches either. Nor is the
-// person's own `!command`: they typed it.
+// A background task keeps its own auto mode: it starts as the one of the conversation that
+// started it (a `writes: 'deny'` child at `ask`), and the chat's `/auto` never changes it
+// afterwards. A `deny` child declines writes by construction — it is given a confirmation
+// that always answers no. Nor is the person's own `!command`: they typed it.
 
 export type AutoMode = 'ask' | 'reads' | 'all';
 
