@@ -1721,6 +1721,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   and the command line. A surface sized by the terminal was four rows too tall and
   pushed the command line off the screen.
 
+- **A follow-up turn never scrolls the reader up to the result it follows.** The rows of
+  a landed background result bound the answer being read: while a follow-up turn writes
+  only tool-call rounds, the answer anchor no longer reaches past the landed block to an
+  older answer's first row above it — the chat used to jump up to the block on every
+  turn and stay there.
+
 ## 0.1.0 — 2026-09-22
 
 The first version: a terminal assistant host that knows no company and no system,
