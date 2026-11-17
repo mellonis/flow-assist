@@ -1,6 +1,6 @@
 // A session left by /resume, the picker or /new while its turn runs goes on headless: its
 // rows reach its journal, the picker reads it `here · working`, and it is put away `done`
-// once the turn ends (AGENTS.md (a host makes its conversations through one registry)).
+// once the turn ends (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

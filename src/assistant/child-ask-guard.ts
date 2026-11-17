@@ -1,4 +1,4 @@
-// When a `y` or `n` may answer the y/n of a subagent (AGENTS.md (subagent y/n)). A
+// When a `y` or `n` may answer the y/n of a subagent (ask-children-spec.md (subagent y/n)). A
 // subagent's request arrives while the person is doing something else, often typing; a key
 // meant for the field must never become a yes to another agent's write. So an answer counts
 // only after a pause: a stretch after the block came on screen, and a stretch after the

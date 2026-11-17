@@ -1,5 +1,5 @@
 // Which request each key reaches while a subagent the person started is idle or in a later
-// turn (AGENTS.md (subagent y/n), (agent tree), (watching a child)): the session's own y/n,
+// turn (ask-children-spec.md (subagent y/n), (agent tree), (watching a child)): the session's own y/n,
 // the settings-file y/n and the session's question keep their keys; a later turn's y/n is
 // offered like any child's; the tree rows and the watch act on an idle node; a `/subagent
 // tell` typed while a y/n waits is a command line. The real app on the scripted model; the

@@ -1,5 +1,5 @@
 // A run_command the model started and a key stopped says which key, in the journal's
-// result and in the console row the chat shows (AGENTS.md (a host makes its conversations
+// result and in the console row the chat shows (sessions-journal-spec.md (a host makes its conversations
 // through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';

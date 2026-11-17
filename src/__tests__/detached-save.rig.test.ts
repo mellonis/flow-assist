@@ -1,5 +1,5 @@
 // A conversation no port draws saves what it holds: its own list and the draft it kept
-// when its port left (AGENTS.md (sessions survive a restart)).
+// when its port left (sessions-journal-spec.md (sessions survive a restart)).
 import { afterEach, expect, test } from 'bun:test';
 import { writeSession } from '../assistant/conversation-session.ts';
 import { resultItem } from '../assistant/__tests__/conversation-deps.ts';

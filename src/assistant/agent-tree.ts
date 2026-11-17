@@ -1,4 +1,4 @@
-// The agent tree as rows (AGENTS.md (agent tree)): which live descendants of a conversation
+// The agent tree as rows (ask-children-spec.md (agent tree)): which live descendants of a conversation
 // are drawn under its field, what a row says, where the cursor goes when the rows change,
 // and the question that guards a stop. Pure: the chat draws what these return.
 import { cellWidth, cutStep } from '../cells.js';
@@ -67,7 +67,7 @@ function stateOf(n: TreeNode, now: number): string {
 }
 
 // What a node does, with its mark: the words of its tree row after the label. The watch's
-// hint row says the same (AGENTS.md (watching a child)).
+// hint row says the same (ask-children-spec.md (watching a child)).
 export function nodeState(n: TreeNode, now = Date.now()): string {
   return `${n.shell ? SHELL_MARK : MARK[n.status]} ${stateOf(n, now)}`;
 }

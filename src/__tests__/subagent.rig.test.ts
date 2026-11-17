@@ -1,4 +1,4 @@
-// A subagent is a child conversation of its own kind (AGENTS.md (a conversation starts a
+// A subagent is a child conversation of its own kind (ask-children-spec.md (a conversation starts a
 // child)): read-only, the config's limits, its own summary kept through a compaction, its
 // calls in a file of its own, its start and end in the journal of the session that started it.
 import { afterEach, expect, test } from 'bun:test';

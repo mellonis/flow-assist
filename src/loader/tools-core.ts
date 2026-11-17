@@ -815,7 +815,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       }
       case 'subagent': {
         // Offload a self-contained task to a CHILD conversation of the one whose turn
-        // called this (AGENTS.md, "A conversation starts a child of its own"): its own
+        // called this (ask-children-spec.md, "A conversation starts a child of its own"): its own
         // plan, shell, tool set and abort, no recall, `ai.taskRounds` rounds. A plain
         // task is a worker: writes and commands wait for the person's yes in the chat
         // that started it. A `writes: 'deny'` task is read-only: it is offered no write
@@ -865,7 +865,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const startChild = c.startChild;
         if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
         // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
-        // itself (AGENTS.md (child schedule)) is one function the slash commands share.
+        // itself (sessions-journal-spec.md (child schedule)) is one function the slash commands share.
         // A named agent takes the writes its own file states (`writes:` in the header,
         // the worker `ask` where the key is omitted) and the call's `writes` does not
         // move it; a plain task takes the call's own mapping: a worker `ask` by default,

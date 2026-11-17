@@ -1,5 +1,5 @@
 // A session whose subagent waits for the person says so, and a child that waits holds no
-// slot (AGENTS.md (a host makes its conversations through one registry), AGENTS.md (a
+// slot (sessions-journal-spec.md (a host makes its conversations through one registry), ask-children-spec.md (a
 // conversation starts a child of its own)).
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';

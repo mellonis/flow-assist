@@ -1,5 +1,5 @@
 // A conversation: the model's history and the list the person reads, what runs and what
-// waits, the session it is saved as. The chat draws one and drives it (AGENTS.md, "The chat").
+// waits, the session it is saved as. The chat draws one and drives it (AGENTS.md, "The chat — the contracts").
 import crypto from 'node:crypto';
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
 import { askShown, askStart, type AskQuestion, type AskState } from './ask.js';
@@ -205,7 +205,7 @@ export class Conversation {
 
   // ── the running thing
   private busyNow = false;
-  // A child's flip is a change of the tree it belongs to (`AGENTS.md (agent tree)`).
+  // A child's flip is a change of the tree it belongs to (`ask-children-spec.md (agent tree)`).
   get busy(): boolean { return this.busyNow; }
   set busy(on: boolean) {
     if (this.busyNow === on) return;

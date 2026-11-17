@@ -1,4 +1,4 @@
-// A conversation starts a child of its own (`startChild`, AGENTS.md (a conversation starts
+// A conversation starts a child of its own (`startChild`, ask-children-spec.md (a conversation starts
 // a child)): a `task` conversation whose tool calls are journaled in its parent's turn,
 // tagged with its label, in its parent's project, from its parent's directory — and no
 // file of its own.

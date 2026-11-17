@@ -1,6 +1,6 @@
 // A long answer is read from its first line: while it fits, the conversation follows
 // the bottom; once its first row would leave the top (under the pinned question), the
-// list stops there and the rest grows below the fold. AGENTS.md, "Where the eye is
+// list stops there and the rest grows below the fold. chat-spec.md, "Where the eye is
 // left" under The chat.
 
 import { expect, test } from 'bun:test';

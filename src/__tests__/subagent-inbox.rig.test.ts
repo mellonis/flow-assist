@@ -1,6 +1,6 @@
 // A result goes to the nearest conversation above that takes it: a task a subagent started
 // lands in the subagent, whose later turn reads it through its schedule, and the answer of
-// that turn goes up (AGENTS.md (a conversation starts a child)).
+// that turn goes up (ask-children-spec.md (a conversation starts a child)).
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import type { Conversation } from '../assistant/conversation.ts';

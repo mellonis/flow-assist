@@ -10,7 +10,7 @@
 // is also why the model may not spend one of its own options on "Other".
 //
 // Answering by TYPING starts that free-text field, and the field itself is flowtty's
-// editor — the same one the chat's own field is (see AGENTS.md, "The field's EDITING
+// editor — the same one the chat's own field is (see chat-spec.md, "The field's EDITING
 // is flowtty's editorReducer"), so caret motion, the kill bindings and paste are not
 // written here and cannot drift from the chat's.
 

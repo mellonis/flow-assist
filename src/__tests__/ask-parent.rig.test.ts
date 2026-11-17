@@ -1,5 +1,5 @@
 // `ask_parent`: a task or a subagent puts one question to the conversation that started it
-// and waits for the answer as a child waits on a y/n (AGENTS.md (a conversation starts a
+// and waits for the answer as a child waits on a y/n (ask-children-spec.md (a conversation starts a
 // child of its own)).
 import { afterEach, expect, test } from 'bun:test';
 import { askKey } from '../assistant/ask.ts';

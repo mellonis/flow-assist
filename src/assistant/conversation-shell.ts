@@ -1,6 +1,6 @@
 // The person's `!command` and `!!command`, run in a conversation. A function over a
 // Conversation, which holds the state; its method calls it, and the chat answers its
-// events (AGENTS.md, "The chat").
+// events (AGENTS.md, "The chat — the contracts").
 import { capConsoleData, consoleData } from './console-view.js';
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from './interactive.js';
 import { outputJournal } from './journal.js';
@@ -15,7 +15,7 @@ import type { Conversation } from './conversation.js';
 // ── `!command &` — the person starts a background shell (./shell-job.ts) ──
 // The same command, directory and whole environment as `!command`; but the conversation is
 // not busy, nothing is waited for, and the field is free at once. The block the job leaves
-// is its tree row (AGENTS.md (agent tree)); a start the host refuses (the limit, with the
+// is its tree row (ask-children-spec.md (agent tree)); a start the host refuses (the limit, with the
 // running jobs listed) is said as the `!` errors are. `line` is what was typed, `command`
 // what runs: the line is kept for ↑.
 export function runBackgroundShell(c: Conversation, command: string, line: string): boolean {

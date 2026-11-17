@@ -1,7 +1,7 @@
 // A session the chat has left is put away in one order: what waits in its inbox lands,
 // it is saved, and only then is its lock released — another process that takes the
 // session reads a file that has the result — and it is closed; the chat is told last
-// (AGENTS.md (a host makes its conversations through one registry)).
+// (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { expect, test } from 'bun:test';
 import type { Conversation } from '../conversation.ts';
 import { ConversationRegistry, type RegistryInit } from '../registry.ts';

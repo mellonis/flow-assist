@@ -1,4 +1,4 @@
-// A conversation's background shells (AGENTS.md, "A host makes its conversations through
+// A conversation's background shells (sessions-journal-spec.md, "A host makes its conversations through
 // one registry"): what the journal says, who counts them, and every way they end — on real
 // processes, because only a real process group shows that a kill reached everything the
 // command started.

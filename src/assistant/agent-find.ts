@@ -1,5 +1,5 @@
 // Where agent files are, read at the moment of the call (no cache: the file is read at
-// each start — AGENTS.md (agent files)). Three places:
+// each start — ask-children-spec.md (agent files)). Three places:
 //
 // - the project's: `<project>/.flow-assist/agents/*.md`, `<project>` being the git top
 //   level of the shell's directory (else the directory itself). Read only inside

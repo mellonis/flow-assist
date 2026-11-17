@@ -2,7 +2,7 @@
 // drawn by nobody, until the task ends: the result lands in that session's file and
 // journal, not on screen, and starts no turn; the session is put away afterwards. Taken
 // back while the task runs, it is the same conversation, with its draft
-// (AGENTS.md (a host makes its conversations through one registry)).
+// (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -167,7 +167,7 @@ test('/resume of the session on screen with nothing running keeps its lock as it
 
 // ─── the picker ──────────────────────────────────────────────────────────────
 // A session held here reads `here · working` and is taken back on ⏎; a result nobody saw
-// reads `done` (AGENTS.md (A session held here)).
+// reads `done` (sessions-journal-spec.md (A session held here)).
 
 const rowOf = (frame: string, text: string) => frame.split('\n').find((r) => r.includes(text)) ?? '';
 const chord = async (ui: Awaited<ReturnType<typeof bootApp>>, name: string) => { ui.backend.press({ name, ctrl: true }); await settle(); };
@@ -298,7 +298,7 @@ test('a session left with two tasks reads `here · working` after the first resu
 
 // ─── the open picker follows the registry ────────────────────────────────────
 // A session held here that is put away while the picker is open reads its file's status
-// with no key pressed; a rename being typed is left as it is (AGENTS.md (A session held here)).
+// with no key pressed; a rename being typed is left as it is (sessions-journal-spec.md (A session held here)).
 
 test('an open picker re-reads a session held here as it is put away: `here · working`, then its file status, with no key pressed', async () => {
   const model = new ScriptedModel();

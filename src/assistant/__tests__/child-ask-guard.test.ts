@@ -1,4 +1,4 @@
-// When a `y` or `n` may answer a subagent's y/n (AGENTS.md (subagent y/n)): a pause after
+// When a `y` or `n` may answer a subagent's y/n (ask-children-spec.md (subagent y/n)): a pause after
 // the request came on screen and a pause after the person's last key. The clock is the
 // guard's seam, moved by the tests.
 import { afterEach, expect, test } from 'bun:test';

@@ -1,4 +1,4 @@
-// The `subagent` tool end to end (AGENTS.md, "A conversation starts a child of its
+// The `subagent` tool end to end (ask-children-spec.md, "A conversation starts a child of its
 // own"): a task is a child conversation of the one whose turn called the tool — its
 // requests carry the worker prompt, its writes and commands stop for the person's y/n, its result comes back as the
 // toast, the log line and an inbox row of that conversation — and it runs in the host's slots, under the

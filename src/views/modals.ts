@@ -1474,7 +1474,7 @@ export interface PagerView {
   title: string;
 }
 
-// A watched child (AGENTS.md (watching a child)): its rows in the conversation's place, the
+// A watched child (ask-children-spec.md (watching a child)): its rows in the conversation's place, the
 // labels from the session's child down to it for the frame title, `state` what it does
 // (the hint row's left text), `ended` whether it has ended, `ask` the stop question that
 // takes the left text's place (null — none). `request` is the y/n of the node or of one
@@ -1657,7 +1657,7 @@ const TREE_LIST_MIN = 4;
 // no line of its own besides the rows, the stop question taking the cursor row's place
 // and the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are
 // `chatRoom`'s. The chat draws this many rows, and its keys use the same geometry, with
-// the nodes read at the key (AGENTS.md (agent tree)).
+// the nodes read at the key (ask-children-spec.md (agent tree)).
 export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
   if (hidden || max <= 0 || nodes <= 0) return 0;
   const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;
@@ -1802,7 +1802,7 @@ export function renderChatModal({
   // deciding on exactly that line.
   pendingConfirm?: ConfirmAsk | null;
   // One line above the field: a subagent waits for a y/n that a field with a draft cannot
-  // take (AGENTS.md (subagent y/n)). It is a row of the field's place.
+  // take (ask-children-spec.md (subagent y/n)). It is a row of the field's place.
   askNotice?: string | null;
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
@@ -2790,7 +2790,7 @@ function askView(state: AskState, wrap: number) {
 export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean;
   // The labels of the subagent that asks, from the one the conversation started down to it:
   // the request is a subagent's, not the conversation's own. Its title names them and its
-  // hint carries only the two keys that answer it (AGENTS.md (subagent y/n)).
+  // hint carries only the two keys that answer it (ask-children-spec.md (subagent y/n)).
   path?: string[] }
 
 // The y/n block's pieces, the same way.

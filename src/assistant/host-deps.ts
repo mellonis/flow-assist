@@ -1,4 +1,4 @@
-// What a conversation is handed by the host it runs in (AGENTS.md, "A conversation has a
+// What a conversation is handed by the host it runs in (ask-children-spec.md, "A conversation has a
 // kind"): the chat's, the one-shot's and a test rig's, from one place. Every member reads
 // `services()` when it is CALLED: the App rebinds some services on every render, and a
 // plugin that joins late is seen.

@@ -1,4 +1,4 @@
-// Every conversation a host runs is made here, by one of these (AGENTS.md, "A host makes
+// Every conversation a host runs is made here, by one of these (sessions-journal-spec.md, "A host makes
 // its conversations through one registry"): the chat has one for its life, the one-shot
 // one for its run, a test rig one per rig. It holds what is the host's rather than any
 // one conversation's: the lock token that makes a session's lock this host's own, what is
@@ -14,7 +14,7 @@ import { ShellJobs } from './shell-job.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
 
 // The host's bookkeeping for background tasks, shared by every conversation it makes
-// (AGENTS.md, "A host makes its conversations through one registry").
+// (sessions-journal-spec.md, "A host makes its conversations through one registry").
 export interface ChildSlots {
   // A task counted from the moment it is armed (its delay starts): what `N in background`
   // shows. `timer` is the delay's handle, kept so `cancelArmed` can stop a task that has
@@ -225,7 +225,7 @@ export class ConversationRegistry {
     if (own === 'waiting' || c.subtreeWaiting) return 'waiting';
     return c.hasWorkingChildren ? 'working' : own;
   }
-  // Nothing of its own is left (AGENTS.md (a host makes its conversations through one
+  // Nothing of its own is left (sessions-journal-spec.md (a host makes its conversations through one
   // registry)), clause by clause:
   // - `busy`: a turn, a `!command`, a `!!` ask's hop or a slash command runs;
   // - `children`: a task it started has not delivered its result yet, or a subagent it
@@ -339,7 +339,7 @@ export class ConversationRegistry {
     this.notifyChange();
   }
   // A session left that has finished: its answer is waiting unread, a toast says so once
-  // (a toast only, no alert; AGENTS.md (a host makes its conversations through one
+  // (a toast only, no alert; sessions-journal-spec.md (a host makes its conversations through one
   // registry)).
   private finishedSaid(c: Conversation): void {
     const svc = this.init.services() as { showMessage?: (t: string) => void };

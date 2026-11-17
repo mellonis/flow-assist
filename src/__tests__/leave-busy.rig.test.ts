@@ -1,5 +1,5 @@
 // A session the chat leaves while it has work of its own stays loaded and locked, and the
-// registry puts it away only once nothing of its own is left (AGENTS.md (a host makes its
+// registry puts it away only once nothing of its own is left (sessions-journal-spec.md (a host makes its
 // conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';

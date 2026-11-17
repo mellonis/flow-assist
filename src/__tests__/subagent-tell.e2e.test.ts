@@ -1,4 +1,4 @@
-// `/subagent tell <n|name> <text>`: the person writes to a subagent they started (AGENTS.md
+// `/subagent tell <n|name> <text>`: the person writes to a subagent they started (ask-children-spec.md
 // (subagent command)). The real app on the scripted model; a child's requests are told
 // from the session's by the first user message, which is its task for its whole life.
 import { afterEach, expect, test } from 'bun:test';

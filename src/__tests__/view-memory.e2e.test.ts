@@ -1,7 +1,7 @@
 // A session the chat leaves while it works stays loaded here and is taken back as the
 // same conversation: its unfolded blocks and its notes mode come back with it. One put
 // away, one read from its file and a cleared one open as any saved session does —
-// folded, on the config's notes mode (AGENTS.md (The chat draws a `Conversation`'s
+// folded, on the config's notes mode (chat-spec.md (The chat draws a `Conversation`'s
 // snapshot)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';

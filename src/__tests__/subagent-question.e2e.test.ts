@@ -1,5 +1,5 @@
 // A question a subagent the person started puts to its parent (`ask_parent`), drawn to the
-// person as a one-item free-text `ask_user` block (AGENTS.md (subagent y/n)): in the field's
+// person as a one-item free-text `ask_user` block (ask-children-spec.md (subagent y/n)): in the field's
 // place while the field is empty, a notice above the field while it holds a draft, answered
 // with the question's keys after the same pause a subagent's y/n has. The real app on the
 // scripted model; the pause is read from `askClock`, which the tests move.

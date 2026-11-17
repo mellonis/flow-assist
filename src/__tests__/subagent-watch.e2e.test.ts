@@ -1,4 +1,4 @@
-// Watching a child (AGENTS.md (watching a child)): ⏎ on a subagent's row shows its conversation
+// Watching a child (ask-children-spec.md (watching a child)): ⏎ on a subagent's row shows its conversation
 // where the list is, the session's own values stay the session's, and Esc steps back. The
 // real app on the scripted model; a child is held with `{ hold: true as const }` until the test lets
 // it go.
@@ -505,7 +505,7 @@ test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on 
   ui.app.unmount();
 });
 
-// ---- a y/n in the watch (AGENTS.md (watching a child)) ----
+// ---- a y/n in the watch (ask-children-spec.md (watching a child)) ----
 
 const BLOCK = 'Confirm write: run_command';
 const tmpRoot = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-ask-')));

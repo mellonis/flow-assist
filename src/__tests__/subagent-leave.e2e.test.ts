@@ -1,5 +1,5 @@
 // A session left while it has an idle subagent stays loaded: the person who comes back finds the
-// subagent in the same conversation and can write to it (AGENTS.md (a host makes its
+// subagent in the same conversation and can write to it (sessions-journal-spec.md (a host makes its
 // conversations through one registry)). The real app on the scripted model.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';

@@ -1,5 +1,5 @@
 // The live descendants of a conversation as data: the walk, the status of each, and the
-// `tree` event that reaches the root (AGENTS.md (agent tree)).
+// `tree` event that reaches the root (ask-children-spec.md (agent tree)).
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import type { Conversation } from '../assistant/conversation.ts';

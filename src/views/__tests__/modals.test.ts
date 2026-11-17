@@ -893,7 +893,7 @@ test('a capped string is cut between clusters, never inside one', () => {
 });
 
 
-// The live subagents under the field (AGENTS.md (agent tree)): one budget serves what is
+// The live subagents under the field (ask-children-spec.md (agent tree)): one budget serves what is
 // drawn and what a key may reach.
 const room = (over: Record<string, unknown> = {}) => chatRoom({ width: 80, height: 24, input: '', ...over });
 const budget = (over: Partial<Parameters<typeof treeBudget>[0]> = {}) => {
@@ -983,7 +983,7 @@ test('the tree is not drawn under a y/n, and a row is cut to one line', async ()
   h2.unmount();
 });
 
-// A watched child (AGENTS.md (watching a child)): its rows in the list's place under a
+// A watched child (ask-children-spec.md (watching a child)): its rows in the list's place under a
 // breadcrumb title, the hint row naming what it does and the keys, and none of the session's
 // plan, queue, field, completion or tree.
 test('the chat draws a watched child: breadcrumb title, its rows, state and keys in the hint row, no field, tree or plan', async () => {

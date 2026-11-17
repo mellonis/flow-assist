@@ -1,5 +1,5 @@
 // `/subagent`: what the person's line means, how a job is named, how the listing reads
-// (AGENTS.md (subagent command)). Pure text in, text out; the chat starts, lists and
+// (ask-children-spec.md (subagent command)). Pure text in, text out; the chat starts, lists and
 // stops through the conversation.
 import { formatDuration } from './duration.js';
 import type { EndedChild, RunningChild } from './conversation-types.js';

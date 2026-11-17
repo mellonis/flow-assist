@@ -1,4 +1,4 @@
-// An agent file: a named subagent described in a Markdown file (AGENTS.md (agent
+// An agent file: a named subagent described in a Markdown file (ask-children-spec.md (agent
 // files)). A header between two `---` lines of plain `key: value` lines, then the body,
 // which is the agent's prompt. The reader is our own and small: every error names the
 // file and the 1-based line it stands on, and a file with any error is not an agent.
