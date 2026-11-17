@@ -62,6 +62,7 @@ import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
+import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
@@ -379,7 +380,7 @@ export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?
 // chat's own rate for a view that updates fast.
 const CONSOLE_REDRAW_MS = 200;
 
-export function renderApp(
+export async function renderApp(
   root: Backend,
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late: lateIn, untrusted: untrustedIn = [], trustNotes = [], site: siteIn }: RenderAppInput,
 ) {
@@ -403,8 +404,27 @@ export function renderApp(
   // point that takes them out of text reads this set (src/assistant/secrets.ts).
   refreshSecrets(config);
   const userTheme = config.theme as Theme | undefined;
-  let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
+  // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
+  // the terminal's own light/dark scheme, `light` and `dark` pin one whatever the
+  // terminal says. `seenConfigMode` is what the config last said, so a mode a picker
+  // pinned (below) is not undone by the next render.
+  const configThemeMode = (): ThemeMode | undefined => (config.ui as { theme?: ThemeMode } | undefined)?.theme;
+  let seenConfigMode: ThemeMode | undefined = configThemeMode();
+  let pinnedScheme: ThemeMode | null = seenConfigMode ?? 'system';
+  let terminalScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
+  let themeScheme: ColorScheme = schemeFor(pinnedScheme, terminalScheme);
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
+  // The ONE place a resolved palette is laid into the running app's theme object — the
+  // same object the plugins and the renderers were given (a plugin may hold the
+  // reference), emptied and refilled, never replaced. The resolve above builds it; every
+  // later change (a plugin joining, the terminal's scheme, a pinned mode) comes here.
+  const applyTheme = (scheme: ColorScheme) => {
+    themeScheme = scheme;
+    const theme = config.theme as Theme;
+    const next = resolveAppTheme(userTheme, plugins, config, scheme);
+    for (const key of Object.keys(theme)) delete theme[key];
+    Object.assign(theme, next);
+  };
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
@@ -456,6 +476,17 @@ export function renderApp(
     (services as unknown as ReactBoundServices).logs = services.log.read();
   };
   const redraw = () => (services as unknown as ReactBoundServices).notify();
+  // What a picker pins (`host.services.setThemeMode`, src/playback/theme-mode.ts): the
+  // mode is stored and the palette re-resolved in place at once — the same resolve the
+  // terminal's own scheme change does — then the screen is drawn again with it. A mode
+  // set as a config value (`ui.theme`) reaches the same resolve through the App's own
+  // read of it, so there is one helper, not two.
+  const setThemeMode = (mode: ThemeMode) => {
+    pinnedScheme = mode;
+    terminalScheme = root.colorScheme?.().scheme ?? terminalScheme;
+    applyTheme(schemeFor(mode, terminalScheme));
+    redraw();
+  };
   // The host's own commands. `plugins` carries its `run`: on the `:` line it opens the
   // runtime's panel, in the chat (`chat: true`) the same panel in the chat's frame.
   const hostCommands: Command[] = BASE_COMMANDS.map((c) => (c.name === 'plugins'
@@ -513,10 +544,8 @@ export function renderApp(
     Object.assign(keys, nextKeys);
     Object.assign(viewRegistry, buildViewRegistry(plugins));
     commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins, hostCommands));
-    const theme = config.theme as Theme;
-    const nextTheme = resolveAppTheme(userTheme, plugins, config, themeScheme);
-    for (const key of Object.keys(theme)) delete theme[key];
-    Object.assign(theme, nextTheme);
+    // The palette follows the config and the mode, not the timing of a plugin's arrival.
+    applyTheme(schemeFor(pinnedScheme ?? 'system', terminalScheme));
     tools?.refresh?.();
     const aiTools = (services as unknown as HostServices).pluginAiTools;
     aiTools.splice(0, aiTools.length, ...(tools?.groups ?? []).filter((g) => g.id.endsWith(':aiTools')).flatMap((g) => g.tools as typeof aiTools));
@@ -568,14 +597,17 @@ export function renderApp(
     // The terminal switched between light and dark (macOS does it by itself at
     // sunset and sunrise): lay the other scheme's palette into the SAME theme object
     // — a plugin may hold a reference to it — before anything below renders with it.
+    // A pinned mode (`ui.theme`, or a picker's `setThemeMode`) answers its own scheme
+    // whatever the terminal says.
     const { scheme } = useColorScheme();
-    if (scheme !== themeScheme) {
-      themeScheme = scheme;
-      const theme = config.theme as Theme;
-      const next = resolveAppTheme(userTheme, plugins, config, scheme);
-      for (const key of Object.keys(theme)) delete theme[key];
-      Object.assign(theme, next);
-    }
+    terminalScheme = scheme;
+    // `ui.theme` is a live key: a value set while the app runs (`config set ui.theme
+    // light`) is read here and is the mode from then on. A mode a picker pinned is not
+    // undone by a render that follows it — the config still says what it said.
+    const fromConfig = configThemeMode();
+    if (fromConfig !== seenConfigMode) { seenConfigMode = fromConfig; pinnedScheme = fromConfig ?? 'system'; }
+    const wanted = schemeFor(pinnedScheme ?? 'system', terminalScheme);
+    if (wanted !== themeScheme) applyTheme(wanted);
 
     // React-bound services rebound on every render (merged into the shared
     // `services` object so plugins see the live channels). `showMessage` uses
@@ -618,6 +650,10 @@ export function renderApp(
       ui.overlay = overlay ?? undefined;
       notify();
     };
+    // The appearance channel (src/playback/theme-mode.ts): a picker pins `system`, `light`
+    // or `dark`; the mode is stored and the palette re-resolved in place at once, then the
+    // screen is drawn with it. `ui.theme` in the config reaches the same helper.
+    (services as unknown as HostServices).setThemeMode = setThemeMode;
     // The chat's outside channel (`postToChat`), on the SHARED services every plugin's
     // per-plugin view inherits from: the assistant registers the deliverer on its chat
     // store each render, so this delegate always asks the current one (`liveChat`, read
@@ -1423,13 +1459,16 @@ export function renderApp(
   // keys (`HostKeyPath`).
   // The meter hears each key where the terminal reports it, under the host's key path
   // (which hands a key nothing took to flowtty twice), and every frame flowtty paints.
-  return render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(metered(root, meter), keyPath), {
+  const rendered = await render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(metered(root, meter), keyPath), {
     onFrame: (stats) => meter.frame(stats),
     onCopy: (event) => onCopySelection(event, {
       say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
       fallback: (text) => copyToClipboard(text),
     }),
   });
+  // The app's own host services go back with the render handle: a test reaches a channel
+  // the way a plugin does (`setThemeMode`), not through the terminal.
+  return Object.assign(rendered, { services });
 }
 
 // What a finished copy does beyond flowtty's own clipboard write. It fires for every

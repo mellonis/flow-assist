@@ -151,12 +151,17 @@ export const hostConfigSchema = z.object({
   // may take under the field (src/assistant/agent-tree.ts).
   // `verbs` — the words the chat's status line picks from while the model works (one
   // per request, src/assistant/verbs.ts); an empty list keeps the built-in ones.
+  // `theme` — the appearance the app draws in (src/playback/theme-mode.ts): `system`
+  // follows the terminal's own light/dark scheme (the default), `light` and `dark` pin
+  // one whatever the terminal says. The person's own appearance: no mark for the model,
+  // and read live — setting it repaints at once.
   ui: z.object({
     // The backend is opened with the mouse or without it when the app starts.
     mouse: z.boolean().register(modelMaySet, MOUSE).register(modelMaySave, MOUSE).register(appliesOnRestart, {}).optional(),
     hover: z.boolean().register(modelMaySet, HOVER).register(modelMaySave, HOVER).register(appliesOnRestart, {}).optional(),
     agentRows: z.number().int().min(0).max(8).register(modelMaySet, AGENT_ROWS).register(modelMaySave, AGENT_ROWS).optional(),
     verbs: z.array(z.string()).register(modelMaySet, VERBS).register(modelMaySave, VERBS).optional(),
+    theme: z.enum(['system', 'light', 'dark']).optional(),
   }).optional(),
   // `file` — the memory list an older host kept; it is moved into the global workspace
   // once, at start (src/assistant/memory-store.ts, `migrateMemoryJson`).

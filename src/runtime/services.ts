@@ -110,6 +110,12 @@ export interface HostServices {
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
   // `ui.overlay` and re-renders. Generic — the tracker uses it for its detail view.
   setOverlay: (overlay: string | null) => void;
+  // Pins the appearance the app draws in (src/playback/theme-mode.ts): `system` follows
+  // the terminal's own light/dark scheme, `light` and `dark` hold one whatever the
+  // terminal says. The palette is re-resolved in place at once — the same resolve the
+  // terminal's own scheme change does — so every window and plugin palette repaints.
+  // The default is a no-op; the App binds it (app.tsx).
+  setThemeMode: (mode: import('../playback/theme-mode.js').ThemeMode) => void;
   // Puts a message into the chat from OUTSIDE the conversation — a plugin's press, a
   // background item — into the session whose work it is, framed as a plugin item (never
   // as the person's words). It never interrupts a running turn: what is posted lands
@@ -265,6 +271,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     suspend: async (fn) => fn(),
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
+    setThemeMode: () => {},
     postToChat: () => {},
     armedHint: '',
     chatDock: null,
