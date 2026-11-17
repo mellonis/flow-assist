@@ -50,7 +50,7 @@ test('a question of a subagent the person started stays parked for the person, n
   expect(q).toEqual([{ question: 'which one?', header: 'from «maker»', options: [] }]);
   expect(sessionRequests(model)).toHaveLength(0);
   typed(child, 'b', 'l', 'u', 'e');
-  expect((rig.conv.offered()!.request as ChildQuestion).state.text).toBe('blue');
+  expect((rig.conv.offered()!.request as ChildQuestion).state.drafts[0]).toMatchObject({ text: 'blue' });
   expect(sub.requests).toHaveLength(1);
   typed(child, 'return');
   await settledAll(rig);

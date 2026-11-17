@@ -605,7 +605,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // once rather than hang on a question nobody will see.
         if (!ctx.askUser) return 'ask_user: there is nobody to ask here (not an interactive chat). Proceed on your best assumption and say which one you made.';
         const done = await ctx.askUser(parsed.questions);
-        return askResult({ ...done, questions: parsed.questions, index: 0, cursor: 0, picked: [], typing: false, text: '', caret: 0, done: true });
+        return askResult({ ...done, questions: parsed.questions, index: 0, drafts: [], done: true });
       }
       case 'ask_parent': {
         const question = typeof args.question === 'string' ? args.question.trim() : '';
