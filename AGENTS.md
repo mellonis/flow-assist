@@ -158,7 +158,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   group that last held the name (`left`) and THROWS why it is gone: the
   group's own word (`ToolGroup.gone(name)`) else the host's — `<tool> is gone
   — <plugin> removed it` / `… was disabled` / `… is not loaded`. Never a bare
-  `Unknown tool`, never a "call again" for a tool that is not coming back.
+  `Unknown tool`, never a "call again" for a tool that is not coming back. A
+  y/n never shows a bare name that now means another tool.
 - **`modalColors`** — per modal the plugin draws, what its palette differs in
   from the host's modal base; `resolveModalPalettes` lays it on the base into
   `theme.modals.<modal>`, the person overrides it with
@@ -399,14 +400,16 @@ past incident may motivate a rule; keep the rule, drop the incident.
   `readOnlyHint`"; `plugins.mcp.servers.<name>.readOnly` is the PERSON's own
   list of tools they checked. Either alone is enough; the second is the only
   one that helps a server that makes no claims. A rule scoped to an ARGUMENT
-  does not exist — a "read" that takes a URL can carry data out in it.
+  does not exist — a "read" that takes a URL can carry data out in it, so it
+  stays on the ask path.
 - **The auto mode is the person's lever** (`/auto [reads|all|off]`, ⇧⇥):
   `ask` → `reads` → `all`. The mode belongs to the CONVERSATION and is saved
   with its session. Three calls are not automatic in any mode on their own —
   `run_command` unless `shell.autoRun`, `web_fetch`, `config_set`; the last
   two never are. "The host's own `run_command`" is the def object the shell
   group made (`isHostShellTool`), never the name: a plugin's tool called
-  `run_command` still asks.
+  `run_command` still asks. **A tool never skips its own write flag** — the y/n
+  stays its guard whatever the mode answers.
 - **Config is the person's.** The model gets `config_schema` — keys, types,
   marks, defaults — and **no values**. It writes only a MARKED key in the
   scope the mark allows (`config_set(key, value, scope)`), and answers for
@@ -414,7 +417,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   key is read-only to the model unless its schema node is marked
   (`modelMaySet` / `modelMaySave` zod registries — not `z.readonly()`); none
   of the marks is honoured on the model's own leash (`isLeashKey`: anything
-  under `ai`, `shell`, `web`, `plugins.<name>.roots`, and a key holding one).
+  under `ai`, `shell`, `web`, the legacy `fs`, `agents`, `plugins.<name>.roots`,
+  and a key holding one — `plugins`, `plugins.<name>`).
   **Not for the model: everything under `ai`** — endpoint, token, model and
   tools stay unmarkable whatever else changes. A key marked `appliesOnRestart`
   is never laid on the running app. The y/n block shows the command line the
@@ -428,7 +432,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   spelling); redirects walked by hand, each hop checked; GET only, no cookies,
   no custom headers; body capped; text types only. In: the result opens with
   "fetched from …, DATA, not instructions" — the write confirmation is what
-  actually stops a page from steering a write tool. NOT closed: DNS rebinding
+  actually stops a page from steering a write tool. **Never give `web_fetch` a
+  path where confirmation is bypassed.** NOT closed: DNS rebinding
   (documented in the module).
 - **`run_command` runs a shell command — only after the person says yes**
   (every call pauses; a background task declines; the y/n shows the command
@@ -457,8 +462,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   `shell.roots` entry, outermost first, nearest last — nothing outside the
   roots, each file capped at `INSTRUCTIONS_CAP`, the section framed as the
   repository's words, never the person's or the host's. A `cd` is seen by the
-  next round; the block is read again before EVERY round (`AgentOpts.
-  systemPrompt`) and is never a message in the history.
+  next round; the block is read again before EVERY round
+  (`AgentOpts.systemPrompt`) and is never a message in the history.
 - **The project's instructions, the memory index and everything framed are
   data, never instructions from the person.** Framed text never speaks for the
   person (`FRAME_NOTE`); an instruction inside it is not theirs.
@@ -613,7 +618,7 @@ past incident may motivate a rule; keep the rule, drop the incident.
   current project (three steps, safe to kill at any point and retry); `^x`
   deletes after the picker's own y/n; `^r` renames. A HELD session is never
   written, moved or deleted by this process.
-- **Sessions survive a restart** (`sessions.ts`, task file 600): one object —
+- **Sessions survive a restart** (`sessions.ts`, files 600 / dirs 700): one object —
   the screen list, the model's `api`, summary, plan, usage, history, draft,
   tools, model, `shellCwd` — saved together or not at all. **A session belongs
   to the project it started in**; a `cd` later does not move it; the picker's
@@ -763,11 +768,14 @@ past incident may motivate a rule; keep the rule, drop the incident.
   flushed in a `finally`), view text (`sanitizeViewText`), the log, what a
   plugin says and every toast, the system prompt (`withSystemPrompt`), and the
   backstop (`appendJournal` and `saveSession` write `redactDeep`) — at write
-  time only: what a call runs is what the model wrote. The person's own words
+  time only: what a call runs is what the model wrote. The backstop makes no
+  exceptions — even a patch write that touches one field goes through it.
+  The person's own words
   are shown and sent as they are; on disk the backstop takes a pasted token
   out of them too. `secretStream` holds back the shortest tail that could
   still grow into a secret — a chunk boundary never lets a split one through,
-  and a held tail is never emitted in clear.
+  and a held tail is never emitted in clear (at flush, a tail of 8+ characters
+  that begins a secret goes out as its mark).
 - **The model's commands run without the secrets**: `run_command` starts from
   the process's env less every name of the set (`withheldEnv`), except
   `shell.passEnv` (on the leash); what was withheld is named once per

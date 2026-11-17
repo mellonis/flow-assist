@@ -5,6 +5,10 @@
 > it covers: where the trimmed AGENTS.md core and this file ever disagree, the
 > core rules win — but treat any difference as a defect in one of the two and
 > report it. Covers: the agent workspace and memory records, the plan, the
+>
+> Cross-file references inside the moved text ("(models)", "(below)") follow
+> the OLD single-file layout; use DISPOSITION.md to find where a section
+> lives now.
 > session file schema, the journal events, the picker, locks and forks, and
 > the conversation registry.
 

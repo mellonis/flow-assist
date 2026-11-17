@@ -1,6 +1,6 @@
 // A conversation's work: a turn with the model, `/compact`, the y/n a write waits on and
 // the settings-file guard's own. Functions over a Conversation, which holds the state;
-// its methods call them, and the chat answers their events (AGENTS.md, "The chat").
+// its methods call them, and the chat answers their events (AGENTS.md, "The chat — the contracts").
 import path from 'node:path';
 import { taskRoundsOf, transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
 import type { AskQuestion } from './ask.js';
@@ -954,7 +954,7 @@ export function askConfigChanges(c: Conversation): Promise<void> {
   const svc = (c.deps.services() as { configChanges?: { check(): ConfigChange[]; apply(ch: ConfigChange): { applied: string[]; restart: string[] }; decline(ch: ConfigChange): string | null } }).configChanges;
   if (!svc || c.confirm || c.question) return Promise.resolve();
   // The guard is the process's, the y/n a conversation's: a change another open
-  // conversation is asking about is left to it (AGENTS.md (Secrets)).
+  // conversation is asking about is left to it (AGENTS.md (Secrets — the rules)).
   const asking = c.configAskers;
   const changes = svc.check().filter((ch) => { const o = asking.get(ch.path); return !o || o === c || o.closed; });
   if (!changes.length) return Promise.resolve();

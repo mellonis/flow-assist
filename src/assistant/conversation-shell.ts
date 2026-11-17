@@ -1,6 +1,6 @@
 // The person's `!command` and `!!command`, run in a conversation. A function over a
 // Conversation, which holds the state; its method calls it, and the chat answers its
-// events (AGENTS.md, "The chat").
+// events (AGENTS.md, "The chat — the contracts").
 import { capConsoleData, consoleData } from './console-view.js';
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from './interactive.js';
 import { outputJournal } from './journal.js';

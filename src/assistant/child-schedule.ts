@@ -1,5 +1,5 @@
 // The schedule of a child conversation: start it, arm its delay, and when the delay ends
-// admit its run into a slot and report how it ended (ask-children-spec.md (child schedule)). The
+// admit its run into a slot and report how it ended (sessions-journal-spec.md (child schedule)). The
 // `subagent` tool and any caller outside a turn share it, so the order is one:
 // start → timer → disarm → fired → admit → run → log / toast → notify.
 import { childResultBody, type ChildResult, type LaterTurn, type ChildSpec, type ChildStart } from './conversation-types.js';

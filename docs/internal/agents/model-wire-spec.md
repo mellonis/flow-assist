@@ -5,8 +5,16 @@
 > it covers: where the trimmed AGENTS.md core and this file ever disagree, the
 > core rules win — but treat any difference as a defect in one of the two and
 > report it. Covers: the context meter, the compaction handoff, cache usage,
+>
+> Cross-file references inside the moved text ("(models)", "(below)") follow
+> the OLD single-file layout; use DISPOSITION.md to find where a section
+> lives now.
 > recall and bulky items, tool-result framing and caps, what the model is
 > sent, attached images, and the turn limits and loop guard.
+>
+> Recorded open question carried over from the old file: with thinking on,
+> the Anthropic API's handling of a text block beside `tool_result` in the
+> last user turn is unverified against the live API (the double takes it).
 
 - **How full the context is, is shown — and says where the number came from.** The
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in

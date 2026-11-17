@@ -5,6 +5,10 @@
 > it covers: where the trimmed AGENTS.md core and this file ever disagree, the
 > core rules win — but treat any difference as a defect in one of the two and
 > report it. Covers: the panel layout, the chat rows and views, the `:` line
+>
+> Cross-file references inside the moved text ("(models)", "(below)") follow
+> the OLD single-file layout; use DISPOSITION.md to find where a section
+> lives now.
 > panels, the message order, keys and bindings, folds and clicks, the mouse,
 > `/model`, plugin commands through the chat, the field, and the modals.
 

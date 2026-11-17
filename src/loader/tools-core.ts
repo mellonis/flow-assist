@@ -865,7 +865,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const startChild = c.startChild;
         if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
         // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
-        // itself (ask-children-spec.md (child schedule)) is one function the slash commands share.
+        // itself (sessions-journal-spec.md (child schedule)) is one function the slash commands share.
         // A named agent takes the writes its own file states (`writes:` in the header,
         // the worker `ask` where the key is omitted) and the call's `writes` does not
         // move it; a plain task takes the call's own mapping: a worker `ask` by default,

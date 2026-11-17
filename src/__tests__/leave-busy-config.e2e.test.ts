@@ -1,6 +1,6 @@
 // A settings-file change is asked in one conversation at a time: while a left session holds
 // the y/n the session on screen leaves it alone, and an answer is checked against the file
-// once more (AGENTS.md (Secrets)).
+// once more (AGENTS.md (Secrets — the rules)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

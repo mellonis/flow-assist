@@ -5,6 +5,10 @@
 > it covers: where the trimmed AGENTS.md core and this file ever disagree, the
 > core rules win — but treat any difference as a defect in one of the two and
 > report it. Covers: late loading and the first frame, a plugin process and
+>
+> Cross-file references inside the moved text ("(models)", "(below)") follow
+> the OLD single-file layout; use DISPOSITION.md to find where a section
+> lives now.
 > the MCP server retry, handled keys, the guest rule and the start screen,
 > screens and their refusals, and remote plugins end to end.
 

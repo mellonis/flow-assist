@@ -5,6 +5,10 @@
 > it covers: where the trimmed AGENTS.md core and this file ever disagree, the
 > core rules win — but treat any difference as a defect in one of the two and
 > report it. Covers: `run_command`, background shell jobs, `cd` and project
+>
+> Cross-file references inside the moved text ("(models)", "(below)") follow
+> the OLD single-file layout; use DISPOSITION.md to find where a section
+> lives now.
 > instructions, and the `!command` / `!!command` lifecycles.
 
 - **`run_command` runs a shell command — only after the person says yes**

@@ -1,5 +1,5 @@
 // The model's job-offloading tool is `subagent`. A saved session whose history holds calls
-// under the name `background` still sends cleanly (AGENTS.md (What the model can do)).
+// under the name `background` still sends cleanly (AGENTS.md (What the model can do — the rules)).
 import { afterEach, expect, test } from 'bun:test';
 import { loadSession, saveSession } from '../assistant/sessions.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
