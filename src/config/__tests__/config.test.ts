@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig, acceptedConfigPath } from '../load';
+import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig, acceptedConfigPath, configMarks } from '../load';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,6 +29,17 @@ test('ai uses assistantLanguage + disabledTools, not chatLanguage/tools/trackerL
 test('config write validation rejects an unknown key and a bad type', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', 'yes').ok).toBe(false);
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', true).ok).toBe(true);
+});
+
+test('project.instructionsCap takes a non-negative integer — and the model may not set it', () => {
+  expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 8192)).toEqual({ ok: true, value: 8192 });
+  expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 0)).toEqual({ ok: true, value: 0 });
+  expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', -1).ok).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 'big').ok).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 1.5).ok).toBe(false);
+  // No mark on it: how big the instructions ride is the developer's editorial call —
+  // and it applies live (no `restart`), since every read of the chain takes it.
+  expect(configMarks(hostConfigSchema, 'project.instructionsCap')).toMatchObject({ maySet: null, maySave: null, restart: false });
 });
 
 test('config set ai.backgroundFollowUp takes a boolean — what the chat reads with `!== false`', () => {
