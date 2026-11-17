@@ -11,7 +11,7 @@
 
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
-import { isPrintable, type Backend } from '@flowtty/core';
+import { editorReducer, nextGrapheme, type Backend } from '@flowtty/core';
 import { Fragment, createContext, createElement as h, useContext, useEffect, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
@@ -197,6 +197,9 @@ export interface RenderAppInput {
 interface CommandLineState {
   open: boolean;
   input: string;
+  // Where the next key edits: the person's caret, an index into `input` (the line is
+  // one row, so the caret is the only thing that says where a key goes).
+  caret: number;
   // History of executed `:`-commands + the cursor index. `historyIdx` = -1 (or
   // history.length) means "the live edit buffer, not a recalled line"; up
   // decrements toward the newest recallable entry, down returns toward the
@@ -547,7 +550,7 @@ export function renderApp(
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
   (services as unknown as HostServices).hostKeys = () => ({ panel: !!ui.hostPanel, line: !!ui.cmdOpen });
-  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null, list: newListState() } as CommandLineState };
+  const cmdline = { current: { open: false, input: '', caret: 0, history: [], historyIdx: -1, walk: null, list: newListState() } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
   const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pressed: () => undefined, pass: 1, heard: false };
 
@@ -922,6 +925,8 @@ export function renderApp(
       // is Esc's job.
       if (isKey(keys.commandLine, name) && !cmdline.current.open) {
         cmdline.current.open = true;
+        // The line opens empty, the caret at its start.
+        cmdline.current.caret = 0;
         ui.cmdOpen = true;
         notify();
         return true;
@@ -938,7 +943,7 @@ export function renderApp(
         if (!key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
           const step = listKey(cmdline.current.input, cmdline.current.list, { name, shift: !!key.shift }, completeLine);
           if (step.handled) {
-            if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.walk = null; }
+            if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.caret = step.input.length; cmdline.current.walk = null; }
             notify();
             return true;
           }
@@ -948,6 +953,7 @@ export function renderApp(
           ui.cmdOpen = false;
           // Discard the half-typed buffer on close so the next `:` opens fresh.
           cmdline.current.input = '';
+          cmdline.current.caret = 0;
           cmdline.current.historyIdx = cmdline.current.history.length;
           notify();
           return true;
@@ -957,87 +963,17 @@ export function renderApp(
         // a character like any other — a URL, a time, `host:port` or `repo:git_status`
         // keeps its colons.
         if (isKey(keys.commandLine, name) && cmdline.current.input === '') return true;
-        // Enter/Return runs a command. This is a HOST concern — it must not depend on
-        // the plugin-namespaced `open` action: tracker defines `open:'enter'`
-        // (open an issue), which overrides the host's `open:['enter','return']`
-        // in buildKeys and drops `return` — yet the real TTY reports Enter as
-        // `{name:'return'}` (see TtyBackend). Relying on isKey(keys.open, name)
-        // there made `:help`/`:ask` silently dead on Enter in a real terminal
-        // while working in a headless probe that pressed `enter`. Check the key
-        // directly.
-        if (name === 'return') {
-          const input = cmdline.current.input.trim();
-          // The command is the FIRST WORD; the rest is its argument. Looking up the
-          // whole line instead would fail to find every plugin command given an
-          // argument — `:ask hi`, a tracker's `:open ABC-1` — and fall through to the
-          // host's own dispatch, which knows nothing of it and says nothing.
-          const [head = '', ...rest] = input.split(/\s+/);
-          const cmd = findIn(commandRegistry, head);
-          const arg = rest.join(' ');
-          // The command context carries the REAL closures (F1): setView/back
-          // mutate ui state + notify, setHelpModal opens core's help modal via
-          // host.store.help, runConfigCommand/runCacheCommand route to the
-          // config/cache handlers. Before, most were no-ops/absent, so
-          // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
-          const ctx = {
-            // Where the command runs: here, the `:` line — the chat runs a command marked
-            // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
-            surface: 'line',
-            showMessage: (m: string) => toast.showMessage(redactSecrets(String(m))),
-            setView: (v: string) => { ui.view = v; notify(); },
-            onExit,
-            back: () => { ui.view = undefined; notify(); },
-            clearCache: () => services.clearCache(),
-            runConfigCommand: (a: string) => runConfigCmd(a),
-            runCacheCommand: (a: string) => runCacheCmd(a),
-            setHelpModal: (open: boolean) => setHelpModalOpen(open),
-            toggleKeycaps: (a: string) => toggleKeycaps(a),
-            // `:ask`/`:chat` route to the assistant plugin's live `openChat`,
-            // published on the shared host.store.chat by its ChatModal (the same
-            // bridge pattern setHelpModal uses for the help modal). Absent until
-            // the chat surface mounts — the optional chaining makes it a no-op,
-            // exactly like the other not-yet-mounted plugin channels.
-            openChat: (t?: string) => (hostBase.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
-          };
-          if (cmd?.run) {
-            try {
-              // A plugin command (`tracker:open`) forwards its `run(ctx, arg)` into a
-              // plugin-specific ctx (TrackerCommandCtx). The base ctx carries only
-              // host-owned closures — a `:open`/`:board` would find no `openIssue`
-              // and silently no-op. Extend it with the OWNING plugin's own-key
-              // services (mutated live by its mount) so tracker commands reach real
-              // nav/modals; the host base closures stay on top (name collisions win
-              // for the host — `showMessage` stays the toast, not a plugin no-op).
-              const ctxForCmd = commandContextFor(cmd, ctx, apiMap as never);
-              cmd.run(ctxForCmd as never, arg);
-            } catch {
-              // A failing host command must not crash the shell.
-            }
-          } else {
-            // Base commands (BASE_COMMANDS) have no `run` — dispatch by name.
-            runHostCommand(cmd?.name ?? head, arg);
-          }
-          // Remember the executed command (no empty lines) and CLEAR the buffer so
-          // the next `:` opens fresh — before, the leftover input was shown again
-          // on the next open (a real defect).
-          // A command that says `history: false` (its argument may be a secret) is not.
-          if (input && cmd?.history !== false) cmdline.current.history.push(input);
-          cmdline.current.historyIdx = cmdline.current.history.length;
-          cmdline.current.input = '';
-          cmdline.current.open = false;
-          ui.cmdOpen = false;
-          notify();
-          return true;
-        }
-        // Up/Down recall the `:`-command history (the executed commands above).
+        // Up/Down recall the `:`-command history (the executed commands below).
         // Up walks back toward the oldest entry, Down toward the newest; past the
         // newest you land back on the live edit buffer. historyIdx starts at
-        // history.length (buffer), so Up immediately recalls the newest entry.
+        // history.length (buffer), so Up immediately recalls the newest entry. A
+        // recalled line puts the caret after it, ready to be typed on at the end.
         if (name === 'up') {
           const h = cmdline.current.history;
           if (h.length && cmdline.current.historyIdx > 0) {
             cmdline.current.historyIdx -= 1;
             cmdline.current.input = h[cmdline.current.historyIdx];
+            cmdline.current.caret = cmdline.current.input.length;
             notify();
           }
           return true;
@@ -1047,39 +983,113 @@ export function renderApp(
           if (cmdline.current.historyIdx < h.length) {
             cmdline.current.historyIdx += 1;
             cmdline.current.input = h[cmdline.current.historyIdx] ?? '';
+            cmdline.current.caret = cmdline.current.input.length;
             notify();
           }
           return true;
         }
         // Tab takes the completion offered inline, then walks the other candidates
         // (config/commandline.ts). It replaces the WORD being completed — a command
-        // name, or a `config get|set|unset` argument.
+        // name, or a `config get|set|unset` argument — wherever the caret was, and
+        // leaves the caret after the whole line.
         if (name === 'tab') {
           const next = lineTab(cmdline.current.input, cmdline.current.walk, completeLine);
           cmdline.current.input = next.input;
+          cmdline.current.caret = cmdline.current.input.length;
           cmdline.current.walk = next.walk;
           notify();
           return true;
         }
-        if (name === 'backspace') {
-          cmdline.current.input = cmdline.current.input.slice(0, -1);
-          notify();
-          return true;
-        }
+        // The rest of the line's keys are the chat field's: flowtty's `editorReducer`,
+        // single-line. The caret moves by character and by word, Home/End, Backspace,
+        // Delete and the kill bindings edit where the caret is, and a paste goes in
+        // there; Enter submits. Esc has its own branch above (it closes the line).
+        const value = cmdline.current.input;
         // A paste goes in whole, colons and all, a line break or other control character
         // as a space: the line is one row, and a pasted newline must not run the command.
-        if (name === 'paste') {
-          const text = String((key as { text?: unknown }).text ?? '');
-          cmdline.current.input += text.replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ');
+        const typed = name === 'paste'
+          ? { ...key, text: String((key as { text?: unknown }).text ?? '').replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ') }
+          : key;
+        const act = editorReducer({ value, cursor: cmdline.current.caret }, typed as unknown as Parameters<typeof editorReducer>[1], { multiline: false, width: Math.max(1, region.width - 2) });
+        if (act.kind === 'edit') {
+          cmdline.current.input = act.state.value;
+          cmdline.current.caret = act.state.cursor;
           notify();
           return true;
         }
-        // A character, not a chord: Ctrl+D or Alt+x typed no `d` / `x` into the line.
-        if (isPrintable(key as never)) {
-          cmdline.current.input += name;
-          notify();
-          return true;
+        // `cancel` never reaches here (Esc closed the line above); `noop` is a key the
+        // line has no meaning for. Either way the text stays as it is.
+        if (act.kind !== 'submit') return true;
+        // ⏎ runs the command. This is a HOST concern — it must not depend on
+        // the plugin-namespaced `open` action: tracker defines `open:'enter'`
+        // (open an issue), which overrides the host's `open:['enter','return']`
+        // in buildKeys and drops `return` — yet the real TTY reports Enter as
+        // `{name:'return'}` (see TtyBackend). Relying on isKey(keys.open, name)
+        // there made `:help`/`:ask` silently dead on Enter in a real terminal
+        // while working in a headless probe that pressed `enter`. Check the key
+        // directly.
+        const input = cmdline.current.input.trim();
+        // The command is the FIRST WORD; the rest is its argument. Looking up the
+        // whole line instead would fail to find every plugin command given an
+        // argument — `:ask hi`, a tracker's `:open ABC-1` — and fall through to the
+        // host's own dispatch, which knows nothing of it and says nothing.
+        const [head = '', ...rest] = input.split(/\s+/);
+        const cmd = findIn(commandRegistry, head);
+        const arg = rest.join(' ');
+        // The command context carries the REAL closures (F1): setView/back
+        // mutate ui state + notify, setHelpModal opens core's help modal via
+        // host.store.help, runConfigCommand/runCacheCommand route to the
+        // config/cache handlers. Before, most were no-ops/absent, so
+        // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
+        const ctx = {
+          // Where the command runs: here, the `:` line — the chat runs a command marked
+          // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
+          surface: 'line',
+          showMessage: (m: string) => toast.showMessage(redactSecrets(String(m))),
+          setView: (v: string) => { ui.view = v; notify(); },
+          onExit,
+          back: () => { ui.view = undefined; notify(); },
+          clearCache: () => services.clearCache(),
+          runConfigCommand: (a: string) => runConfigCmd(a),
+          runCacheCommand: (a: string) => runCacheCmd(a),
+          setHelpModal: (open: boolean) => setHelpModalOpen(open),
+          toggleKeycaps: (a: string) => toggleKeycaps(a),
+          // `:ask`/`:chat` route to the assistant plugin's live `openChat`,
+          // published on the shared host.store.chat by its ChatModal (the same
+          // bridge pattern setHelpModal uses for the help modal). Absent until
+          // the chat surface mounts — the optional chaining makes it a no-op,
+          // exactly like the other not-yet-mounted plugin channels.
+          openChat: (t?: string) => (hostBase.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
+        };
+        if (cmd?.run) {
+          try {
+            // A plugin command (`tracker:open`) forwards its `run(ctx, arg)` into a
+            // plugin-specific ctx (TrackerCommandCtx). The base ctx carries only
+            // host-owned closures — a `:open`/`:board` would find no `openIssue`
+            // and silently no-op. Extend it with the OWNING plugin's own-key
+            // services (mutated live by its mount) so tracker commands reach real
+            // nav/modals; the host base closures stay on top (name collisions win
+            // for the host — `showMessage` stays the toast, not a plugin no-op).
+            const ctxForCmd = commandContextFor(cmd, ctx, apiMap as never);
+            cmd.run(ctxForCmd as never, arg);
+          } catch {
+            // A failing host command must not crash the shell.
+          }
+        } else {
+          // Base commands (BASE_COMMANDS) have no `run` — dispatch by name.
+          runHostCommand(cmd?.name ?? head, arg);
         }
+        // Remember the executed command (no empty lines) and CLEAR the buffer so
+        // the next `:` opens fresh — before, the leftover input was shown again
+        // on the next open (a real defect).
+        // A command that says `history: false` (its argument may be a secret) is not.
+        if (input && cmd?.history !== false) cmdline.current.history.push(input);
+        cmdline.current.historyIdx = cmdline.current.history.length;
+        cmdline.current.input = '';
+        cmdline.current.caret = 0;
+        cmdline.current.open = false;
+        ui.cmdOpen = false;
+        notify();
         return true;
       }
       // Command line closed: the global host action keys fire here.
@@ -1269,8 +1279,13 @@ export function renderApp(
     // The command line completes inline with one candidate: the untyped rest of the
     // suggestion after the caret. With two or more, a list sits over the line; it keeps
     // its height while it is open, so typing does not move the screen by a row at a time.
-    const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.walk, cmdline.current.list, completeLine) : null;
+    const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.caret, cmdline.current.walk, cmdline.current.list, completeLine) : null;
     const line = shownLine?.view ?? null;
+    // The line as drawn: the text before the caret, the caret cell — the whole cluster
+    // under it, or a space at the end — and the text after it.
+    const lineInput = cmdline.current.input;
+    const lineCaret = line?.caret ?? 0;
+    const caretCell = lineInput.slice(lineCaret, nextGrapheme(lineInput, lineCaret));
     // The runtime's panel as it is drawn: its rows as they are now, redacted — a
     // plugin's settings and its links' places may hold what should not be on screen.
     const hostView = hostPanel.current ? (() => {
@@ -1354,11 +1369,15 @@ export function renderApp(
               // speaking, not text anyone asked for: a copy of the command line is
               // what was typed and nothing else.
               h(Text, { bold: true, color: 'cyan', selectable: false }, ': '),
-              h(Text, null, cmdline.current.input),
-              // The caret sits ON the first offered character, as in the chat's field.
+              lineCaret > 0 ? h(Text, null, lineInput.slice(0, lineCaret)) : null,
+              // The caret sits ON the character under it — the whole cluster, a flag or
+              // an emoji with its modifiers included — and on a space at the end of the
+              // line. With an offer, it sits on the first offered character instead, as
+              // in the chat's field.
               line.ghost
                 ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan', selectable: false }, line.ghost.slice(1))]
-                : h(Text, { inverse: true, selectable: false }, ' '),
+                : h(Text, { inverse: true, ...(caretCell ? {} : { selectable: false }) }, caretCell || ' '),
+              lineInput.length > lineCaret + caretCell.length ? h(Text, null, lineInput.slice(lineCaret + caretCell.length)) : null,
               // What the offered candidate's label says (a value declared as
               // `{ value, label }`): said, dim, never part of the command.
               line.label ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${redactSecrets(line.label)}`) : null,

@@ -26,7 +26,7 @@ test('a path completes the last word, relative to the shell directory; a directo
   expect(c).toMatchObject({ head: 'sn', best: 'snake-project/', candidates: ['snake-project/'] });
   // Through the line: Tab takes it.
   expect(lineTab('cd sn', null, (t) => completePath(t, deps)).input).toBe('cd snake-project/');
-  expect(lineView('cd sn', null, (t) => completePath(t, deps)).ghost).toBe('ake-project/');
+  expect(lineView('cd sn', 5, null, (t) => completePath(t, deps)).ghost).toBe('ake-project/');
   // A file has no slash.
   expect(completePath('cat RE', deps).best).toBe('README.md');
 });
@@ -133,13 +133,13 @@ test('values from a function carry labels: the offered one is said beside the fi
   const c = completeSlash('/resume ', defs);
   expect(c.candidates).toEqual(['1', '2']);
   expect(c.labels).toEqual({ '1': 'hello there', '2': 'fix the tests' });
-  const v = lineView('/resume ', null, complete);
-  expect(v).toEqual({ ghost: '1', label: 'hello there', others: ['2 fix the tests'] });
+  const v = lineView('/resume ', 8, null, complete);
+  expect(v).toEqual({ caret: 8, ghost: '1', label: 'hello there', others: ['2 fix the tests'] });
   // Walking: the field holds `/resume 2`, and its label is said.
   const first = lineTab('/resume ', null, complete);
   const second = lineTab(first.input, first.walk, complete);
   expect(second.input).toBe('/resume 2');
-  expect(lineView(second.input, second.walk, complete)).toEqual({ ghost: '', label: 'fix the tests', others: ['1 hello there'] });
+  expect(lineView(second.input, second.input.length, second.walk, complete)).toEqual({ caret: 9, ghost: '', label: 'fix the tests', others: ['1 hello there'] });
   // A function that throws offers nothing.
   expect(completeSlash('/x ', [{ name: 'x', values: () => { throw new Error('no'); } }]).candidates).toEqual([]);
 });

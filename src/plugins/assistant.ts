@@ -3155,7 +3155,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // closed by Esc, Tab walks the candidates: the field then holds a whole one,
           // and the view takes the others from where the walk started (`tabRef`). Only
           // with the caret at the end of a one-line field, where the offer can be drawn.
-          const shown = !input.includes('\n') && cursor >= input.length ? lineViewWithList(input, tabRef.current, listRef.current, chatComplete) : null;
+          const shown = !input.includes('\n') && cursor >= input.length ? lineViewWithList(input, cursor, tabRef.current, listRef.current, chatComplete) : null;
           if (!shown) listRef.current.height = 0;
           const completion = shown ? { ...shown.view, list: shown.list } : null;
           // The watched child as the chat draws it: its own rows and folds, never the session's.

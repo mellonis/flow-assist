@@ -19,8 +19,12 @@ import type { CompleteResult } from './commands.js';
 export interface TabWalk { stem: string; head: string; idx: number; shown: string }
 
 export interface LineView {
-  // The untyped rest of the suggestion, drawn after the caret. '' when there is
-  // nothing to offer, or while walking (the line already holds a whole candidate).
+  // Where the caret sits in the input, as the editor's own index into it.
+  caret: number;
+  // The untyped rest of the suggestion, drawn at the end of the line where the caret
+  // sits. '' when there is nothing to offer, while walking (the line already holds a
+  // whole candidate), and anywhere but the end of the line: the rest belongs after
+  // the text, not mid-line.
   ghost: string;
   // What the offered candidate's label says (a session's title beside its number);
   // '' when it has none.
@@ -40,22 +44,25 @@ const walking = (input: string, walk: TabWalk | null): walk is TabWalk => !!walk
 
 const named = (c: string, labels: Record<string, string> | undefined) => (labels?.[c] ? `${c} ${labels[c]}` : c);
 
-export function lineView(input: string, walk: TabWalk | null, complete: Complete): LineView {
-  if (!input.trim()) return { ghost: '', label: '', others: [] };
+export function lineView(input: string, caret: number, walk: TabWalk | null, complete: Complete): LineView {
+  // A caret past either end is the line's own end: the view is total whatever the
+  // line's text did to the caret.
+  const at = Math.max(0, Math.min(input.length, caret));
+  if (!input.trim()) return { caret: at, ghost: '', label: '', others: [] };
   if (walking(input, walk)) {
     // The candidates of the walk, taken from where it STARTED — from the line as it
     // stands they would narrow to the one Tab just picked.
     const comp = complete(walk.stem + walk.head);
     const all = comp.candidates;
     if (all.length > 1) {
-      const at = walk.idx % all.length;
-      return { ghost: '', label: comp.labels?.[all[at]!] ?? '', others: all.filter((_, i) => i !== at).map((c) => named(c, comp.labels)) };
+      const pick = walk.idx % all.length;
+      return { caret: at, ghost: '', label: comp.labels?.[all[pick]!] ?? '', others: all.filter((_, i) => i !== pick).map((c) => named(c, comp.labels)) };
     }
   }
   const comp = complete(input);
   const fits = comp.best && comp.best.toLowerCase().startsWith(comp.head.toLowerCase()) && input.endsWith(comp.head);
-  const ghost = fits ? comp.best.slice(comp.head.length) : '';
-  return { ghost, label: fits ? comp.labels?.[comp.best] ?? '' : '', others: comp.candidates.filter((c) => c !== comp.best).map((c) => named(c, comp.labels)) };
+  const ghost = fits && at === input.length ? comp.best.slice(comp.head.length) : '';
+  return { caret: at, ghost, label: fits ? comp.labels?.[comp.best] ?? '' : '', others: comp.candidates.filter((c) => c !== comp.best).map((c) => named(c, comp.labels)) };
 }
 
 export function lineTab(input: string, walk: TabWalk | null, complete: Complete): { input: string; walk: TabWalk | null } {
@@ -188,8 +195,9 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 
 // The line as drawn: the list's selection as the inline rest, or the inline view alone
 // while no list is open.
-export function lineViewWithList(input: string, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
+export function lineViewWithList(input: string, caret: number, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
   const once = lastOnly(complete);
   const list = openList(input, state, once);
-  return list ? { view: { ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, walk, once), list: null };
+  const at = Math.max(0, Math.min(input.length, caret));
+  return list ? { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, caret, walk, once), list: null };
 }

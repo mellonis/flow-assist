@@ -72,6 +72,25 @@ test('completion is inline and the screen does not jump while typing', async () 
   ui.app.unmount();
 });
 
+test('a caret mid-line edits mid-line', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  const line = () => lastRow(ui);
+  await ui.press(':');
+  await ui.type('config et');
+  // Home, then seven steps right: the caret rests between `e` and `t`, and the `s`
+  // goes in there — not at the end of the line.
+  await ui.press('home', 'right', 'right', 'right', 'right', 'right', 'right', 'right');
+  await ui.type('s');
+  expect(line()).toMatch(/^\s*: config set$/);
+  // Backspace takes the `s` just inserted from the middle.
+  await ui.press('backspace');
+  expect(line()).toMatch(/^\s*: config et$/);
+  // The start of the line is editable too.
+  await ui.press('home', 'delete');
+  expect(line()).toMatch(/^\s*: onfig et$/);
+  ui.app.unmount();
+});
+
 // A value with a colon in it — a URL, a time, `host:port`, `repo:git_status` — reaches
 // the command whole, typed or pasted; only the key that opens the line is special, and
 // only while it is closed or empty.
