@@ -322,9 +322,12 @@ there is no `/fullscreen`.
   `!command`/`!!command` and on none for a command the MODEL ran and they confirmed (a `view`
   message) — the same marker in the same colour, the ground saying whose it was. The
   host's own ask after a `!!command` is a `›` message drawn dim, marker and text: the
-  person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
-  `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
-  overridable via `config.plugins.assistant.colors`.
+  person's side of the conversation, not their words. A kept `ask_user` question and the
+  answer it got (`?` over `→`) share a ground of their own, `askBg` in `askInk`, so the
+  pair reads as one band in the transcript; a dismissed answer keeps the ground and dims
+  its ink. Colours come from `theme.modals.chat` (`accent`, `assistantAccent`, `userBg`,
+  `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`, `askBg`, `askInk`) and are overridable via
+  `config.plugins.assistant.colors`.
 - A marker is ONE narrow-width code point: flowtty's grid measures display width per
   grapheme cluster and reads an East-Asian-ambiguous glyph (`∮`, `≈`, most of
   Mathematical Operators) as one cell, so it shifts the row in a terminal that draws

@@ -27,7 +27,10 @@ assistant may set or save".
   outside a running app is read at the next start — there is no file watcher. `/theme` in
   the chat picks it with the palette previewed as the cursor moves — see
   [usage.md](usage.md), "The look: `/theme`". The key is the person's — the assistant has
-  no mark for it.
+  no mark for it. The chat's own colours live at `theme.modals.chat`: `accent`, `shell`,
+  `assistantAccent`, `userBg` (the person's messages), `bgAccent`/`bgBg` (a background
+  result), `askBg`/`askInk` (a kept question and the answer it got), `fieldBg`, `warn`,
+  `ok` and `idleBorder`. The same keys are what `config.plugins.chat.colors` overrides.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

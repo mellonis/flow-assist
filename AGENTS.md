@@ -529,9 +529,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
 
 - Who speaks is said by a **gutter marker and a ground**, not a label:
   `›` the person, `ƒ` the assistant (also signing the frame), `◆` a background
-  result, `!`/`‼` a command. A marker is ONE narrow-width code point (a wide
-  glyph shifts the row in a terminal that draws it two cells wide). Colours
-  come from `theme.modals.chat`.
+  result, `!`/`‼` a command. A kept question and the answer it got share a ground of
+  their own (`askBg` in `askInk`; a dismissed answer's ink is dim). A marker is ONE
+  narrow-width code point (a wide glyph shifts the row in a terminal that draws it two
+  cells wide). Colours come from `theme.modals.chat`.
 - Markdown in answers is laid out by flowtty's `layoutMarkdown`; **the person's
   own message is drawn as typed, not as markdown** (every line break and
   indent kept). Only role `user`: a background result and a `!command`'s block

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import {
+  modalColorDefaults,
   resolveModalPalettes,
   resolveColorRefs,
   resolveAppTheme,
@@ -117,4 +118,20 @@ test('each scheme has its own grounds, and the person\'s theme wins over every s
   // A colour the person set stays theirs, on light as on dark.
   const mine = resolveAppTheme({ error: 'magenta' }, [], {}, 'light');
   expect(mine.error).toBe('magenta');
+});
+
+// The kept question and its answer are one block on a ground of their own: both
+// tokens are on the chat palette of every scheme, or the rows would paint nothing on
+// one of them.
+test('the ask ground lands in every palette', () => {
+  for (const scheme of ['light', 'dark', 'unknown'] as const) {
+    const chat = modalColorDefaults(scheme).chat;
+    expect(chat.askBg).toBeString();
+    expect(chat.askInk).toBeString();
+  }
+  // Either token is the person's like every other chat colour: the override reaches it
+  // through the same palette path, with no value baked into the render.
+  const mine = resolveAppTheme(undefined, [], { plugins: { chat: { colors: { askBg: 'red', askInk: 'white' } } } }, 'light');
+  expect(modalsOf(mine).chat.askBg).toBe('red');
+  expect(modalsOf(mine).chat.askInk).toBe('white');
 });

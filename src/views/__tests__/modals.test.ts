@@ -83,6 +83,81 @@ test('chat marks a background result with its own marker and ground, never as th
   handle.unmount();
 });
 
+// A kept question and its answer are one block, not two loose lines: both rows sit on
+// a quiet ground of their own, the question and the answer in `askInk`. A dismissed
+// answer keeps the ground and its ink steps back, so a question nobody answered is
+// still one band on the screen.
+test('answered question rows carry the ask ground', async () => {
+  // Colours the test can tell apart from every other ground and ink the chat ships: the
+  // rows take the palette's tokens, whatever a scheme's own values are.
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const messages = [
+    { role: 'ask', content: 'Which branch?', answer: 'master' },
+    { role: 'ask', content: 'Which checks?', answer: 'dismissed', dismissed: true },
+  ];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      theme: { modals: { chat } },
+      messages,
+    }),
+    backend,
+  );
+  const lines = backend.lastFrame.split('\n');
+  const find = (needle: string) => {
+    const y = lines.findIndex((r) => r.includes(needle));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const row = lines[y]!;
+    return { y, row, x: row.indexOf(needle) };
+  };
+  const styleAt = (needle: string) => {
+    const { y, x } = find(needle);
+    return backend.lastBuffer!.get(x, y).style;
+  };
+  // The question and its answer on one ground, in the palette's own ink.
+  const question = styleAt('Which branch?');
+  expect(question.bg).toBe(chat.askBg);
+  expect(question.fg).toBe(chat.askInk);
+  const answer = styleAt('master');
+  expect(answer.bg).toBe(chat.askBg);
+  expect(answer.fg).toBe(chat.askInk);
+  expect(answer.dim).toBeFalsy();
+  // The ground runs across the message column, so the pair reads as one band while
+  // scanning — not a tint that stops at the end of the words.
+  const { y, row, x } = find('Which branch?');
+  const border = row.lastIndexOf('│');
+  const right = border >= 0 ? border - 2 : row.trimEnd().length - 1;
+  expect(right).toBeGreaterThan(x + 'Which branch?'.length);
+  expect(backend.lastBuffer!.get(right, y).style.bg).toBe(chat.askBg);
+  // The gutters keep their place and their glyphs: `?` over the question, `→` under it,
+  // both painted on the same band.
+  expect(lines[y]![x - 2]).toBe('?');
+  expect(backend.lastBuffer!.get(x - 2, y).style.bg).toBe(chat.askBg);
+  const arrow = find('master');
+  expect(lines[arrow.y]![arrow.x - 2]).toBe('→');
+  expect(backend.lastBuffer!.get(arrow.x - 2, arrow.y).style.bg).toBe(chat.askBg);
+  // A dismissed answer keeps the ground and dims its ink.
+  const gone = styleAt('dismissed');
+  expect(gone.bg).toBe(chat.askBg);
+  expect(gone.fg).toBe(chat.askInk);
+  expect(gone.dim).toBe(true);
+  handle.unmount();
+  // The palette is read when the row is drawn: changing a token repaints the rows the
+  // conversation already has, with no reload.
+  const second = new TestBackend(80, 24);
+  const again = await render(
+    h(renderChatModal, { ...baseChat, theme: { modals: { chat: { ...chat, askBg: 'red', askInk: 'green' } } }, messages }),
+    second,
+  );
+  const repainted = second.lastFrame.split('\n');
+  const y2 = repainted.findIndex((r) => r.includes('Which branch?'));
+  const cell = second.lastBuffer!.get(repainted[y2]!.indexOf('Which branch?'), y2).style;
+  expect(cell.bg).toBe('red');
+  expect(cell.fg).toBe('green');
+  again.unmount();
+});
+
 // The gutter marker on a command block's first row: dim/pulsing while it runs, then
 // coloured for how it ended — never a code to decode, the way the tail beside it reads.
 test("a command block's gutter marker is dim while it runs, ok on exit 0, the error colour otherwise", async () => {

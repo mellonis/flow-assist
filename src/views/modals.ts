@@ -1017,8 +1017,9 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
 }): (row: ChatRow, i: number) => ReactNode {
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
-  // A `!command` is the person's own action, so it sits on the person's ground.
-  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  // A `!command` is the person's own action, so it sits on the person's ground. A kept
+  // question and its answer share a ground of their own, so the pair reads as one band.
+  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : role === 'ask' ? m.askBg : undefined);
   // The gutter is frame, never copied: a drag across an answer returns its text
   // without the `ƒ ` (or `› `, `! `/`‼ `, `◆ `) in front of it.
   const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
@@ -1138,6 +1139,10 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
       }
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
+      // A kept question and its answer take the ask ink on that ground; a span's own
+      // colour (a token, an accent) still wins, and a dismissed answer's dims are on
+      // its spans, so it keeps the ground while its ink steps back.
+      const ink = row.role === 'ask' ? m.askInk : undefined;
       if (row.spans && row.spans.length) {
         return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
           content(row, (s, j) => h(Text, {
@@ -1148,7 +1153,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
             dim: s.dim || row.role === 'note' || row.quiet === true,
             // Lit, the text is underlined and a code block's bar (chrome) is not.
             underline: s.underline || (lit && j >= (row.chrome ?? 0)),
-            color: s.token || s.accent ? m.accent : s.color,
+            color: s.token || s.accent ? m.accent : s.color ?? ink,
             selectable: j < (row.chrome ?? 0) ? false : undefined,
           }, String(s.text ?? ''))));
       }

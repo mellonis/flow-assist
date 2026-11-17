@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A kept question and its answer keep a ground of their own.** Once an `ask_user`
+  question is answered, the `?` row and the `→` row under it sit on one quiet tint, so
+  every pair reads as a single band while scanning the transcript. A dismissed answer —
+  the person said nothing — keeps the same ground and dims its ink. The two colours are
+  the chat palette's own, `askBg` and `askInk`, present in all three schemes and
+  overridable like every other chat colour; on an unknown scheme they leave the ground
+  and the ink to the terminal, as the chat's other grounds do. The pending question box
+  is unchanged.
+
 - **The narration above a waiting question reads in full.** While `ask_user` waits on an
   answer — one question or a wizard — the run of steps that led into the call draws
   unfolded and at full ink, so the question is read against what brought it on, however
