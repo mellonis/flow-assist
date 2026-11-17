@@ -46,6 +46,9 @@ export interface ProjectInstructions {
 }
 
 const NONE = (dir: string, cap: number): ProjectInstructions => ({ dir, root: null, cap, files: [] });
+// A project with nothing read yet: the placeholder a conversation starts from, and
+// what a save restores before the shell's directory is set.
+export const emptyProject = (): ProjectInstructions => NONE('', 0);
 
 // The text a file keeps under the cap, and how many lines the cut left out. A file
 // of the cap or less is whole. Otherwise the head ends at the last line break within
