@@ -8,6 +8,7 @@
 // changes under it — a server that connects while the list is up. A key's `run` may
 // answer a line for the panel's notice, or a panel of its own, which is opened over this
 // one: Esc goes back to the one before it, and closes the last.
+import { canonicalBinding, isKey } from '../playback/keys.js';
 
 export type PanelRow = {
   // What the key's `run` is handed for the row under the cursor.
@@ -18,11 +19,14 @@ export type PanelRow = {
   // How the detail is coloured: `ok` a good state, `warn` one to look at, `error` one
   // that failed; none — dim.
   tone?: 'ok' | 'warn' | 'error';
+  // A group header over the rows that follow: drawn dim, and no key runs on it.
+  kind?: 'group';
 };
 
 export type PanelKeyDef = {
   // The key as the terminal names it (`d`, `r`, `return`) — a key the panel does not
-  // take for itself (`up`, `down`, `escape`).
+  // take for itself (`up`, `down`, `escape`). A chord is spelled with its modifier
+  // (`ctrl+d`) and matches only with that modifier held.
   key: string;
   label: string;
   // Runs on the row under the cursor (null — the panel has no rows). May answer a line
@@ -113,7 +117,12 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
     }
     return { state: { ...state, cursor: to, ...atOf(to) } };
   }
-  if (key.ctrl || key.meta) return { state };
+  if (key.ctrl || key.meta) {
+    // Every modifier key is the panel's own silence but the chords its keys spell
+    // (`ctrl+d`): a bare name never fires with a modifier held.
+    const chord = panelKeys(state).find((k) => k.key.includes('+') && isKey(canonicalBinding(k.key), key));
+    return chord ? { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def: chord, id: rows[cursor]?.id ?? null } } : { state };
+  }
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
   return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def, id: rows[cursor]?.id ?? null } };

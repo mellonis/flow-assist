@@ -520,7 +520,9 @@ there is no `/fullscreen`.
   STOPS it exactly as Esc does (a pending y/n declined and a question dismissed first,
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
   the editor's forward delete, consumed (never while the `:` line is open — it owns the
-  keyboard then; its own catch-all types no chord as a character). **The keys are
+  keyboard then; its own catch-all types no chord as a character); a chord a drawn
+  plugin's panel binds (its `ctrl+d` — the work picker's kill) is the panel's key and
+  goes on to the panel, never to the arm. **The keys are
   claimed only while there is something to stop** (a live abort controller not yet
   aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores
   its signal) no longer holds them, so the next Ctrl+C arms and the one after exits,
@@ -591,8 +593,10 @@ there is no `/fullscreen`.
     stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
     the start screen then names the key instead of `:q`. Plugins leave their screens
     on Esc (`keys.back`) only.
-- **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log; a plugin's main
-  screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
+- **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log, `J` the
+  work picker; a plugin's main screen should follow (`B` for a board). Lower case is for
+  what is INSIDE a screen. The work picker acts where the chat does not have the keyboard
+  (a capital would type into the field), and `/work` opens it from inside the chat.
   The session picker is the exception, `^s` (`sessions`): it must open from inside the
   chat, where a letter types.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
@@ -1041,9 +1045,12 @@ there is no `/fullscreen`.
   `renderCommandPanel` in `src/views/modals.ts`) stands in the conversation's place
   under the picker's rules: it opens the chat and takes the keyboard, a pending y/n or
   question is drawn over it and answered first, it holds every key while drawn (↑/↓,
-  Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's), a mouse
+  Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's, and a key may
+  spell a chord like `ctrl+d`, which fires only with that modifier held), a mouse
   button and the wheel never reach the conversation it hides, and closing the chat,
-  `/clear`, `/new`, `/resume` and opening the picker drop it. `rows()` is read at every
+  `/clear`, `/new`, `/resume` and opening the picker drop it. A row's `kind: 'group'`
+  is a dim group header (`id: 'group:…'`): the cursor moves over it and no key runs on
+  it. `rows()` is read at every
   draw and a 1 s tick redraws it while up. A spec's `onCursor(id, index)` observes a
   cursor move and `onDrop()` a drop WITHOUT a decision (never a key's `run`), where a
   preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the

@@ -286,12 +286,14 @@ past incident may motivate a rule; keep the rule, drop the incident.
   component; the first press arms (`^c again to exit`, `ARM_MS` 2 s), the same
   key fires, any other key disarms. The open chat speaks first: Ctrl+C with a
   turn or `!command` running STOPS it exactly as Esc does and nothing is
-  armed; Ctrl+D in a field with text is the editor's forward delete. **The
+  armed; Ctrl+D in a field with text is the editor's forward delete; a chord
+  a drawn plugin's panel binds (its `ctrl+d`) is the panel's key. **The
   keys are claimed only while there is something to stop**
   (`Conversation.canStop`) — for Esc as well. No key quits by default: a
   stray `q` would close the whole app; quitting is `:quit` or Ctrl+C twice.
-  A capital opens something big (`F` the assistant, `L` the log); lower case
-  is for what is INSIDE a screen. A modal is closed by the key it is bound to
+  A capital opens something big (`F` the assistant, `L` the log, `J` the work
+  picker); lower case is for what is INSIDE a screen. A modal is closed by the
+  key it is bound to
   (`f.keys.<action>`), never by a letter written in the handler.
 - **One look for every host modal** — `frame()` and `overlay()` in
   `src/views/modals.ts`; a modal that draws its own frame doubles up. A window

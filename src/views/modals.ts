@@ -2419,11 +2419,12 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
 // `/mcp` and the like: a plugin's list in the chat's own frame, in the conversation's
 // place — the same docked, as a window and full, as the session picker. One row per
 // item, each ONE terminal line: the cursor mark, the text, the detail dim (or in its
-// tone's colour) and cut first. The notice under the list, then the keys: the panel's
-// own and the plugin's. The state and what a key does are src/assistant/command-panel.ts.
+// tone's colour) and cut first; a group header row is dim throughout and no key runs on
+// it. The notice under the list, then the keys: the panel's own and the plugin's. The
+// state and what a key does are src/assistant/command-panel.ts.
 export type CommandPanelView = {
   title: string;
-  rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error' }>;
+  rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error'; kind?: 'group' }>;
   cursor: number;
   notice: string;
   empty: string;
@@ -2461,7 +2462,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
     return h(ListRow, { key: r.id, hover: hover && !!onPickRow, onClick: onPickRow ? () => onPickRow(i) : undefined, draw: (lit: boolean) => [
       h(Text, { key: 'mark', bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
       h(Box, { key: 'text', flexShrink: 0, overflow: 'hidden', width: textCol },
-        h(Text, { wrap: 'truncate', bold: active, underline: lit, color: active ? m.accent : undefined }, r.text)),
+        h(Text, { wrap: 'truncate', bold: active, underline: lit, dim: r.kind === 'group', color: active ? m.accent : undefined }, r.text)),
       r.detail ? h(Box, { key: 'detail', flexShrink: 1000, overflow: 'hidden' }, h(Text, { ...(color ? { color } : { dim: true }), wrap: 'truncate' }, `  ${r.detail}`)) : null] });
   });
   const offset = windowAround(lines, panel.cursor, listRows).start;
@@ -3074,14 +3075,14 @@ export function helpEntries(commands: HelpCommand[]): { usage: string; descripti
 const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
   open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
-  toEnd: 'to the end of the conversation',
+  toEnd: 'to the end of the conversation', work: 'the work picker — /work does the same',
 };
-// Keys the HOST acts on from anywhere — the assistant's `chat` and `sessions` included,
-// whose keys work on every screen. Everything else in the key map belongs to a
+// Keys the HOST acts on from anywhere — the assistant's `chat`, `sessions` and `work`
+// included, whose keys work on every screen. Everything else in the key map belongs to a
 // plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
 // merely defines a default for) — listed separately, because on the start screen they
 // do nothing and a key in a help list is an instruction.
-const HOST_ACTIONS = ['chat', 'sessions', 'commandLine', 'log', 'back', 'quit'];
+const HOST_ACTIONS = ['chat', 'work', 'sessions', 'commandLine', 'log', 'back', 'quit'];
 const actionLabel = (action: string) => ACTION_LABELS[action] ?? action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 
 export function renderHelp({

@@ -406,6 +406,30 @@ a `y` counts; a question that arrives while the cursor is in the rows, or that e
 takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
 on screen a question takes keys at once.
 
+### The work picker: `J`, or `/work`
+
+Everything that runs beside this conversation — the live subagents and tasks, the
+background shells — in one list to jump between. `J` opens it wherever the chat does not
+have the keyboard (on the start screen, on a plugin's screen), `/work` from inside the
+chat; `config set keys.work <key>` moves the capital.
+
+One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
+it says `none`. A subagent's row is its label path with what it is doing
+(`main › review · running — reading src/`), and one that waits on you — a question of its,
+or a y/n — is marked `? waiting for you`. A shell's row is its id and command
+(`sh-3 · bun run dev`) with its state and who owns it (`running — fix-tests`, or the
+chat's own as `this chat`); a shell you killed sinks below the running ones and reads
+`killed (person) — this chat`. The rows are read again at every draw, so a state is what
+is true now.
+
+↑ and ↓ move among the rows across the group names, which are no key's. ⏎ opens what is
+under the cursor: a subagent's conversation as the watch draws it (Esc comes back to the
+chat, never to the picker — the picker is one-shot, `J` opens it again), or a shell's kept
+output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
+closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
+`kill sh-3? y yes · n no` in that row's place; `y` kills it as the tree's `x` does,
+`n` leaves it running. Esc closes the picker back to the chat.
+
 ## Agent files
 
 An agent file is a named subagent written down in a Markdown file: a prompt you reuse, with

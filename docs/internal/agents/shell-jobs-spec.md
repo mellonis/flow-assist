@@ -168,6 +168,15 @@
   end with no request, so the row stays until the next message; a person's job never leaves this way.
   The pager of a job reads the WHOLE ring buffer at each draw (`jobConsoleData`,
   `whole`, `ViewRecord.rows` raising `frameView`'s 400-row cap), not the view caps.
+  **The work picker** (`/work`, the `work` key — `openWork` in `src/plugins/assistant.ts`)
+  lists every shell of the session's subtree beside its live subagents: one row per job
+  the registry still holds (`ShellJob`, running, plus the ended records each
+  conversation keeps under `MAX_ENDED_JOBS`) with `<state> — <owner conversation's
+  label>` (`this chat` for the session's own), ended rows sinking below the running
+  ones. Its ⏎ opens the kept output in that same pager; its `ctrl+d` asks `kill sh-N?
+  y yes · n no` in the row's place and `y` is `killJob(job, 'person')` through the
+  registry's own path, never a shell string on a command line. The rows are read at
+  every draw, so a state follows the job.
   `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells (`shownJobs()`, subagents' too;
   a probe still within its settle is none, and the session stays loaded for its running turn) in a
   panel: `s` stops them

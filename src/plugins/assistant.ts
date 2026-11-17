@@ -45,7 +45,7 @@ import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type Pa
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
-import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
+import { bindingGlyph, canonicalBinding, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
 import { askKey } from '../assistant/ask.js';
 import { memoryCommand, type Shown } from '../assistant/memory-command.js';
@@ -64,10 +64,11 @@ import type { Make } from '../loader/plugin.js';
 import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
-import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelRow, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import { workRows, type WorkJob, type WorkSub } from '../assistant/work-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
-import { Conversation, workHome } from '../assistant/conversation.js';
+import { Conversation, parentAskDestination, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { startStateFiles, stateSources, type StateFileInput } from '../assistant/state-file.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
@@ -108,6 +109,7 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'subagent', description: 'start a subagent from an agent file' },
   { name: 'sub', description: 'start a subagent from an agent file' },
   { name: 'agents', description: 'the live and ended subagents and tasks' },
+  { name: 'work', description: 'the subagents and shells running beside the chat' },
   { name: 'skill', description: 'list the skills, or send a turn with one' },
   { name: 'copy', description: 'copy an answer to the clipboard' },
   { name: 'image', description: 'attach an image' },
@@ -213,9 +215,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // `sessions` (Ctrl+S) opens the session picker from anywhere — a chord, since the
     // chat's field would type a letter; the terminal's raw mode leaves Ctrl+S to the app,
     // not to flow control.
+    // `work` (J) opens the work picker — every live subagent and background shell of the
+    // session in one list to jump between. A capital, as `chat`'s F and `log`'s L: it
+    // acts where the chat does not have the keyboard (a letter would type into the
+    // field), and `/work` opens the same panel from inside the chat.
     // `toEnd` (End) brings the conversation back to its end from wherever it was
     // scrolled to — when End has nothing to do in the field (see the chat's handler).
-    keys: { chat: 'F', sessions: 'ctrl+s', details: ['ctrl+o', 'ctrl+r'], toEnd: 'end', chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
+    keys: { chat: 'F', sessions: 'ctrl+s', work: 'J', details: ['ctrl+o', 'ctrl+r'], toEnd: 'end', chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
     // config.plugins.assistant: `mode` — where the chat is (src/runtime/panel-layout.ts):
     // `panel` beside the plugin's screen (the default), `window` over it, `full` the
     // whole terminal; `/mode` switches it for the session, and an old `fullscreen: true`
@@ -264,13 +270,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
       // Docked and open with the plugin at the keys: the footer says how to get back.
       if (chat?.open && chat.layout === 'panel' && chat.focus === 'plugin') {
         const cap = p.keyCap?.('chatFocus') ?? '';
-        return cap ? [`${cap} chat`] : [];
+        return [...(cap ? [`${cap} chat`] : []), ...(p.keyCap?.('work') ? [`${p.keyCap('work')} work`] : [])];
       }
       if (chat?.open) return [];
       // The cap of whatever `chat` is bound to now — not a letter written here.
       const cap = p.keyCap?.('chat') ?? '';
       if (!cap) return [];
-      return [`${cap} chat${chat?.unread ? ` · ◆ ${chat.unread} new` : ''}`];
+      return [`${cap} chat${chat?.unread ? ` · ◆ ${chat.unread} new` : ''}`, ...(p.keyCap?.('work') ? [`${p.keyCap('work')} work`] : [])];
     },
     views: { chat: renders.chat },
     // Where the chat is, before anything renders: the App lays the screen out by it on
@@ -1776,6 +1782,142 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               else apply(r);
             } catch (e) { fail(e); }
           };
+          // The work picker (`/work` and its `work` key): the session's live subagents and
+          // background shells in one list under two group headers (docs/usage.md). The
+          // rows are read at every draw — a group that is empty says `none`, a row's
+          // state is what is true now. The picker is ONE-SHOT: a key closes it and opens
+          // what is under the cursor — Enter watches a subagent (a waiting one just
+          // closes: its request block takes the keyboard), Enter opens a shell's output
+          // in the pager, and `ctrl+d` kills a shell after the question that stands in
+          // its row's place (`stopQuestion`, the tree's own words).
+          const openWork = () => {
+            const asked = conv;
+            let askedKill: string | null = null; // the job whose kill question is up
+            // Every shell of the session's subtree the registry still holds: the running
+            // ones and the ended records each conversation keeps (`shell_list`'s view of
+            // them), with the conversation that owns each.
+            const shells = (): Map<string, { job: ShellJob; owner: Conversation }> => {
+              const map = new Map<string, { job: ShellJob; owner: Conversation }>();
+              const walk = (c: Conversation) => {
+                for (const job of [...c.jobs.values(), ...c.endedShellJobs]) map.set(job.id, { job, owner: c });
+                for (const child of c.children) walk(child);
+              };
+              walk(asked);
+              return map;
+            };
+            // The kill question stands until its job is gone from the registry.
+            const killPending = (): string | null => {
+              const up = askedKill !== null && shells().has(askedKill) ? askedKill : null;
+              askedKill = up;
+              return up;
+            };
+            const rows = (): PanelRow[] => {
+              // The subagents: the live tree as rows, with the label path each node sits
+              // on (the depth-first walk rebuilds it from the stack) and the state words
+              // of its tree row. One that waits on the person — its own y/n or a question
+              // put to it — is flagged, and its row says so.
+              const subs: WorkSub[] = [];
+              const stack: { depth: number; label: string }[] = [];
+              for (const n of asked.tree()) {
+                if (n.shell) continue;
+                while (stack.length && stack[stack.length - 1]!.depth >= n.depth) stack.pop();
+                stack.push({ depth: n.depth, label: n.label });
+                const who = asked.nodeByKey(n.key);
+                const asking = !!who && (!!who.confirm || (!!who.parentAsk && parentAskDestination(who) === 'person'));
+                subs.push({
+                  key: n.key,
+                  path: stack.map((s) => s.label),
+                  asking,
+                  state: asking ? 'waiting for you'
+                    : n.status === 'working' ? 'running'
+                    : n.status === 'waiting' ? 'waiting for you'
+                    : n.status === 'asks' ? 'asking'
+                    : n.status === 'queued' ? 'queued'
+                    : n.status === 'delayed' ? 'delayed'
+                    : n.answered ? 'answered' : 'idle',
+                  ...(n.status === 'working' && n.latest ? { title: n.latest } : {}),
+                });
+              }
+              // The shells: one row each, `<state> — <owner>`; the conversation's own are
+              // the chat's.
+              const jobs: WorkJob[] = [...shells().values()].map(({ job, owner }) => ({
+                id: job.id,
+                command: job.command.replace(/\s+/g, ' ').trim(),
+                state: job.statusText,
+                owner: owner.parent ? owner.label : 'this chat',
+              }));
+              const all = workRows(subs, jobs, Date.now());
+              const up = killPending();
+              const out: PanelRow[] = [];
+              for (const group of ['subagents', 'shells'] as const) {
+                out.push({ id: `group:${group}`, kind: 'group', text: group === 'subagents' ? 'Subagents' : 'Shells' });
+                const here = all.filter((r) => r.group === group);
+                if (!here.length) { out.push({ id: `group:${group}:none`, kind: 'group', text: 'none' }); continue; }
+                for (const r of here) {
+                  out.push(up !== null && r.id === `shell:${up}`
+                    // The question stands in place of the row it is about.
+                    ? { id: r.id, text: stopQuestion({ label: up, below: 0, kind: 'shell' }), tone: 'warn' }
+                    : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) });
+                }
+              }
+              return out;
+            };
+            // Enter opens what is under the cursor — a group header is nothing to open.
+            const openKey: PanelKeyDef = {
+              key: 'return', label: 'open',
+              run: (id) => {
+                if (!id || id.startsWith('group:')) return undefined;
+                if (id.startsWith('sub:')) {
+                  const node = asked.nodeByKey(id.slice('sub:'.length));
+                  if (!node) return 'it has ended — nothing to open';
+                  // A subagent that waits on the person needs no watch: closing the
+                  // picker is all it takes, and its request block takes the keyboard.
+                  if (!asked.offeredWithin(node)) startWatch(node);
+                  setPanel(null);
+                  return undefined;
+                }
+                const found = shells().get(id.slice('shell:'.length));
+                if (found) { openJobView(found.job, found.owner); setPanel(null); return undefined; }
+                return undefined;
+              },
+            };
+            const killKey: PanelKeyDef = {
+              key: 'ctrl+d', label: 'kill',
+              run: (id) => {
+                const row = id ?? '';
+                if (!row || row.startsWith('group:')) return undefined;
+                if (!row.startsWith('shell:')) return 'only a background shell can be killed';
+                const found = shells().get(row.slice('shell:'.length));
+                if (!found) return 'it is gone — nothing to kill';
+                if (!found.job.running) return 'it has ended — nothing to kill';
+                askedKill = found.job.id;
+                return undefined;
+              },
+            };
+            // The question's keys. A `y` counts for the row the question stands on only:
+            // a cursor moved elsewhere never kills the job it names.
+            const answerKeys: PanelKeyDef[] = [
+              {
+                key: 'y', label: 'yes',
+                run: (id) => {
+                  const job = killPending();
+                  askedKill = null;
+                  const found = job !== null && id === `shell:${job}` ? shells().get(job) : undefined;
+                  if (found) found.owner.killJob(found.job, 'person');
+                  host.notify();
+                  return undefined;
+                },
+              },
+              { key: 'n', label: 'no', run: () => { askedKill = null; return undefined; } },
+            ];
+            openPanel({
+              title: 'Work',
+              follow: true,
+              rows,
+              get keys() { return killPending() !== null ? answerKeys : [openKey, killKey]; },
+            });
+            host.notify();
+          };
           // A plugin's command run from the chat: what it says is a note (display only,
           // never sent), a failure the chat's error line, and it may open a panel.
           const runPluginCommand = (name: string, cmd: PluginCommand, arg: string) => {
@@ -2079,6 +2221,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'sessions':
                 setField('');
                 openPicker();
+                return;
+              case 'work':
+                // For the person; nothing is sent. The picker of the subagents and
+                // background shells that run beside the conversation.
+                setField('');
+                openWork();
                 return;
               case 'clear': {
                 // The session is written and left for /resume — closed, so a restart does
@@ -2502,13 +2650,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // - Ctrl+D in a field with text is the editor's forward delete — 'field', and
           //   the key goes to the handler below; in an empty field it arms the exit.
           // Any of the three disarms Esc's own exit, as every other key does.
-          const ctrlKey = (key: { name?: string }): 'handled' | 'field' | undefined => {
+          const ctrlKey = (key: { name?: string; ctrl?: boolean; meta?: boolean }): 'handled' | 'field' | undefined => {
             // Docked with the plugin at the keys, these are the plugin's side's, as with
             // the chat closed.
             if (!openRef.current || (layoutRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
             disarmEsc();
             // Not while a watch is up: the session's turn is not what the person is looking at.
             if (key.name === 'c' && conv.canStop() && !watchRef.current) { conv.stop(keyGlyph({ name: 'c', ctrl: true })); return 'handled'; }
+            // A plugin's panel holds every key while it is drawn: a chord one of its keys
+            // spells — the work picker's `ctrl+d` kill — is the panel's key, never the
+            // exit arm's, and goes on to the panel below. Everything else arms as ever.
+            if (panelRef.current && panelKeys(panelRef.current).some((def) => def.key.includes('+') && isKey(canonicalBinding(def.key), key))) return 'field';
             if (key.name === 'd' && inputRef.current !== '') return 'field';
             return undefined;
           };
@@ -3274,16 +3426,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // command line / an open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ host, action: 'chat', isOpen: () => focused, open: () => openChat() });
-          // The `sessions` key wherever the chat does not have the keyboard (the start
-          // screen, a plugin's screen). A chord: `addTrigger` compares the bare name, so
-          // the whole key is compared here.
+          // The `sessions` and `work` keys wherever the chat does not have the keyboard
+          // (the start screen, a plugin's screen). A chord: `addTrigger` compares the bare
+          // name, so the whole key is compared here.
           host.useInputHandler({
             mode: 'consume',
             priority: (u) => (u.cmdOpen || u.modalActive || focused ? 0 : 10),
             handler: (key) => {
-              if (focused || !isKey(host.keys.sessions ?? [], key)) return false;
-              openPicker();
-              return true;
+              if (focused) return false;
+              if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
+              if (isKey(host.keys.work ?? [], key)) { openWork(); return true; }
+              return false;
             },
           });
           if (!open) {

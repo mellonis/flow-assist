@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The work picker: subagents and shells in one place.** `J` opens one panel listing
+  everything that runs beside the conversation — every live subagent and task (its label
+  path, `running — <what it is doing>`, `? waiting for you` when a question or a y/n of
+  its waits on you) under **Subagents**, every background shell (`sh-3 · bun run dev —
+  <who owns it>`, running or ended) under **Shells**; a group with nothing in it says
+  `none`, and the rows follow the live state while the panel is up. Enter opens what is
+  under the cursor: a subagent's conversation (the existing watch), or a shell's kept
+  output in the pager; on a subagent that waits on you Enter just closes the picker and
+  its request block takes the keyboard. `ctrl+d` on a shell asks `kill sh-3? y yes · n
+  no` in its row's place and y kills it — SIGTERM to the group, SIGKILL two seconds
+  later — as the tree's `x` does. `/work` opens the same panel from inside the chat;
+  Esc closes, and the picker does not come back from a watch — it is one-shot. The
+  capital acts wherever the chat does not have the keyboard, and `config set keys.work`
+  moves it; `:help` lists it.
+
 - **A question waits out the sentence you are typing.** A question that parks while you
   are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
   no longer takes the field from under your keys: the field keeps them, the strip above it
