@@ -17,10 +17,18 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **`subagent` takes `writes`, and a bare task is a worker.** A background task writes
   and runs commands through the person's y/n (the session's auto mode answers). The
   call's `writes` is `allow`, `ask` (the default) or `deny`: `writes: 'deny'` narrows a
-  task to read-only (write tools and run_command are declined), and a call may not
-  grant its own `allow` — it reads as `ask`, said in the answer. `write:` remains as
+  task to read-only (write tools are not offered, and a write behind another name is
+  declined), and a call may not grant its own `allow` — it reads as `ask`, said in the
+  answer. `write:` remains as
   the deprecated spelling — `true` reads as `ask`, `false` as `deny` — and `writes`
   wins when both are given.
+
+- **A read-only task sees no write tools at all.** A task started `writes: 'deny'` — the
+  call's own `writes`, or a `writes: deny` agent file — is offered none of the write tools
+  (`write_file`, `edit_file`, `workspace_write`, `run_command`, `shell_kill`): a call for
+  one is answered `Unknown tool` and nothing runs, and a write behind a name the list
+  cannot hide is declined with one pinned sentence that says the run is read-only and how
+  to have it again (started with `writes: ask`). Reads and the rest of `core` run as ever.
 
 - **`/diff`: the working tree, live, beside the chat.** `/diff` splits the chat — the
   conversation on the left, every file you have changed on the right, the field across the

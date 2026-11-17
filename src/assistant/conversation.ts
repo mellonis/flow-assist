@@ -1197,7 +1197,10 @@ export class Conversation {
     while (host.parent) host = host.parent;
     const writes = spec.writes ?? 'ask';
     const mayVouch = (!this.parent || this.policy.kind === 'ask' || this.policy.kind === 'allow-writes') && host.deps.canAsk !== false;
-    const policy = childPolicy(writes, mayVouch, (line) => this.deps.pushLog(`[bg] ${line}`));
+    // `allow`'s writes are said in the log of the conversation at the ROOT, not the
+    // starter's: a starter that is itself a child carries a silent `pushLog`, and the
+    // line must land somewhere the person can read it.
+    const policy = childPolicy(writes, mayVouch, (line) => host.deps.pushLog(`[bg] ${line}`));
     const deps: ConversationDeps = {
       ...this.deps,
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: policy.kind === 'ask',

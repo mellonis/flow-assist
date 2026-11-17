@@ -595,7 +595,10 @@ test('the directory survives a restart', async () => {
   b.app.unmount();
 });
 
-test('a background run does not move the chat\'s directory', async () => {
+// The task is read-only (`writes: 'deny'`): its `cd` is behind a name the write-tool list
+// hides, so nothing moves it to move the chat. The claim about a `cd` that runs — a
+// child's own move not moving the parent's — is `task-child.rig`'s directory test.
+test('a read-only background task leaves the chat\'s directory where it is', async () => {
   const root = rootDir();
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();

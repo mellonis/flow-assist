@@ -108,3 +108,10 @@ test('the trust question names the role the file gives the work, and nothing whe
   expect(agentTrustRequest(agent('a', 'd', 'project', 'fast'), 'a', 'reads', false).line).toContain('model: fast (a role from ai.roles)');
   expect(agentTrustRequest(agent('b', 'd', 'project'), 'b', 'reads', false).line).not.toContain('model: ');
 });
+
+test('the trust question carries the writes of its file — the loudest grant the person is consenting to', () => {
+  expect(agentTrustRequest({ ...agent('a', 'd', 'project'), writes: 'allow' }, 'a', 'reads', false).line).toContain('writes: allow');
+  expect(agentTrustRequest({ ...agent('b', 'd', 'project'), writes: 'deny' }, 'b', 'reads', false).line).toContain('writes: deny');
+  // The key omitted reads as `ask`, and the request says that too.
+  expect(agentTrustRequest(agent('c', 'd', 'project'), 'c', 'reads', false).line).toContain('writes: ask');
+});

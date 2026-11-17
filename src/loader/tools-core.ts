@@ -885,7 +885,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // The demotion note maps the call's own argument to a plain task's writes; a
         // named agent's writes come from its file, so the note is the plain path's.
         const notes = [...(named ? [absentGroupsNote(named.id, named.absent), named.note] : []), started.note ?? '', named ? '' : mapped.note].filter(Boolean).join('\n');
-        return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes === 'ask' ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
+        return `${notes ? `${notes}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes === 'ask' ? ' It may ask the person to approve each write, and waits for their answer.' : writes === 'allow' ? ' Its writes run without asking: the auto mode with shell.autoRun answers each write — never config_set, an unlisted web_fetch or a plugin\'s run_command — and each is said in the log.' : ''}`;
       }
       case 'todo': {
         // Not write-confirmed (like memory): a y/n pause on every `todo add` would

@@ -519,7 +519,8 @@ An agent file is somebody else's instructions, so what you have not started does
 the assistant's word.
 
 - A **project file** asks at its first start, and again after its content changes: a y/n shows
-  the file's path, its description, the tool groups, the auto mode after the cap, the role
+  the file's path, its description, the tool groups, the auto mode after the cap, the
+  `writes` it states with what each means (see What it may do), the role
   it runs on when the file names one (`model: deep (a role from ai.roles)`), the
   parameters and the size of the prompt. `y` starts the agent and remembers this content; `n` starts nothing.
 - **Your own file** is recorded at your start and asks nothing.
@@ -539,9 +540,10 @@ project and your own that you have started with their current content, and the p
 only extra instructions, added after the prompt. Its `model` takes a role from your
 `ai.roles` too, as the file's own `model:` line does — and the call's role wins over the
 file's; a plain task may name one the same way. A role your machine does not define runs
-the work on the conversation's model, with one note (see Which model it runs). The agent runs as a background task
-that may write, each write asking you unless its auto mode answers, and its result comes back to the assistant as
-any task's does. A call that names an agent you have not started, an unknown parameter or a missing
+the work on the conversation's model, with one note (see Which model it runs). The agent runs as a background
+task whose `writes` says what it may change (see What it may do): `ask` (the default) waits for your y/n on
+every write and command, `deny` is a read-only run, `allow` runs each write unasked and says each one in
+the log. Its result comes back to the assistant as any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
 start it once yourself with `/subagent @<name>`. A file it cannot start yet (never started by you,
 or changed since) is named in one more line of the list, by `@name` and its mark only, so it can ask

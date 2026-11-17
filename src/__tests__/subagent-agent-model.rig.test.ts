@@ -126,8 +126,10 @@ test('a named agent takes the writes of its own file, not the call\'s: an allow 
   const answer = await call(rig, model, { agent: 'job', writes: 'deny' });
   // A named agent takes the writes its own file states and the call's `writes` does not
   // move it: `allow` runs each write the auto mode with `shell.autoRun` answers and is
-  // said in the log, so no y/n is offered and the write runs.
+  // said in the log, so no y/n is offered and the write runs. The answer says so, as the
+  // ask path names its own y/n.
   expect(answer).not.toContain('may ask the person');
+  expect(answer).toContain("Its writes run without asking: the auto mode with shell.autoRun answers each write — never config_set, an unlisted web_fetch or a plugin's run_command — and each is said in the log.");
   await rig.until(() => child.held);
   expect([...rig.conv.children].map((c) => c.policy.kind)).toEqual(['allow-writes']);
   expect(rig.conv.offered()).toBeNull();
@@ -136,6 +138,28 @@ test('a named agent takes the writes of its own file, not the call\'s: an allow 
   expect(rig.journal().some((e) => e.t === 'confirm')).toBe(false);
   child.release();
   await childDone(rig);
+});
+
+test('an allow agent a task starts logs its writes in the ROOT log, past its starter\'s silence', async () => {
+  // The nested topology: session → plain task → named agent whose file says
+  // `writes: allow`. The reader is the root's own `pushLog` (the rig's `log`): the
+  // grandchild's unasked writes are said there, `[bg] ` over `writeLine`'s own `[write] `,
+  // whatever log a starter between them is handed.
+  const model = new ScriptedModel();
+  const outer = model.when((req) => firstUser(req).includes('outer go'));
+  const inner = model.when((req) => firstUser(req).includes('NEST'));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  project(rig, 'job', doc('writes: allow\n', 'NEST go'));
+  outer.script([{ tool: 'subagent', args: { agent: 'job' } }], [{ text: 'outer ok' }]);
+  inner.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'outer go', label: 'outer' } }], [{ text: 'Started.' }]);
+  await rig.conv.send('go');
+  await rig.idle();
+  await rig.until(() => inner.requests.length >= 1);
+  await childDone(rig);
+  expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(true);
+  expect(rig.conv.offered()).toBeNull();
+  expect(rig.log).toContain('[bg] [write] ! echo x > made.txt');
 });
 
 test('a named call\'s answer says what the file decides: no demotion note, the file\'s ask said', async () => {

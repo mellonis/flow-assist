@@ -105,8 +105,15 @@ export function recordAgentStart(agent: Recorded): boolean {
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // What the person is asked before the first start of a project agent file: the file, what
-// it will be allowed (its tool groups, its auto mode after the cap) and what it takes.
-export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params' | 'body' | 'model'> & { skills?: readonly string[] }, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
+// it will be allowed (its tool groups, its auto mode after the cap, the writes its file
+// states) and what it takes.
+export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params' | 'body' | 'model' | 'writes'> & { skills?: readonly string[] }, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
+  const writes = agent.writes ?? 'ask';
+  const writesGloss = writes === 'allow'
+    ? 'its writes run without asking — the auto mode with shell.autoRun answers each — and each is said in the log'
+    : writes === 'deny'
+      ? 'read-only: no write tools are offered, and a write behind another name is declined'
+      : 'each write and command waits for your y/n';
   return {
     title: `⚠ ${changed ? `@${id} changed since you last started it` : `@${id} is a project file you have not started`} — start it? (y/n)`,
     line: [
@@ -114,6 +121,7 @@ export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 't
       `file: ${agent.path}`,
       `tool groups: ${agent.tools ? ['core', ...agent.tools.filter((g) => g !== 'core')].join(', ') : 'every group'}`,
       `auto mode: ${mode}`,
+      `writes: ${writes}${agent.writes ? '' : ' (the key is omitted)'} (${writesGloss})`,
       ...(agent.model ? [`model: ${agent.model} (a role from ai.roles)`] : []),
       ...(agent.skills?.length ? [`skills: ${agent.skills.join(', ')} (loaded into its first message)`] : []),
       `parameters: ${agent.params.length ? paramsText(agent.params) : 'none'}`,

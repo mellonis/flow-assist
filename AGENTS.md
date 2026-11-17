@@ -5228,7 +5228,8 @@ commands; docs and hints never present either mechanism as a boundary.
     the sha-256 of the bytes the person last started (`agent-trust.ts`). A project file with
     no record, or another hash, asks at the person's start: the host's y/n slot
     (`Conversation.askAgentTrust`, `host: true`) shows the path, the description, the tool
-    groups, the auto mode after the cap and the parameters, and says `changed since you last
+    groups, the auto mode after the cap, the `writes` the file states and the parameters,
+    and says `changed since you last
     started it` when a record exists under another hash; yes records the hash and starts,
     no starts nothing, stop or reset gives the typed line back. A person's file is recorded
     at its start with no question; a plugin's has no record and is trusted with the plugin.
