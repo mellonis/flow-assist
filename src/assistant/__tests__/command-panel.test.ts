@@ -150,6 +150,39 @@ test('the drop hook runs only when the panel goes without a decision', () => {
   expect(seen).toEqual(['outer']);
 });
 
+test('no key runs on a group header, bare or chord', () => {
+  const ran: string[] = [];
+  const grouped: PanelSpec = {
+    title: 'Work',
+    rows: () => [
+      { id: 'group:agents', text: 'Agents', kind: 'group' },
+      { id: 'a', text: 'agent a' },
+      { id: 'group:shells', text: 'Shells', kind: 'group' },
+      { id: 's', text: 'shell s' },
+    ],
+    keys: [
+      { key: 'x', label: 'stop', run: (id) => { ran.push(`x:${id}`); } },
+      { key: 'ctrl+d', label: 'kill', run: (id) => { ran.push(`kill:${id}`); } },
+    ],
+  };
+  // The cursor opens on the first row a key can run on, and ↑ takes it onto the header.
+  let s = panelStart(grouped);
+  expect(s.cursor).toBe(1);
+  s = panelKey(s, { name: 'up' }).state!;
+  expect(s.cursor).toBe(0);
+  // Neither a bare key nor a chord runs on it — nothing was handed to `run`.
+  expect(panelKey(s, { name: 'x' }).run).toBeUndefined();
+  expect(panelKey(s, { name: 'd', ctrl: true }).run).toBeUndefined();
+  expect(ran).toEqual([]);
+  // Arrow keys still move the cursor off the header and back onto a row.
+  s = panelKey(s, { name: 'down' }).state!;
+  expect(s.cursor).toBe(1);
+  const onRow = panelKey(s, { name: 'x' });
+  expect(onRow.run?.id).toBe('a');
+  onRow.run!.def.run(onRow.run!.id);
+  expect(ran).toEqual(['x:a']);
+});
+
 test('a panel pushed over a following one starts without the parent\'s row id', () => {
   const follow: PanelSpec = { title: 'Agents', follow: true, rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }] };
   let s = panelStart(follow);

@@ -132,10 +132,15 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
     // Every modifier key is the panel's own silence but the chords its keys spell
     // (`ctrl+d`): a bare name never fires with a modifier held.
     const chord = panelKeys(state).find((k) => k.key.includes('+') && isKey(canonicalBinding(k.key), key));
-    return chord ? { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def: chord, id: rows[cursor]?.id ?? null } } : { state };
+    if (!chord) return { state };
+    // A group header is nobody's row: a key over it runs nothing at all, which is what
+    // the row's `kind` promises. The state is the panel's, unchanged.
+    if (rows[cursor]?.kind === 'group') return { state };
+    return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def: chord, id: rows[cursor]?.id ?? null } };
   }
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
+  if (rows[cursor]?.kind === 'group') return { state };
   return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def, id: rows[cursor]?.id ?? null } };
 }
 
