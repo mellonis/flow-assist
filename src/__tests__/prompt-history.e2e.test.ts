@@ -95,6 +95,47 @@ test('the history — commands included — is saved with the session and back a
   ui.app.unmount();
 });
 
+test('walking history never opens suggestions', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 28);
+  const fieldRow = () => ui.backend.lastFrame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
+  await ui.press('F');
+  // A line being typed offers its candidates: `/mo` has `/mode` and `/model`.
+  await ui.type('/mo');
+  expect(ui.backend.lastFrame).toContain('the chat\'s layout');
+  await ui.press('return');
+  await settle(4);
+  // The unknown command leaves the line as typed: Esc closes its list, the next one
+  // clears the field.
+  await ui.press('escape', 'escape');
+  expect(ui.backend.lastFrame).not.toContain('› /mo');
+  // ↑ recalls it. A recalled line is not one being typed: no list rows, no rest.
+  await ui.press('up');
+  expect(fieldRow()).toContain('› /mo');
+  expect(ui.backend.lastFrame).not.toContain('the chat\'s layout');
+  expect(ui.backend.lastFrame).not.toContain('the model this conversation runs');
+  // One character typed is a content edit: the list is back.
+  await ui.type('d');
+  expect(fieldRow()).toContain('› /mod');
+  expect(ui.backend.lastFrame).toMatch(/mode +the chat's layout/);
+  expect(ui.backend.lastFrame).toMatch(/model +the model this conversation runs/);
+  ui.app.unmount();
+
+  // The `:` line is the same one rule: ↑ recalls a command, and the offer comes back
+  // only with the first character typed into it.
+  const line = await bootApp(new ScriptedModel(), 100, 24);
+  await line.press(':');
+  await line.type('c');
+  expect(line.backend.lastFrame).toMatch(/cache +Turn the cache on or off/);
+  await line.press('return');
+  await line.press(':');
+  await line.press('up');
+  expect(line.backend.lastFrame).toContain(': c');
+  expect(line.backend.lastFrame).not.toMatch(/cache +Turn the cache on or off/);
+  await line.type('a');
+  expect(line.backend.lastFrame).toContain(': cache');
+  line.app.unmount();
+});
+
 test('a `:` command declared with history: false is not recalled by ↑; one without the flag is', async () => {
   const guests = (make: Make) => [make('vault', {
     name: 'vault',

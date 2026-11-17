@@ -4,7 +4,10 @@
 // the selection, Tab and Enter take it, Esc closes it until the text changes, and the
 // inline rest shows the selected candidate. The list keeps one height while it is open,
 // so typing does not move the screen by a row at a time. While the list is closed (Esc)
-// Tab still takes the offer and walks the other candidates, one per press.
+// Tab still takes the offer and walks the other candidates, one per press. A line
+// recalled from ↑/↓ history is not one being typed: it opens no list and draws no rest
+// until a content edit — a typed character or a paste — clears the mark beside its
+// state (`ListState.fromHistory`).
 //
 // Pure: what to draw and what a key does are computed from the text and the list's
 // state, so both are tested without a terminal. The chat's field goes through the same
@@ -97,9 +100,11 @@ export const LIST_ROWS = 8;
 // the line is anything else the selection and the Esc are void. `sel` indexes the
 // candidates (-1: the completer's best), `moved` whether an arrow moved it since the
 // list opened or the text changed, `closed` is Esc, and `height` the rows the list has
-// needed since it opened, so it never shrinks while it is open.
-export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number }
-export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0 });
+// needed since it opened, so it never shrinks while it is open. `fromHistory` is a line
+// the person recalled with ↑/↓ — not one being typed — and it offers nothing until a
+// content edit clears the mark.
+export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number; fromHistory: boolean }
+export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0, fromHistory: false });
 
 export interface ListRow { value: string; detail: string }
 export interface CompletionList {
@@ -124,13 +129,13 @@ export interface CompletionList {
 }
 
 // The list for `input`, or null when none is open: fewer than two candidates, a line
-// the completion does not end, or one closed by Esc. Reading it syncs `state` to the
-// line — a changed line forgets the selection and the Esc — and keeps `height`, so it
-// is safe to call from both the drawing and the keys.
+// the completion does not end, one closed by Esc, or one recalled from history. Reading
+// it syncs `state` to the line — a changed line forgets the selection and the Esc — and
+// keeps `height`, so it is safe to call from both the drawing and the keys.
 export function openList(input: string, state: ListState, complete: Complete): CompletionList | null {
   if (state.text !== input) { state.text = input; state.sel = -1; state.moved = false; state.closed = false; }
   const shut = () => { state.height = 0; state.moved = false; return null; };
-  if (state.closed || !input.trim()) return shut();
+  if (state.closed || state.fromHistory || !input.trim()) return shut();
   const comp = complete(input);
   const all = comp.candidates;
   if (all.length < 2 || !input.endsWith(comp.head)) return shut();
@@ -198,10 +203,13 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 // The line as drawn: the list's selection as the inline rest, or the inline view alone
 // while no list is open. Both belong to the line's LAST word, so they hold only while
 // the caret is at the end: mid-line the rows, the ⏎/Tab take and the rest would all
-// target the wrong word, and the rest would be spliced in at the caret.
+// target the wrong word, and the rest would be spliced in at the caret. A line recalled
+// from history offers nothing at all — no rows, no rest — until it is edited.
 export function lineViewWithList(input: string, caret: number, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
   const once = lastOnly(complete);
   const at = caretAt(input, caret);
   const list = at === input.length ? openList(input, state, once) : null;
-  return list ? { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, caret, walk, once), list: null };
+  if (list) return { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list };
+  const view = state.fromHistory ? { caret: at, ghost: '', label: '', others: [] } : lineView(input, caret, walk, once);
+  return { view, list: null };
 }

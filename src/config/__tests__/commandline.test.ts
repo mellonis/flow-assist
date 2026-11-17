@@ -243,6 +243,25 @@ test('the list and its ghost hold only while the caret is at the end of the line
   expect(lineViewWithList('c', 1, null, st, complete).list?.selected).toBe('cache');
 });
 
+test('a recalled line offers no list', () => {
+  const two = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'item00', candidates: ['item00', 'item01'] });
+  const st = newListState();
+  // ↑ recalled the line from history: the mark rides beside the list's state, so the
+  // line offers nothing — neither the rows nor the inline rest.
+  st.fromHistory = true;
+  const recalled = lineViewWithList('item0', 5, null, st, two);
+  expect(recalled.list).toBeNull();
+  expect(recalled.view).toEqual({ caret: 5, ghost: '', label: '', others: [] });
+  // Every list key is the line's own then: ↑ walks the history again.
+  expect(listKey('item0', st, { name: 'down' }, two)).toEqual({ handled: false });
+  // The next content edit (`editorReducer` `edit` from typing or a paste) brings them
+  // back: the field clears the mark as it takes the edited text.
+  st.fromHistory = false;
+  const edited = lineViewWithList('item0', 5, null, st, two);
+  expect(edited.list?.total).toBe(2);
+  expect(edited.view.ghost).toBe('0');
+});
+
 test('a draw or a key runs the completer once for the line', () => {
   let calls = 0;
   const counted = (text: string): CompleteResult => { calls++; return many(1)(text); };

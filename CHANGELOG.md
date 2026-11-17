@@ -14,6 +14,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   pinned by a test of its own: a letter typed after ← lands at the caret, under a block
   whose inverse cell says where that is.
 
+- **Walking the history opens no suggestions.** A line recalled with ↑/↓ — in the chat's
+  field or on the `:` line — offers nothing: no completion list and no inline rest, however
+  completable its last word. The next character typed (or pasted) into it brings both back;
+  Tab still takes the offer on a recalled line, and Esc and the list's own keys work as on
+  any line without a list.
+
 - **Every request says how long its answer may be.** A request now carries an answer ceiling
   as `max_tokens` on the OpenAI-compatible wire as well as the Anthropic one, and on the
   `/compact` request: `ai.maxTokens`, else the model's own `ai.models.<id>.maxTokens` (new),
