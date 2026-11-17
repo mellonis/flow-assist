@@ -428,8 +428,9 @@ under the cursor: a subagent's conversation as the watch draws it (Esc comes bac
 chat, never to the picker — the picker is one-shot, `J` opens it again), or a shell's kept
 output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
 closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
-`kill sh-3? y yes · n no` in that row's place; `y` kills it as the tree's `x` does,
-`n` leaves it running. Esc closes the picker back to the chat.
+`kill sh-3? y yes · n no` in that row's place; the question names its job, so `y` kills
+that job wherever the cursor has moved to since and `n` leaves it running. `ctrl+d` again
+drops the pending question and kills nothing, and Esc closes the picker, question and all.
 
 ## Agent files
 
@@ -739,11 +740,11 @@ you had typed is kept, not lost. The block always offers `Other…` for your own
 On a question with one answer, a digit answers the option it numbers at once, and ↑/↓
 move the cursor with ⏎ picking the row under it (or opening `Other…`). On a question
 that allows several, a digit toggles the option it numbers, Space toggles the option row
-under the cursor, and ⏎ sends the picks. Typing anything else answers in your own words,
-with the field open on what you typed. Esc leaves the answer field and goes back to the
-list; Esc on the list dismisses the question — the assistant is told you gave no answer
-and must not assume one (a question that is only a text field has no list, so its Esc
-dismisses at once).
+under the cursor, and ⏎ sends the picks. Typing anything else starts an answer in your
+own words: the field opens on what you typed, and ⏎ sends it. Esc leaves the answer field
+and goes back to the list; Esc on the list dismisses the question — the assistant is told
+you gave no answer and must not assume one (a question that is only a text field has no
+list, so its Esc dismisses at once).
 
 **A question waits out the sentence you are typing.** When it arrives while you are still
 typing, the block does not take the field from under your keys: they stay the field's and
@@ -911,7 +912,8 @@ Moving the cursor with ↑/↓ applies the row under it at once — the whole sc
 in the other palette while the menu is up, so the choice is made by looking at it. ⏎
 keeps the mode you are looking at, closes the menu and saves it to `ui.theme`; the chat
 says which one in one row (`theme: light`). Esc closes the menu and puts back the mode
-it opened with; nothing is saved. `system` is honest about what it means: it follows the
+the config names then — what was on screen before the menu opened, unless the config
+changed under it; nothing is saved. `system` is honest about what it means: it follows the
 terminal's own light/dark scheme as the terminal is at that moment, so a terminal that
 switched while the menu was open is followed too.
 

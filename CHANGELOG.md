@@ -54,14 +54,14 @@ What each version of flow-assist brought, newest first. The version is the one i
   question and a `Submit` page last, with a one-row tab strip naming them (a tick marks
   a page that holds an answer). On a single-select page a digit or ⏎ on an option answers
   and moves on; in a multi-select a digit or Space toggles an option row and ⏎ commits
-  the picks and moves on; typing answers in the person's own words. A page commits what
+  the picks and moves on; typing starts an answer. A page commits what
   its draft holds and moves on, so an empty page leaves its question unanswered. ←/→
   walk back and forth, and every page keeps its draft, so changing a pick or the words
-  costs nothing until the end. The submit page lists each question with the answer ⏎
-  will send, or `(not answered)`, and that one ⏎ is the answer the model gets. A single
-  question keeps its own keys, with no pages and no submit page. Esc leaves the answer
-  field first; Esc on the list — on any page, the submit page included — dismisses the
-  whole call, and is reported as a dismissal, never as consent.
+  costs nothing until the end. The submit page sums the call up: every question with the
+  answer ⏎ will send, or `(not answered)`, and that one ⏎ is the answer the model gets. A
+  single question keeps its own keys, with no pages and no submit page. Esc leaves the
+  answer field first; Esc on the list — on any page, the submit page included — dismisses
+  the whole call, and is reported as a dismissal, never as consent.
 
 - **`/theme` picks the look, and the menu previews it.** `ui.theme` is `system`
   (the default, following the terminal's own light/dark scheme as it changes), `light`
@@ -69,7 +69,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   its colours whatever the terminal says. `/theme` opens the three rows with the saved
   mode marked `current`; ↑/↓ apply the row under the cursor at once, so the screen
   repaints while the menu is up. ⏎ keeps it and saves it to `config.local.json`, Esc
-  puts back the mode the menu opened with and saves nothing, and `/theme light|dark|system`
+  puts back the mode the config names then — the one on screen before the menu opened,
+  unless the config changed under it; nothing is saved, and `/theme light|dark|system`
   applies and saves in one line. The key is the person's — the assistant has no mark for
   it — and is read live.
 
