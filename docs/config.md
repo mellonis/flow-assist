@@ -22,8 +22,10 @@ assistant may set or save".
 - **The look**: `ui.theme` is `system` (the default), `light` or `dark`. `system` follows
   the terminal's own light/dark scheme as it changes (macOS switches it by itself and
   the terminal follows); `light` and `dark` pin one whatever the terminal says. It is
-  read live: a value set while the app runs repaints it at once, and `/theme` in the
-  chat picks it with the palette previewed as the cursor moves — see
+  read live: `:config set ui.theme dark` in the running app repaints it at once, and
+  `/theme` does the same through this key; a value written into `config.local.json` from
+  outside a running app is read at the next start — there is no file watcher. `/theme` in
+  the chat picks it with the palette previewed as the cursor moves — see
   [usage.md](usage.md), "The look: `/theme`". The key is the person's — the assistant has
   no mark for it.
 - **The model**: by default an OpenAI-compatible chat-completions API —

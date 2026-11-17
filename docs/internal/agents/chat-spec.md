@@ -1006,7 +1006,9 @@ there is no `/fullscreen`.
   Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's), a mouse
   button and the wheel never reach the conversation it hides, and closing the chat,
   `/clear`, `/new`, `/resume` and opening the picker drop it. `rows()` is read at every
-  draw and a 1 s tick redraws it while up. A key's `run(id)` may answer a line (the
+  draw and a 1 s tick redraws it while up. A spec's `onCursor(id, index)` observes a
+  cursor move and `onDrop()` a drop WITHOUT a decision (never a key's `run`), where a
+  preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat

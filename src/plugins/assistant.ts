@@ -64,7 +64,7 @@ import type { Make } from '../loader/plugin.js';
 import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
-import { isPanelSpec, panelAnswer, panelCursor, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
@@ -506,6 +506,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const panelRef = ui.useRef<PanelState | null>(null);
           const [panel, setPanelState] = ui.useState<PanelState | null>(null);
           const setPanel = (next: PanelState | null) => { panelRef.current = next; setPanelState(next); if (!next) markSeenRef.current(); host.notify(); };
+          // The ONE way a panel goes WITHOUT a decision — Esc, the chat closing, a
+          // session change, another panel taking its place. Its spec's `onDrop` puts back
+          // whatever it previewed; a key's `run` that closes a panel is a decision and
+          // calls `setPanel(null)` itself. See command-panel.ts, `panelDrop`.
+          const dropPanel = () => setPanel(panelDrop(panelRef.current));
           const [, setPanelTick] = ui.useState(0);
           ui.useEffect(() => {
             if (!panel) return;
@@ -1030,7 +1035,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // remembered folds and notes mode replace those two resets.
           const applySessionView = (s: Session, of?: Conversation) => {
             restoreView(of);
-            setPanel(null);
+            dropPanel();
             histAt.current = null;
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
@@ -1537,7 +1542,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The picker takes the conversation's place, where a pager left open while
             // the plugin had the keys stands: the pager goes, and so does a panel.
             setPager(null);
-            setPanel(null);
+            dropPanel();
             closeDiff();
             setPicker(pickerStart(pickerRows(), conv.currentProject()));
           };
@@ -1628,7 +1633,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (prev.confirm || prev.question) { setError('background shells are running — answer the question that waits first, then leave'); return false; }
             const done = (stop: boolean) => {
               if (stop) for (const j of prev.shownJobs()) (j.owner as Conversation).killJob(j, 'person');
-              setPanel(null);
+              dropPanel();
               if (!go()) refused?.();
               host.notify();
             };
@@ -1711,7 +1716,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setError(null);
             setElapsedMs(0);
             restoreView();
-            setPanel(null);
+            dropPanel();
             closeDiff();
             disarmEsc();
             host.notify();
@@ -1737,14 +1742,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setError(null);
             setPager(null);
             setPicker(null);
+            // A panel already up is replaced without a decision: its preview is put back.
+            dropPanel();
             setPanel(panelStart(spec));
           };
           // A panel key's answer: a line for its notice, or a panel over it — laid on the
           // panel it ran in, and dropped when that one has gone meanwhile (an answer that
           // came after Esc).
           const panelStep = (step: ReturnType<typeof commandPanelKey>) => {
+            // Esc closed the last panel: its preview is put back (`dropPanel`), not kept.
+            if (!step.state) { dropPanel(); return; }
             setPanel(step.state);
-            if (!step.run || !step.state) return;
+            if (!step.run) return;
             const at = panelTop(step.state);
             const apply = (answer: unknown) => {
               const cur = panelRef.current;
@@ -1874,7 +1883,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // saves nothing), Enter keeps it and saves it, Esc puts back the mode the
                 // menu opened with, and `/theme <mode>` applies and saves in one step.
                 const saved = (): ThemeMode => (host.config.ui as { theme?: ThemeMode } | undefined)?.theme ?? 'system';
-                const preview = (mode: ThemeMode) => (host.services as { setThemeMode?: (m: ThemeMode) => void }).setThemeMode?.(mode);
+                const preview = (mode: ThemeMode) => (host.services as { setThemeMode: (m: ThemeMode) => void }).setThemeMode(mode);
                 const save = (mode: ThemeMode): boolean => {
                   const res = setConfigValue(host.config as Record<string, unknown>, 'ui.theme', mode, { scope: 'saved' });
                   if (!res.ok) { setError(`/theme: ${res.error}`); return false; }
@@ -1884,13 +1893,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const got = parseThemeArg(asked);
                   if (typeof got !== 'string') { setError(got.error); return false; }
                   setField('');
+                  const was = saved();
                   preview(got);
-                  if (!save(got)) return false;
+                  // A save that failed leaves nothing changed: the look goes back to what
+                  // it was, as `/model` leaves the model alone.
+                  if (!save(got)) { preview(was); return false; }
                   conv.pushNote(`theme: ${got}`);
                   host.notify();
                   return true;
                 };
-                if (arg.trim()) { set(arg); return; }
+                if (arg.trim()) { set(arg.trim().toLowerCase()); return; }
                 setField('');
                 const opened = saved();
                 openPanel({
@@ -1902,15 +1914,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     tone: mode === saved() ? 'ok' : undefined,
                   })),
                   onCursor: (id) => preview(id as ThemeMode),
-                  // Esc is the menu's dismissal, never a choice: what the person saw
-                  // before it opened is what they see again. `system` is honest — it
-                  // follows the terminal as it is now, not as it was at open.
-                  onDismiss: () => preview(opened),
+                  // The menu went WITHOUT a choice — Esc, the chat folding away, a session
+                  // change: what the person saw before it opened is what they see again.
+                  // `system` is honest — it follows the terminal as it is now, not as it
+                  // was at open. A `⏎` that saves is a decision and closes without this.
+                  onDrop: () => preview(opened),
                   keys: [{ key: 'return', label: 'use', run: (id) => {
-                    const mode = id as ThemeMode;
-                    preview(mode);
-                    if (save(mode)) conv.pushNote(`theme: ${mode}`);
-                    setPanel(null);
+                    // The same path as `/theme <mode>`: a save that fails keeps the menu up
+                    // with its error, as `/model` keeps its panel.
+                    if (set(id as ThemeMode)) setPanel(null);
                     return undefined;
                   } }],
                 });
@@ -2397,7 +2409,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             disarmEsc();
             setPager(null);
             setPicker(null); // its rows were read for this visit; the key reads them anew
-            setPanel(null);
+            dropPanel();
             conv.save(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render

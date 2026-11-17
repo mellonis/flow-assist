@@ -56,22 +56,30 @@ test('the theme menu previews and decides', async () => {
   expect(frame(ui)).toContain('system');
   expect(frame(ui)).toContain('light');
   expect(frame(ui)).toContain('dark');
-  // The saved mode's row says it is the current one.
-  const current = frame(ui).split('\n').find((r) => r.includes('system'))!;
-  expect(current).toContain('follows the terminal');
-  expect(current).toContain('current');
+  // The SAVED mode's row says it is the current one; the cursor opens there.
+  const marked = () => frame(ui).split('\n').filter((r) => r.includes('current'));
+  expect(marked().length).toBe(1);
+  expect(marked()[0]).toContain('system');
+  expect(marked()[0]).toContain('follows the terminal');
 
-  // Moving the cursor previews at once; back on the mode that follows the terminal,
-  // the look follows it again.
+  // Moving the cursor previews at once; the mark stays on the saved row, not on the
+  // previewed one.
   await ui.press('down');
   await settle();
   expect(look(ui)).toBe(LIGHT);
-  await ui.press('up');
-  await settle();
-  expect(NONE).toContain(look(ui));
+  expect(frame(ui)).toMatch(/› light/);
+  expect(marked().length).toBe(1);
+  expect(marked()[0]).toContain('system');
+  // A click is a cursor move too: the row under the pointer previews.
+  const rowY = (t: string) => frame(ui).split('\n').findIndex((r) => r.includes(t));
+  ui.backend.mouse('down', 14, rowY('dark'));
+  ui.backend.mouse('up', 14, rowY('dark'));
+  await settle(6);
+  expect(look(ui)).toBe(DARK);
+  expect(marked()[0]).toContain('system');
 
-  // Esc decides nothing: the look is the one the panel opened with, and nothing is
-  // written.
+  // Esc decides nothing: the look is the one the panel opened with — a mode that
+  // differs from the preview — and nothing is written.
   await ui.press('escape');
   await settle();
   expect(frame(ui)).not.toContain('Flow Assist · Theme');
@@ -92,6 +100,28 @@ test('the theme menu previews and decides', async () => {
   ui.app.unmount();
 });
 
+test('a panel that goes without a choice puts the preview back', async () => {
+  // Docked, the collapse key folds the chat away while a panel is up — the panel goes
+  // with it, and no key of its own was pressed.
+  const ui = await bootApp(new ScriptedModel(), 120, 40, undefined, {}, { scheme: 'unknown', chatMode: 'panel' });
+  await ui.press('F');
+  await settle();
+  await theme(ui);
+  await ui.press('down');
+  await settle();
+  expect(look(ui)).toBe(LIGHT);
+
+  ui.backend.press({ name: '\\', ctrl: true });
+  await settle();
+  expect(savedTheme()).toBeUndefined();
+  // Opened again, the chat shows the mode the menu opened with, not the preview.
+  await ui.press('F');
+  await settle();
+  expect(frame(ui)).not.toContain('Flow Assist · Theme');
+  expect(NONE).toContain(look(ui));
+  ui.app.unmount();
+});
+
 test('the theme command applies its argument', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { scheme: 'unknown' });
   await ui.press('F');
@@ -102,11 +132,19 @@ test('the theme command applies its argument', async () => {
   expect(frame(ui)).toContain('theme: dark');
   expect(savedTheme()).toBe('dark');
 
-  // A word that is not a mode changes nothing and names the three that are.
+  await theme(ui, 'Light');
+  expect(look(ui)).toBe(LIGHT);
+  expect(frame(ui)).toContain('theme: light');
+  expect(savedTheme()).toBe('light');
+
+  // A word that is not a mode changes nothing and names the three that are. (The
+  // refused line keeps the field as typed, so it is cleared before the next attempt.)
+  await ui.press('escape');
+  await settle();
   await theme(ui, 'blue');
   expect(frame(ui)).toContain('theme: blue is not a mode');
   expect(frame(ui)).toContain('system, light, dark');
-  expect(look(ui)).toBe(DARK);
-  expect(savedTheme()).toBe('dark');
+  expect(look(ui)).toBe(LIGHT);
+  expect(savedTheme()).toBe('light');
   ui.app.unmount();
 });

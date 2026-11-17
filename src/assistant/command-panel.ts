@@ -42,11 +42,14 @@ export type PanelSpec = {
   follow?: boolean;
   // A cursor move, observed: the row under it now, and its index. A preview is laid on
   // screen here (`/theme`), never a decision — a key's `run` is the only thing that
-  // decides, and it never calls this.
+  // decides, and it never calls this. A move between rows observes; a panel's cursor
+  // reset (Esc back to the panel underneath, the last one closing) is not a move.
   onCursor?: (id: string, index: number) => void;
-  // Esc closing the last panel, observed: what a preview put on screen is put back here.
-  // A step back to a panel underneath, and a key's `run` that closes, never call it.
-  onDismiss?: () => void;
+  // The panel went WITHOUT a decision, observed: Esc closing the last one, the chat
+  // closing, a session change, another panel taking its place. What a preview put on
+  // screen is put back here (`/theme`). A key's `run` that closes the panel is a
+  // decision and never calls it; Esc back to a panel underneath is not a drop either.
+  onDrop?: () => void;
 };
 
 // `at`: the id of the row the cursor was last moved to, read when the top panel follows.
@@ -96,9 +99,8 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
   const atOf = (to: number): { at?: string } => (panelTop(state).follow && rows[to] ? { at: rows[to]!.id } : {});
   if (key.name === 'escape') {
     if (state.stack.length > 1) return { state: { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } };
-    // The last panel closes: a preview it laid on screen is put back. A throw is no
-    // closing's business — the panel must still go.
-    try { panelTop(state).onDismiss?.(); } catch { /* observation only */ }
+    // The last panel closes. The preview a spec laid on screen is put back by whoever
+    // drops it (`panelDrop`) — the chat's one drop path, never a key's decision.
     return { state: null };
   }
   if (key.name === 'up' || key.name === 'down') {
@@ -115,6 +117,17 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
   return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def, id: rows[cursor]?.id ?? null } };
+}
+
+// The panel went WITHOUT a decision: Esc on the last one, the chat closing, a session
+// change, another panel taking its place. It is `null` after, and the spec's `onDrop`
+// has put back whatever it previewed. A key's `run` that closes the panel is a decision
+// and closes it without passing here; Esc back to a panel underneath is not a drop.
+export function panelDrop(state: PanelState | null): null {
+  if (state) {
+    try { panelTop(state).onDrop?.(); } catch { /* observation only */ }
+  }
+  return null;
 }
 
 const isSpec = (v: unknown): v is PanelSpec => !!v && typeof v === 'object' && typeof (v as PanelSpec).rows === 'function' && typeof (v as PanelSpec).title === 'string';

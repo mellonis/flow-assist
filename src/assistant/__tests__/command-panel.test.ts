@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { panelAnswer, panelCursor, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec } from '../command-panel';
+import { panelAnswer, panelCursor, panelDrop, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec } from '../command-panel';
 
 const spec = (rows: string[], ran: string[] = []): PanelSpec => ({
   title: 'Servers',
@@ -119,6 +119,35 @@ test('onCursor runs as the cursor moves', () => {
   expect(seen).toEqual([['light', 1]]);
   panelKey(moved.state!, { name: 'up' });
   expect(seen).toEqual([['light', 1], ['system', 0]]);
+});
+
+test('the drop hook runs only when the panel goes without a decision', () => {
+  const seen: string[] = [];
+  const inner: PanelSpec = { title: 'inner', rows: () => [{ id: 'a', text: 'a' }], onDrop: () => { seen.push('inner'); } };
+  const outer: PanelSpec = {
+    title: 'outer',
+    rows: () => [{ id: 'x', text: 'x' }],
+    keys: [{ key: 'r', label: 'use', run: () => 'used' }],
+    onDrop: () => { seen.push('outer'); },
+  };
+  const start = panelStart(outer);
+  // A key's run is a decision: the panel closes by `run`'s own answer, not by a drop.
+  expect(panelKey(start, { name: 'r' }).run).toBeDefined();
+  expect(seen).toEqual([]);
+  // A panel over it: Esc goes back, and that is no drop either.
+  const nested = panelAnswer(start, inner);
+  const back = panelKey(nested, { name: 'escape' });
+  expect(back.state).not.toBeNull();
+  expect(seen).toEqual([]);
+  // Esc on the last one is a drop: the chat puts it away through `panelDrop`.
+  const closed = panelKey(back.state!, { name: 'escape' });
+  expect(closed.state).toBeNull();
+  expect(seen).toEqual([]);
+  expect(panelDrop(back.state!)).toBeNull();
+  expect(seen).toEqual(['outer']);
+  // Nothing to drop says nothing.
+  expect(panelDrop(null)).toBeNull();
+  expect(seen).toEqual(['outer']);
 });
 
 test('a panel pushed over a following one starts without the parent\'s row id', () => {

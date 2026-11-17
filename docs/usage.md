@@ -856,9 +856,11 @@ switched while the menu was open is followed too.
 
 `/theme <mode>` skips the menu and applies and saves the mode in one line — the same
 thing ⏎ does. A word that is not a mode is refused with the three that are. The choice
-is the person's: it has no mark for the assistant, and it is read live, so a mode set
-while the app runs repaints at once. `/theme` is not kept in the ↑/↓ history: a look is
-one key away rather than a line worth recalling. The setting is `ui.theme` — see
+is the person's: it has no mark for the assistant, and it is read live, so
+`:config set ui.theme light` in the running app repaints at once (a value written into
+`config.local.json` from outside is read at the next start). `/theme` is not kept in the
+↑/↓ history: a look is one key away rather than a line worth recalling. The setting is
+`ui.theme` — see
 [config.md](config.md); a palette of your own is still `theme` (`config set theme …`),
 which lays its colours over either scheme.
 
