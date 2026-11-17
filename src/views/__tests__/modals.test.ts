@@ -6,7 +6,8 @@ import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
-import { askStart } from '../../assistant/ask.js';
+import { askKey, askStart, type AskState } from '../../assistant/ask.js';
+import { keyGlyph } from '../../playback/keys.js';
 import { bumpViewRevision } from '../../assistant/views.js';
 import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
@@ -1359,4 +1360,69 @@ test('the body is one walk: the files ↑/↓ move among, in the drawn order, an
   const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40, gitless: false, failed: false });
   expect(gone.cursorRow).toBe(-1);
   expect(gone.rows).toHaveLength(4);
+});
+
+// ─── The question wizard (ticket 4) ─────────────────────────────────────────
+// A call with more than one question is a wizard: one page per question under a tab
+// strip, then a submit page that shows what its Enter will send. The single-question
+// box has no strip and no submit page, and draws as it always has.
+type AskGrid = { width: number; height: number; get(x: number, y: number): { char: string; style: { inverse?: boolean; dim?: boolean } } };
+const twoQuestions = () => askStart([
+  { question: 'Which one?', header: 'First', options: [{ label: 'alpha' }, { label: 'beta' }] },
+  { question: 'Where?', header: 'Second', options: [{ label: 'x' }, { label: 'y' }] },
+]);
+const askFrame = async (state: AskState, width = 120) => {
+  const backend = new TestBackend(width, 30);
+  const handle = await render(h(renderChatModal, { ...baseChat, width, height: 30, pendingQuestion: state } as never), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: AskGrid }).lastBuffer;
+  handle.unmount();
+  return { lines, grid };
+};
+
+test('the ask box draws the tabs strip and the submit page', async () => {
+  // Page one answered with its first option, so the strip says so on page two.
+  const answered = askKey(twoQuestions(), { name: '1' });
+  const { lines, grid } = await askFrame(answered);
+  const stripY = lines.findIndex((l) => l.includes('✓ First') && l.includes('Second'));
+  expect(stripY).toBeGreaterThanOrEqual(0);
+  const x = (text: string) => lines[stripY]!.indexOf(text);
+  const inverseAt = (text: string) => {
+    for (let i = 0; i < text.length; i++) if (grid.get(x(text) + i, stripY).style.inverse) return true;
+    return false;
+  };
+  // One strip row: both tabs on it, the page on screen inverse, the answered one not.
+  expect(inverseAt('Second')).toBe(true);
+  expect(inverseAt('First')).toBe(false);
+  expect(lines.join('\n')).toContain(
+    `${keyGlyph('left')}${keyGlyph('right')} questions · ${keyGlyph('up')}${keyGlyph('down')} move · ${keyGlyph('return')} answer · type your own words · ${keyGlyph('escape')} dismiss`);
+
+  // The submit page (page three of three): every question's title dim, its answer at
+  // full ink — or `(not answered)` dim — and the hint naming the keys that act there.
+  const submitting = askKey(answered, { name: 'right' });
+  const sub = await askFrame(submitting);
+  const row = (text: string) => sub.lines.findIndex((l) => l.includes(text));
+  const dimAt = (text: string) => sub.grid.get(sub.lines[row(text)]!.indexOf(text), row(text)).style.dim === true;
+  expect(row('First — Which one?')).toBeGreaterThanOrEqual(0);
+  expect(dimAt('First — Which one?')).toBe(true);
+  expect(dimAt('alpha')).toBe(false);
+  expect(dimAt('Second — Where?')).toBe(true);
+  expect(dimAt('(not answered)')).toBe(true);
+  expect(sub.lines.findIndex((l) => l.includes('✓ First') && l.includes('Submit'))).toBeGreaterThanOrEqual(0);
+  const text = sub.lines.join('\n');
+  expect(text).toContain(`${keyGlyph('left')}${keyGlyph('right')} questions · ${keyGlyph('return')} submit · ${keyGlyph('escape')} dismiss`);
+  // The page is the sum, not a question: no option list and no free-text row.
+  expect(text).not.toContain('Other…');
+
+  // A wide label is cut by cells, so the strip stays ONE row between the title and the
+  // list: a tab never pushes a row onto a second line.
+  const wide = askStart([
+    { question: 'One?', header: `${'🙂'.repeat(20)} first`, options: [{ label: 'a' }, { label: 'b' }] },
+    { question: 'Two?', header: `${'回答'.repeat(20)} second`, options: [{ label: 'a' }, { label: 'b' }] },
+    { question: 'Three?', header: 'third', options: [{ label: 'a' }, { label: 'b' }] },
+  ]);
+  const narrow = await askFrame(wide, 80);
+  const title = narrow.lines.findIndex((l) => l.includes('? 1/3'));
+  expect(title).toBeGreaterThanOrEqual(0);
+  expect(narrow.lines[title + 2]).toContain('1. a');
 });

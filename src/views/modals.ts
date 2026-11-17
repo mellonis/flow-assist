@@ -14,7 +14,7 @@
 //   - `theme` may be undefined / lack a resolved `modals` map, so every
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
-import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { askRows, askSubmitRows, askTabs, type AskRow, type AskState, type AskSubmitRow, type AskTab } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
 import type { TreeRow } from '../assistant/agent-tree.js';
@@ -521,6 +521,7 @@ const CAP = {
   tab: keyGlyph('tab'),
   space: keyGlyph(' '),
   upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
+  leftRight: `${keyGlyph('left')}${keyGlyph('right')}`,
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
   // `details` is NOT here: it is a bound action (`config.keys.details`), so its cap is
   // drawn from the binding and handed in as a prop — the rule for every key a person
@@ -2766,30 +2767,52 @@ export const askFieldWidth = (wrap: number) => Math.max(10, wrap - ASK_PROMPT.le
 // The question block's pieces, shared by its render and by the count of its rows
 // (`pendingChatRows`), so the two cannot drift apart.
 function askView(state: AskState, wrap: number) {
-  // The working state of the page on screen. With several questions the page after the
-  // last (the submit page) draws the last question's pieces here — its rows and its
-  // keys are the submit page's whatever is shown.
+  // The page after the last is the submit page (several questions only): it sums the
+  // drafts instead of holding one question's list.
+  const submitting = state.index >= state.questions.length;
+  const many = state.questions.length > 1;
+  // The working state of the page on screen. On the submit page this is the last
+  // question's — it draws no rows of its own, and its keys are the submit page's.
   const at = Math.min(state.index, state.questions.length - 1);
   const q = state.questions[at]!;
   const d = state.drafts[at]!;
-  const many = state.questions.length > 1 ? `${at + 1}/${state.questions.length} · ` : '';
-  // The hint says the rule the list itself cannot: the digits pick, and anything else
-  // typed starts an answer in the person's own words.
-  const hint = d.typing
-    ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
-    : q.multiSelect
-      ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
-      : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
+  const page = many ? `${at + 1}/${state.questions.length} · ` : '';
+  // The hint says the rule the list itself cannot: the digits pick, anything else typed
+  // starts an answer in the person's own words, and — with several questions — the
+  // arrows walk the pages (inside the field they are the caret's, so it is not said
+  // there).
+  const pageKeys = many ? `${CAP.leftRight} questions · ` : '';
+  const hint = submitting
+    ? `${pageKeys}${CAP.enter} submit · ${CAP.esc} dismiss`
+    : d.typing
+      ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
+      : q.multiSelect
+        ? `${pageKeys}${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
+        : `${pageKeys}${CAP.upDown} move · ${CAP.enter} answer · type your own words · ${CAP.esc} dismiss`;
   return {
     q,
     d,
-    title: `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`,
-    rows: askRows(state),
+    title: submitting ? '? Submit' : `? ${page}${q.header ? `${q.header} — ` : ''}${q.question}`,
+    // The wizard's page strip (nothing for a single question) and, on the submit page,
+    // every question's title with the answer Enter will send under it.
+    tabs: askTabs(state),
+    submitRows: submitting ? askSubmitRows(state) : null,
+    rows: submitting ? [] : askRows(state),
     hint,
     // The field is an editor, so it has a caret of its own to draw — wherever it is in
     // the text, not always at the end.
-    fieldRows: d.typing ? inputVisualRows(d.text, d.caret, askFieldWidth(wrap)) : [],
+    fieldRows: !submitting && d.typing ? inputVisualRows(d.text, d.caret, askFieldWidth(wrap)) : [],
   };
+}
+
+// The wizard's page strip: ONE row, a tab per page (`✓` once its draft holds an
+// answer), the page on screen in inverse. Each tab is cut by cells to the share of the
+// row it has, so a wide label never pushes the strip onto a second line.
+function askTabRow(tabs: AskTab[], inner: number) {
+  const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
+  return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
+    ...tabs.map((t, i) => h(Text, { key: i, inverse: t.current, wrap: 'truncate', selectable: false },
+      `${i ? '  ' : ''}${cutStep(`${t.answered ? '✓ ' : ''}${t.label}`, room)}`)));
 }
 
 // What a y/n block is given: a write the model asked for, or — with `title` and `hint`
@@ -2854,7 +2877,12 @@ export function pendingChatRows({ width, question, confirm, notice = 0, todo, qu
 function askBlockRows(state: AskState, wrap: number): number {
   const v = askView(state, wrap);
   const inner = wrap - 2;
-  return 2 + textRows(v.title, inner) + v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0) + v.fieldRows.length + textRows(v.hint, inner);
+  // A submit row is a title and its answer, each one row; an option may carry a
+  // description under it.
+  const body = v.submitRows
+    ? v.submitRows.reduce((n) => n + 2, 0)
+    : v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0);
+  return 2 + textRows(v.title, inner) + (v.tabs.length ? 1 : 0) + body + v.fieldRows.length + textRows(v.hint, inner);
 }
 function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): number {
   const inner = wrap - 2;
@@ -2871,14 +2899,23 @@ function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, re
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
-  const { q, d, title, rows, hint, fieldRows } = askView(state, wrap);
+  const { q, d, title, tabs, submitRows, rows, hint, fieldRows } = askView(state, wrap);
+  const inner = Math.max(1, wrap - 2);
   const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
+  // What Enter will send for one question: its title in the quiet ink, its answer under
+  // it — unless there is none, which is said in the quiet ink too.
+  const answerRow = (r: AskSubmitRow, i: number) => h(Box, { key: `s${i}`, flexDirection: 'column' },
+    h(Text, { dim: true, wrap: 'truncate', selectable: false }, cutStep(r.title, inner)),
+    h(Text, { dim: r.answer === '(not answered)', wrap: 'truncate' }, `  ${cutStep(r.answer, Math.max(1, inner - 2))}`));
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
-    ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
-      h(Text, { bold: r.active, inverse: r.active && !d.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
-      r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${headClusters(r.description, Math.max(10, wrap - 8))}`) : null)),
-    d.typing
+    tabs.length ? askTabRow(tabs, inner) : null,
+    ...(submitRows
+      ? submitRows.map(answerRow)
+      : rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
+          h(Text, { bold: r.active, inverse: r.active && !d.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
+          r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${headClusters(r.description, Math.max(10, wrap - 8))}`) : null))),
+    fieldRows.length
       ? h(Box, { flexDirection: 'column' }, fieldRows.map((row, i) =>
           h(Box, { key: `f${i}`, flexDirection: 'row' },
             h(Text, null, i === 0 ? ASK_PROMPT : ' '.repeat(ASK_PROMPT.length)),
