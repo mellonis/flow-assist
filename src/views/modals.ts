@@ -1346,9 +1346,11 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // whole answer can arrive in the very render that ends its turn, while a session
   // opened or resumed is no answer arriving — and only while that answer is the last
   // message: a background result landing under it is not the answer growing. Never a
-  // row from before the person's last message (a question, a `!command`), so a
-  // command's output never stops on an older answer. The steps and the trail of the
-  // turn above it scroll away with the question.
+  // row from before the turn's question — the person's last message (a question, a
+  // `!command`) or a landed result's `bg` row, which is what a follow-up turn's
+  // question is — so a command's output never stops on an older answer and a
+  // follow-up turn never stops above the result it follows. The steps and the trail
+  // of the turn above it scroll away with the question.
   let sent: ChatMsg | null = null;
   for (let mi = messages.length - 1; mi >= 0 && !sent; mi--) if (messages[mi]!.role === 'user' || messages[mi]!.role === 'shell') sent = messages[mi]!;
   if (streaming) turn.current = sent;
@@ -1356,7 +1358,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   if (sent && turn.current === sent && messages.at(-1)?.role === 'assistant') {
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!;
-      if ((r.role === 'user' || r.role === 'shell') && r.first) break;
+      if ((r.role === 'user' || r.role === 'shell' || r.role === 'bg') && r.first) break;
       if (r.liveMark || (r.role === 'assistant' && r.first && !r.step && !r.limit && !r.groupHead)) { answerRow.current = i; break; }
     }
   }
