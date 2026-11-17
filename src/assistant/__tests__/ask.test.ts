@@ -261,8 +261,8 @@ test('the submit page sends the last state of every draft', () => {
   expect(draft(s).text).toBe('rst');
   s = press(s, 'right');
   expect(askSubmitRows(s)).toEqual([
-    { title: 'First?', answer: 'one' },
-    { title: 'Second?', answer: 'rst' },
+    { title: 'First?', answer: 'one', answered: true },
+    { title: 'Second?', answer: 'rst', answered: true },
   ]);
   // Enter on the submit page answers the whole call, once.
   s = press(s, 'return');

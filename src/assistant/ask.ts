@@ -126,11 +126,15 @@ export function askTabs(state: AskState): AskTab[] {
   ];
 }
 
-export interface AskSubmitRow { title: string; answer: string }
+export interface AskSubmitRow { title: string; answer: string; answered: boolean }
 // The submit page: every question and where its draft stands now, so the person reads
-// what their Enter will send before pressing it.
+// what their Enter will send before pressing it. `answered` is the same reading of the
+// draft the strip makes — said by the draft, never inferred from the answer's words.
 export function askSubmitRows(state: AskState): AskSubmitRow[] {
-  return state.questions.map((q, i) => ({ title: titled(q), answer: worded(entryOf(q, state.drafts[i]!)) }));
+  return state.questions.map((q, i) => {
+    const d = state.drafts[i]!;
+    return { title: titled(q), answer: worded(entryOf(q, d)), answered: taken(d) };
+  });
 }
 
 export interface AskRow { label: string; description?: string; picked: boolean; active: boolean; other: boolean }

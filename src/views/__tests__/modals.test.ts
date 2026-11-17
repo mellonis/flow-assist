@@ -1380,6 +1380,17 @@ const askFrame = async (state: AskState, width = 120) => {
   return { lines, grid };
 };
 
+test('a one-question box keeps its own hint and grows no strip', async () => {
+  const one = askStart([{ question: 'Which one?', header: 'First', options: [{ label: 'alpha' }, { label: 'beta' }] }]);
+  const { lines } = await askFrame(one);
+  const text = lines.join('\n');
+  // The single question answers in its own keys — the digits still pick — and has no
+  // pages to walk and no strip to walk them on.
+  expect(text).toContain(`${keyGlyph('up')}${keyGlyph('down')} move · ${keyGlyph('return')} or a digit to answer · type your own words · ${keyGlyph('escape')} dismiss`);
+  expect(text).not.toContain('←→');
+  expect(text).not.toContain('✓');
+});
+
 test('the ask box draws the tabs strip and the submit page', async () => {
   // Page one answered with its first option, so the strip says so on page two.
   const answered = askKey(twoQuestions(), { name: '1' });

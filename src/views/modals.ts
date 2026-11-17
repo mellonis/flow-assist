@@ -2788,7 +2788,7 @@ function askView(state: AskState, wrap: number) {
       ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
       : q.multiSelect
         ? `${pageKeys}${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
-        : `${pageKeys}${CAP.upDown} move · ${CAP.enter} answer · type your own words · ${CAP.esc} dismiss`;
+        : `${pageKeys}${CAP.upDown} move · ${CAP.enter} ${many ? 'answer' : 'or a digit to answer'} · type your own words · ${CAP.esc} dismiss`;
   return {
     q,
     d,
@@ -2807,12 +2807,16 @@ function askView(state: AskState, wrap: number) {
 
 // The wizard's page strip: ONE row, a tab per page (`✓` once its draft holds an
 // answer), the page on screen in inverse. Each tab is cut by cells to the share of the
-// row it has, so a wide label never pushes the strip onto a second line.
+// row it has, so a wide label never pushes the strip onto a second line. The gap
+// between two tabs belongs to neither, so it is never part of the inverse.
 function askTabRow(tabs: AskTab[], inner: number) {
   const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
   return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
-    ...tabs.map((t, i) => h(Text, { key: i, inverse: t.current, wrap: 'truncate', selectable: false },
-      `${i ? '  ' : ''}${cutStep(`${t.answered ? '✓ ' : ''}${t.label}`, room)}`)));
+    ...tabs.flatMap((t, i) => [
+      i ? h(Text, { key: `gap${i}`, selectable: false }, '  ') : null,
+      h(Text, { key: i, inverse: t.current, wrap: 'truncate', selectable: false },
+        cutStep(`${t.answered ? '✓ ' : ''}${t.label}`, room)),
+    ]));
 }
 
 // What a y/n block is given: a write the model asked for, or — with `title` and `hint`
@@ -2906,7 +2910,7 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
   // it — unless there is none, which is said in the quiet ink too.
   const answerRow = (r: AskSubmitRow, i: number) => h(Box, { key: `s${i}`, flexDirection: 'column' },
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, cutStep(r.title, inner)),
-    h(Text, { dim: r.answer === '(not answered)', wrap: 'truncate' }, `  ${cutStep(r.answer, Math.max(1, inner - 2))}`));
+    h(Text, { dim: !r.answered, wrap: 'truncate' }, `  ${cutStep(r.answer, Math.max(1, inner - 2))}`));
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
     tabs.length ? askTabRow(tabs, inner) : null,
