@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/theme` picks the look, and the menu previews it.** `ui.theme` is `system`
+  (the default, following the terminal's own light/dark scheme as it changes), `light`
+  or `dark`, over the host's palette and every plugin's `${token}`: a pinned mode keeps
+  its colours whatever the terminal says. `/theme` opens the three rows with the saved
+  mode marked `current`; ↑/↓ apply the row under the cursor at once, so the screen
+  repaints while the menu is up. ⏎ keeps it and saves it to `config.local.json`, Esc
+  puts back the mode the menu opened with and saves nothing, and `/theme light|dark|system`
+  applies and saves in one line. The key is the person's — the assistant has no mark for
+  it — and is read live.
+
 - **The `:` line has a caret you can see and move.** A command is edited mid-line: the
   caret is drawn where it stands in what you typed, ←/→ move it by a character (word
   motion and Home/End too), and text, Backspace/Delete and a paste go in at the caret

@@ -100,6 +100,27 @@ test('a panel that does not follow records no row id on ↑/↓ or on a key', ()
   expect(panelKey(s, { name: 'r' }).state!.at).toBeUndefined();
 });
 
+test('onCursor runs as the cursor moves', () => {
+  const seen: Array<[string, number]> = [];
+  const preview: PanelSpec = {
+    title: 'Theme',
+    rows: () => ['system', 'light', 'dark'].map((id) => ({ id, text: id })),
+    keys: [{ key: 'r', label: 'use', run: () => 'used' }],
+    onCursor: (id, index) => { seen.push([id, index]); },
+  };
+  const s = panelStart(preview);
+  const moved = panelKey(s, { name: 'down' });
+  expect(seen).toEqual([['light', 1]]);
+  // Up at the top is no move: nothing is said.
+  expect(panelKey(s, { name: 'up' }).state!.cursor).toBe(0);
+  expect(seen).toEqual([['light', 1]]);
+  // A key is a decision, not a move: its run is untouched and no preview is said.
+  expect(panelKey(moved.state!, { name: 'r' }).run?.def.run(null)).toBe('used');
+  expect(seen).toEqual([['light', 1]]);
+  panelKey(moved.state!, { name: 'up' });
+  expect(seen).toEqual([['light', 1], ['system', 0]]);
+});
+
 test('a panel pushed over a following one starts without the parent\'s row id', () => {
   const follow: PanelSpec = { title: 'Agents', follow: true, rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }] };
   let s = panelStart(follow);

@@ -840,6 +840,28 @@ see, and nothing is lost by it. Compacting before you switch down is the way thr
 today — a compaction that folds a tail of the history instead of all of it is the change
 this needs.
 
+## The look: `/theme`
+
+`/theme` with no argument opens a menu over the conversation with the three modes:
+`system` (with `follows the terminal` beside it), `light` and `dark`. The row your
+config names is marked `current`, and the cursor opens on the first row.
+
+Moving the cursor with ↑/↓ applies the row under it at once — the whole screen repaints
+in the other palette while the menu is up, so the choice is made by looking at it. ⏎
+keeps the mode you are looking at, closes the menu and saves it to `ui.theme`; the chat
+says which one in one row (`theme: light`). Esc closes the menu and puts back the mode
+it opened with; nothing is saved. `system` is honest about what it means: it follows the
+terminal's own light/dark scheme as the terminal is at that moment, so a terminal that
+switched while the menu was open is followed too.
+
+`/theme <mode>` skips the menu and applies and saves the mode in one line — the same
+thing ⏎ does. A word that is not a mode is refused with the three that are. The choice
+is the person's: it has no mark for the assistant, and it is read live, so a mode set
+while the app runs repaints at once. `/theme` is not kept in the ↑/↓ history: a look is
+one key away rather than a line worth recalling. The setting is `ui.theme` — see
+[config.md](config.md); a palette of your own is still `theme` (`config set theme …`),
+which lays its colours over either scheme.
+
 ## Images
 
 To show the assistant an image — a screenshot, a mock, a diagram — drag the file onto

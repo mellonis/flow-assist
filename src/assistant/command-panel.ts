@@ -40,6 +40,13 @@ export type PanelSpec = {
   // ends, one that appears above), by the row's `id`; when that row is gone it stays at
   // the place it was. Without it the cursor is an index into the rows.
   follow?: boolean;
+  // A cursor move, observed: the row under it now, and its index. A preview is laid on
+  // screen here (`/theme`), never a decision — a key's `run` is the only thing that
+  // decides, and it never calls this.
+  onCursor?: (id: string, index: number) => void;
+  // Esc closing the last panel, observed: what a preview put on screen is put back here.
+  // A step back to a panel underneath, and a key's `run` that closes, never call it.
+  onDismiss?: () => void;
 };
 
 // `at`: the id of the row the cursor was last moved to, read when the top panel follows.
@@ -88,10 +95,20 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
   // The cursor's row is remembered by id only for a panel that follows its rows.
   const atOf = (to: number): { at?: string } => (panelTop(state).follow && rows[to] ? { at: rows[to]!.id } : {});
   if (key.name === 'escape') {
-    return { state: state.stack.length > 1 ? { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } : null };
+    if (state.stack.length > 1) return { state: { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } };
+    // The last panel closes: a preview it laid on screen is put back. A throw is no
+    // closing's business — the panel must still go.
+    try { panelTop(state).onDismiss?.(); } catch { /* observation only */ }
+    return { state: null };
   }
   if (key.name === 'up' || key.name === 'down') {
     const to = key.name === 'up' ? Math.max(0, cursor - 1) : Math.min(last, cursor + 1);
+    // A move is observed before the state is handed back; a key that is no move says
+    // nothing. A throw is no move's business — the cursor still goes where it goes.
+    const id = to !== cursor ? rows[to]?.id : undefined;
+    if (id !== undefined) {
+      try { panelTop(state).onCursor?.(id, to); } catch { /* observation only */ }
+    }
     return { state: { ...state, cursor: to, ...atOf(to) } };
   }
   if (key.ctrl || key.meta) return { state };

@@ -19,6 +19,13 @@ assistant may set or save".
   `config unset <key>` removes a saved value (`:config unset --session <key>` only the
   one for this run). `config get <key>` says where the value comes from: `session`,
   `local` (`config.local.json`), `config` (`config.json`) or `default`.
+- **The look**: `ui.theme` is `system` (the default), `light` or `dark`. `system` follows
+  the terminal's own light/dark scheme as it changes (macOS switches it by itself and
+  the terminal follows); `light` and `dark` pin one whatever the terminal says. It is
+  read live: a value set while the app runs repaints it at once, and `/theme` in the
+  chat picks it with the palette previewed as the cursor moves — see
+  [usage.md](usage.md), "The look: `/theme`". The key is the person's — the assistant has
+  no mark for it.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

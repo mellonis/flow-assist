@@ -37,6 +37,7 @@ import type { ShellJob } from '../assistant/shell-job.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
+import { setConfigValue } from '../config/load.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -78,6 +79,7 @@ import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
 import { modelChoice, modelRows, roleStart } from '../assistant/model-roles.js';
+import { THEME_MODES, parseThemeArg, type ThemeMode } from '../playback/theme-mode.js';
 import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
@@ -124,6 +126,9 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'notes', description: 'how the steps between tool calls are drawn', values: NOTES_MODES },
   { name: 'mode', description: 'the chat\'s layout', values: CHAT_MODES },
   { name: 'model', description: 'the model this conversation runs' },
+  // A chosen theme is not worth recalling: the menu is one key away and ↑/↓ history is
+  // for the command's argument.
+  { name: 'theme', description: 'the look: system, light or dark', values: THEME_MODES, history: false },
   { name: 'log', description: 'share the tail of the host log' },
   { name: 'exit', description: 'close the chat' },
 ];
@@ -1863,6 +1868,55 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 set(name);
                 return;
               }
+              case 'theme': {
+                // The person's own appearance. The menu marks the mode the config names;
+                // a cursor move previews it at once (`setThemeMode` pins the palette and
+                // saves nothing), Enter keeps it and saves it, Esc puts back the mode the
+                // menu opened with, and `/theme <mode>` applies and saves in one step.
+                const saved = (): ThemeMode => (host.config.ui as { theme?: ThemeMode } | undefined)?.theme ?? 'system';
+                const preview = (mode: ThemeMode) => (host.services as { setThemeMode?: (m: ThemeMode) => void }).setThemeMode?.(mode);
+                const save = (mode: ThemeMode): boolean => {
+                  const res = setConfigValue(host.config as Record<string, unknown>, 'ui.theme', mode, { scope: 'saved' });
+                  if (!res.ok) { setError(`/theme: ${res.error}`); return false; }
+                  return true;
+                };
+                const set = (asked: string): boolean => {
+                  const got = parseThemeArg(asked);
+                  if (typeof got !== 'string') { setError(got.error); return false; }
+                  setField('');
+                  preview(got);
+                  if (!save(got)) return false;
+                  conv.pushNote(`theme: ${got}`);
+                  host.notify();
+                  return true;
+                };
+                if (arg.trim()) { set(arg); return; }
+                setField('');
+                const opened = saved();
+                openPanel({
+                  title: 'Theme',
+                  rows: () => THEME_MODES.map((mode) => ({
+                    id: mode,
+                    text: mode,
+                    detail: [mode === 'system' ? 'follows the terminal' : '', mode === saved() ? 'current' : ''].filter(Boolean).join(' · ') || undefined,
+                    tone: mode === saved() ? 'ok' : undefined,
+                  })),
+                  onCursor: (id) => preview(id as ThemeMode),
+                  // Esc is the menu's dismissal, never a choice: what the person saw
+                  // before it opened is what they see again. `system` is honest — it
+                  // follows the terminal as it is now, not as it was at open.
+                  onDismiss: () => preview(opened),
+                  keys: [{ key: 'return', label: 'use', run: (id) => {
+                    const mode = id as ThemeMode;
+                    preview(mode);
+                    if (save(mode)) conv.pushNote(`theme: ${mode}`);
+                    setPanel(null);
+                    return undefined;
+                  } }],
+                });
+                host.notify();
+                return;
+              }
               case 'log': {
                 const svc = host.services as Record<string, any>;
                 const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
@@ -3257,12 +3311,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (p) { if (p.mode === 'list' && index !== p.cursor) setPicker({ ...p, cursor: index, notice: '' }); return; }
               const q = panelRef.current;
               if (!q) return;
+              const top = panelTop(q);
+              // A move is observed as a key's is (`onCursor`): a preview, never a
+              // decision. A throw is no click's business.
+              const observe = (id: string | undefined) => {
+                if (id === undefined) return;
+                try { top.onCursor?.(id, index); } catch { /* observation only */ }
+              };
               // Only a panel that follows its rows reads them here, to remember the clicked
-              // row by id; any other keeps the index alone.
-              if (panelTop(q).follow) {
+              // row by id; any other keeps the index alone — and reads them only for an
+              // observer, so a click that decides nothing costs the plugin no rows.
+              if (top.follow) {
                 const { rows } = panelRows(q);
-                if (index !== panelCursor(q, rows)) setPanel({ ...q, cursor: index, at: rows[index]?.id });
-              } else if (index !== q.cursor) setPanel({ ...q, cursor: index });
+                if (index === panelCursor(q, rows)) return;
+                const id = rows[index]?.id;
+                setPanel({ ...q, cursor: index, at: id });
+                observe(id);
+              } else if (index !== q.cursor) {
+                setPanel({ ...q, cursor: index });
+                if (top.onCursor) observe(panelRows(q).rows[index]?.id);
+              }
             },
             // What this chat's conversation is doing, for its own row: a y/n or a question
             // waits, a turn or a `!command` runs, or an answer or a result came while the
