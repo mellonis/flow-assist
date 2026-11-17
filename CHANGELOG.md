@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The `:` line has a caret you can see and move.** A command is edited mid-line: the
+  caret is drawn where it stands in what you typed, ←/→ move it by a character (word
+  motion and Home/End too), and text, Backspace/Delete and a paste go in at the caret
+  rather than at the end. The completion offer follows the caret — it is made only at the
+  end of the line's last word, so a caret moved back into the typed text takes the list
+  away. The question's own free-text answer is the same flowtty editor, and its caret is
+  pinned by a test of its own: a letter typed after ← lands at the caret, under a block
+  whose inverse cell says where that is.
+
 - **Every request says how long its answer may be.** A request now carries an answer ceiling
   as `max_tokens` on the OpenAI-compatible wire as well as the Anthropic one, and on the
   `/compact` request: `ai.maxTokens`, else the model's own `ai.models.<id>.maxTokens` (new),

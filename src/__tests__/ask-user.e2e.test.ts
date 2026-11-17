@@ -20,6 +20,15 @@ const sse = (...chunks: unknown[]) =>
   new Response([...chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`), 'data: [DONE]\n\n'].join(''), { headers: { 'content-type': 'text/event-stream' } });
 const settle = async () => { for (let i = 0; i < 8; i++) { await flush(); await new Promise((r) => setTimeout(r, 5)); } };
 
+// The style of the cell where `text` starts (plus `offset` cells) — the caret cell is
+// drawn inverse, so this is how a test tells where the field's caret rests.
+function styleAt(backend: { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean } } } | null; lastFrame: string }, text: string, offset = 0) {
+  const rows = backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes(text));
+  if (y < 0) throw new Error(`"${text}" is not on screen:\n${backend.lastFrame}`);
+  return backend.lastBuffer!.get(rows[y]!.indexOf(text) + offset, y).style;
+}
+
 test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as const)('the model asks, the person picks with the keyboard, the model gets the answer (%ix%i, %s)', async (cols, rows, mode) => {
   // The short screen carries a plan too: the question block must still show its
   // last row and its key hints — budgeting it as a one-line input field instead
@@ -131,6 +140,39 @@ test('typing starts the answer, the field takes a paste, and the model is sent t
   // Kept as it was answered, in the person's own words.
   expect(ui.backend.lastFrame).toContain('? Which branch?');
   expect(ui.backend.lastFrame).toContain('→ use feature/ABC-1 please now');
+  ui.app.unmount();
+});
+
+test('the arrows move the caret inside the free-text answer', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+    [{ text: 'Fine.' }],
+  );
+  const ui = await bootApp(model, 110, 30);
+  const fieldRow = () => ui.backend.lastFrame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
+  await ui.press('F');
+  await ui.type('which branch should I use?');
+  await ui.press('return');
+  await settleUi(15);
+
+  // The first printable key opens the field with itself in it.
+  await ui.type('abc');
+  expect(fieldRow()).toContain('› abc');
+  await ui.press('left');
+  await ui.type('X');
+  // The letter went in at the caret, not at the end.
+  expect(fieldRow()).toContain('› abXc');
+  // The caret is the cell it rests on: the character AFTER `X`, drawn inverse.
+  expect(styleAt(ui.backend, '› abXc', 5).inverse).toBe(true);
+  expect(styleAt(ui.backend, '› abXc', 4).inverse).toBeFalsy();
+
+  // And what the field answers with is the edited text.
+  await ui.press('return');
+  await settleUi(20);
+  expect(model.requests).toHaveLength(2);
+  const result = (model.requests[1]!.messages as { role: string; content?: string }[]).find((m) => m.role === 'tool');
+  expect(String(result?.content)).toContain('abXc');
   ui.app.unmount();
 });
 
