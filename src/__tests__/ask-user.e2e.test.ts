@@ -286,9 +286,12 @@ test('a two-question call walks pages and submits once', async () => {
   expect(ui.backend.lastFrame).toContain('? Checks — Which checks?');
   expect(ui.backend.lastFrame).toContain('→ tests');
   expect(ui.backend.lastFrame).not.toContain('ask_user');
-  // The model reads the call once, and the first question's second pick is the answer.
+  // The model reads the call once, and the first question's second pick is the answer:
+  // one tool message, holding one copy of the result.
   expect(model.requests).toHaveLength(2);
-  const results = (model.requests[1]!.messages as { role: string; content?: string }[]).filter((m) => m.role === 'tool' && String(m.content).includes('The user answered:'));
+  const toolMessages = (model.requests[1]!.messages as { role: string; content?: string }[]).filter((m) => m.role === 'tool');
+  const results = toolMessages.filter((m) => String(m.content).includes('The user answered:'));
+  expect(toolMessages).toHaveLength(1);
   expect(results).toHaveLength(1);
   expect(String(results[0]!.content)).toContain('The user answered:\n- Rebase or merge? → merge\n- Which checks? → tests');
   // The journal keeps one row per question, in order, as the call was answered.

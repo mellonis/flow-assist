@@ -73,25 +73,29 @@
   for the person's own words, so the model never spends an option on it. `AskState` holds
   one page per question (`index`), one `AskDraft` per question (`cursor`, `picked`, `typing`,
   `text`, `caret`) and the answers the call has written so far. A single question keeps its
-  own keys and answers in one key: a digit picks the row it names, ⏎ picks the row under the
-  cursor (or opens `Other…`), Space toggles in a multi-select, and any other printable key
-  starts the answer with itself in the field. More than one question is a WIZARD: the page
-  after the last is the submit page, and only that page's ⏎ answers the call — a page's ⏎
-  commits its draft and moves on, a digit does the same on a single-select, and in a
-  multi-select a digit or Space toggles a row and ⏎ commits the picks; ←/→ walk the pages
-  (clamped at both ends; inside the open field they are the caret's). A draft survives
-  every move, so going back, changing a pick, editing the words or leaving a page empty
-  costs nothing; a page's words erased before the call goes read as the empty page they
-  left, never as words the person took back. **Submit is the answer**: the submit page
-  lists every question with the answer its ⏎ will send (`(not answered)` for a draft that
-  holds nothing), and its ⏎ rebuilds `answers` for every question in order — an empty one
-  sent as `- <question> → no answer given` — resolves the tool once, and writes the kept
-  `? / →` rows and journal rows, one per question. Esc on any page, the submit page
-  included, dismisses the whole call: a dismissal is not consent — the model reads `The
-  user dismissed the question without answering` and that it must not assume an answer.
-  What a page COMMITTED and its draft still holds is kept as that question's answer; every
-  other question reads `dismissed`. A child's question (`ask_parent`) is a free-text block
-  and takes none of this: its field is open from the start and Esc settles it.
+  own keys: on a single-select a digit answers the option it names at once and ⏎ answers
+  the row under the cursor (or opens `Other…`); in a multi-select a digit toggles the
+  option it names and Space toggles the option row under the cursor, and ⏎ commits the
+  picks. Any other printable key starts the answer with itself in the field. More than
+  one question is a WIZARD: the page after the last is the submit page, and only that
+  page's ⏎ answers the call — a page's ⏎ on an option commits its draft and moves on, a
+  digit does the same on a single-select, and in a multi-select a digit or Space toggles
+  an option row and ⏎ commits the picks; ←/→ walk the pages (clamped at both ends;
+  inside the open field they are the caret's). A draft survives every move, so going
+  back, changing a pick, editing the words or leaving a page empty costs nothing; a
+  page's words erased before the call goes read as the empty page they left, never as
+  words the person took back. **Submit is the answer**: the submit page lists every
+  question with the answer its ⏎ will send (`(not answered)` for a draft that holds
+  nothing), and its ⏎ rebuilds `answers` for every question in order — an empty one sent
+  as `- <question> → no answer given` — resolves the tool once, and writes the kept
+  `? / →` rows and journal rows, one per question. Esc leaves the answer field first (a
+  free-text question has no list, so there Esc dismisses at once); Esc on the list — or
+  on the submit page — dismisses the whole call: a dismissal is not consent — the model
+  reads `The user dismissed the question without answering` and that it must not assume
+  an answer. What a page COMMITTED and its draft still holds is kept as that question's
+  answer; every other question reads `dismissed`. A child's question (`ask_parent`) is a
+  free-text block and takes none of this: its field is open from the start and Esc
+  settles it.
 - **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
   rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's

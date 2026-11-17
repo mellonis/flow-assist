@@ -8,14 +8,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **Several questions are walked page by page and answered at a submit screen.** When
   the assistant asks more than one question in a call, the block shows one page per
   question and a `Submit` page last, with a one-row tab strip naming them (a tick marks
-  a page that holds an answer). A page is answered with a digit, ⏎ on a row, Space in a
-  multi-select or the person's own words, and the answer moves on to the next page;
-  ←/→ walk back and forth, and every page keeps its draft, so changing a pick or the
-  words costs nothing until the end. The submit page lists each question with the
-  answer ⏎ will send, or `(not answered)`, and that one ⏎ is the answer the model gets.
-  A single question keeps its own keys and answers in one, with no pages and no submit
-  page. Esc on any page, the submit page included, dismisses the whole call and is
-  reported as a dismissal, never as consent.
+  a page that holds an answer). On a single-select page a digit or ⏎ on an option answers
+  and moves on; in a multi-select a digit or Space toggles an option row and ⏎ commits
+  the picks and moves on; typing answers in the person's own words. A page commits what
+  its draft holds and moves on, so an empty page leaves its question unanswered. ←/→
+  walk back and forth, and every page keeps its draft, so changing a pick or the words
+  costs nothing until the end. The submit page lists each question with the answer ⏎
+  will send, or `(not answered)`, and that one ⏎ is the answer the model gets. A single
+  question keeps its own keys, with no pages and no submit page. Esc leaves the answer
+  field first; Esc on the list — on any page, the submit page included — dismisses the
+  whole call, and is reported as a dismissal, never as consent.
 
 - **`/theme` picks the look, and the menu previews it.** `ui.theme` is `system`
   (the default, following the terminal's own light/dark scheme as it changes), `light`
