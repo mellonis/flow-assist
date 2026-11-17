@@ -8,6 +8,16 @@
 > panels, the message order, keys and bindings, folds and clicks, the mouse,
 > `/model`, plugin commands through the chat, the field, and the modals.
 
+### Where the chat is: panel, window, full
+
+`panel` docks the chat beside the plugin's screen, so the board the model is told
+about (`chatContext`) stays visible to the person typing about it. Three modes
+(`src/runtime/panel-layout.ts`, pure): `panel` — the default — docks it beside the
+plugin's screen, `window` floats it over the plugin's screen, `full` takes the whole
+terminal. `plugins.assistant.mode` says where a conversation starts, `/mode` moves it
+for the session (never saved); `fullscreen: true` reads as `full` (`chatModeOf`), and
+there is no `/fullscreen`.
+
 - **The layout is the App's** (`runtime/app.tsx`). The terminal is split into the
   plugin's SIDE — title bar, surface, footer, always from the top-left corner — and the
   chat's panel: on the right (`panel.size`, 35% of the width) or at the bottom (40% of
@@ -266,6 +276,44 @@
   `untrusted` (the start screen follows); a loaded one gets its tools back, an enabled
   one joins. Every name in a notice or a title goes through `shownName`.
   `src/__tests__/plugins-panel.e2e.test.ts` holds it.
+- **The typed command is text; everything drawn around it is chrome.** A drag over
+  the line copies what was typed and nothing else — not the `: ` prompt, not the
+  inline offer after the caret, not the `⇥ a · b` candidates — so a long
+  `config set plugins.mcp.servers.safari.readOnly …` can be taken out to be fixed or
+  shared. It follows the rule the chat's rows follow (the gutter is chrome, the text
+  is not): only the spans carry `selectable: false`, and the bottom box carries
+  `selectionScope` instead — a drag that starts there stays on its row and inside the
+  padding, so the layout's own blank cells never come back as spaces around the
+  command. The footer hints and the toast, which have that row whenever the line is
+  closed, are chrome too. A command wider than the terminal is not wrapped
+  (the rule above), so a drag copies the part that is on the screen. The chat's input
+  field is NOT this: its caret and placeholder sit in the middle of its text, so it
+  stays unselectable whole until that is thought through.
+
+## The chat
+
+- Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the
+  user ground for the person (the input field's own prompt), `ƒ` for the
+  assistant's answer (also signing the frame, `ƒ Flow Assist`), `◆` on its own
+  ground for a background result, `!`/`‼` on the user ground for the person's own
+  `!command`/`!!command` and on none for a command the MODEL ran and they confirmed (a `view`
+  message) — the same marker in the same colour, the ground saying whose it was. The
+  host's own ask after a `!!command` is a `›` message drawn dim, marker and text: the
+  person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
+  `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
+  overridable via `config.plugins.assistant.colors`.
+- A marker is ONE narrow-width code point: flowtty's grid measures display width per
+  grapheme cluster and reads an East-Asian-ambiguous glyph (`∮`, `≈`, most of
+  Mathematical Operators) as one cell, so it shifts the row in a terminal that draws
+  it two cells wide. A CJK ideograph or an emoji is wide and gets its own two cells
+  (`Cell.char` is `''` for the second one).
+- Markdown in answers — tables included — is laid out by flowtty's
+  `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker (and keeps
+  the selection marks each row carries — see the drag below); a gap in
+  that layout is fixed in flowtty, not papered over here. Since flowtty
+  1.0.0-alpha.14 fenced code is highlighted in ~25 languages, ```diff is coloured,
+  and a block is a dim language label over rows prefixed with a dim `│ ` (no
+  backtick rows) — a test that joins a block's text must strip that bar.
 - **The person's own message is drawn as typed, not as markdown** (`typedLines` in
   `src/views/modals.ts`). In markdown a single line break is soft: two typed lines
   were drawn as one, `  npm test` lost its indent, `- a` became a bullet. Their text
