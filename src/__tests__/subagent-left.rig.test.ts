@@ -1,6 +1,6 @@
 // A session the chat leaves while a subagent the person started rests in it stays loaded.
 // What lands in it while nobody looks is said as for a session put away: its own answer
-// unread, and a later answer of the subagent (AGENTS.md (a host makes its conversations
+// unread, and a later answer of the subagent (sessions-journal-spec.md (a host makes its conversations
 // through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';

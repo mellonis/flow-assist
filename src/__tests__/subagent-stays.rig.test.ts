@@ -1,5 +1,5 @@
 // A subagent the person started stays after its answer: idle between turns, holding no slot,
-// ended only by a stop, a /clear or the exit (AGENTS.md (a conversation starts a child)).
+// ended only by a stop, a /clear or the exit (ask-children-spec.md (a conversation starts a child)).
 // A task, and a subagent the model started, end after their answer.
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';

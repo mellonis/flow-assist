@@ -1,5 +1,5 @@
 // `answer_child`: a task's or a subagent's question reaches the model of the conversation
-// above it as framed data, and that model answers it (AGENTS.md (a conversation starts a
+// above it as framed data, and that model answers it (ask-children-spec.md (a conversation starts a
 // child of its own)).
 import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';

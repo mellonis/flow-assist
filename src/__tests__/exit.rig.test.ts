@@ -1,6 +1,6 @@
 // At exit every live conversation is saved and unlocked, each task still counted says in
 // its session's journal that it stopped, and everything closes, deepest first
-// (AGENTS.md (a host makes its conversations through one registry)).
+// (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

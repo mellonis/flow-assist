@@ -2,7 +2,7 @@
 // roles a person defines, and the one place a role becomes a model id. A conversation
 // runs ONE model id; an agent file and the `subagent` tool ask for a ROLE, so a file that
 // travels between machines names `fast` and the machine says what that runs on
-// (AGENTS.md (models)). Pure: `config.ai` in, values out.
+// (ask-children-spec.md (models)). Pure: `config.ai` in, values out.
 import { DEFAULT_CONTEXT_WINDOW } from './context-meter.js';
 
 interface AiConfig {

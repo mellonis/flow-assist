@@ -174,10 +174,10 @@ function jobMessages(job: ShellJob): ChatMsg[] {
   return [{ role: 'shell', content: '', command: job.command, views: [{ kind: 'console', data, phase: job.running ? 'live' : 'done', startedAt: job.startedAt, callId: `job#${job.id}`, turn: 0, rows }] } as unknown as ChatMsg];
 }
 
-// The tree cursor's state (AGENTS.md (agent tree)).
+// The tree cursor's state (ask-children-spec.md (agent tree)).
 interface TreeSel { at: string | null; ask: boolean }
 const NO_TREE_SEL: TreeSel = { at: null, ask: false };
-// The child the chat is watching (AGENTS.md (watching a child)): `path` the labels from the
+// The child the chat is watching (ask-children-spec.md (watching a child)): `path` the labels from the
 // session's child down to it; `ended` how it ended (null while it runs) and `final` its
 // snapshot at that moment; `back` the tree row the cursor stood on when the watch began;
 // `ask` whether the stop question is up, `stopped` whether the person answered it with a yes
@@ -377,13 +377,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const unbindRef = ui.useRef(new Map<Conversation, Array<() => void>>());
           // A y/n of a subagent is read from the tree, not from the snapshot: this counts the
           // changes the tree reports, so the chat draws again for each. The guard decides
-          // when a key may answer such a y/n (AGENTS.md (subagent y/n)).
+          // when a key may answer such a y/n (ask-children-spec.md (subagent y/n)).
           const [, setAskTick] = ui.useState(0);
           const askGuard = ui.useRef(createAskGuard());
           const ownSeenRef = ui.useRef<unknown>(null);
           const ownArmedAt = ui.useRef<number | null>(null);
           // The conversation's own question that ended a watch, or came over the tree cursor,
-          // takes no key for the pause from its appearing (AGENTS.md (subagent y/n)).
+          // takes no key for the pause from its appearing (ask-children-spec.md (subagent y/n)).
           const questionSeenRef = ui.useRef<unknown>(null);
           const questionArmedAt = ui.useRef<number | null>(null);
           const childBlockRef = ui.useRef(false);
@@ -599,7 +599,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [bangLevel, setBangLevelState] = ui.useState<0 | 1 | 2>(0);
           const bangLevelRef = ui.useRef(bangLevel);
           const setBangLevel = (v: 0 | 1 | 2) => { bangLevelRef.current = v; setBangLevelState(v); };
-          // The cursor in the tree rows under the field (AGENTS.md (agent tree)): `at` is the
+          // The cursor in the tree rows under the field (ask-children-spec.md (agent tree)): `at` is the
           // key of the node it stands on (null — it is in the field), `ask` whether the stop
           // question for that node is up. Cleared whenever the rows are not drawn.
           const [, setTreeSelState] = ui.useState<TreeSel>(NO_TREE_SEL);
@@ -922,7 +922,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             conv.attach(portRef.current);
           }
           markSeenRef.current = () => convRef.current!.markSeen();
-          // The watch (AGENTS.md (watching a child)): the chat keeps drawing the session, and
+          // The watch (ask-children-spec.md (watching a child)): the chat keeps drawing the session, and
           // draws `node`'s rows in the list's place. Its listener on `closed` goes first, so
           // a node that ends from here on is heard, and reads the snapshot again: the rows
           // told last may come after the listeners are cleared. The subscription redraws the
@@ -1591,7 +1591,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (outcome === 'moved') {
                   dropEmptyDirs(from, sessDir); // the project's last session there, its mirror dir too
                   // A background task, or a fork, still writing to this id by its OLD home
-                  // would otherwise miss it (AGENTS.md, "sessions per project" — `conv.homes`).
+                  // would otherwise miss it (sessions-journal-spec.md, "sessions per project" — `conv.homes`).
                   if (conv.homes.has(a.id)) conv.homes.set(a.id, projectHome(sessDir, dest));
                 }
                 const notice = outcome === 'moved' ? `Moved «${titleOf(a.id)}» to ${dest ? tildePath(dest) : 'no project'}`
@@ -2063,7 +2063,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               case 'agents': {
-                // The whole tree in the conversation's place (AGENTS.md (agent tree)): the
+                // The whole tree in the conversation's place (ask-children-spec.md (agent tree)): the
                 // live nodes, then the ended ones. `x` asks to stop the node under the cursor
                 // and `y` stops it, as the rows under the field do; the question stands in
                 // place of that row's text. The cursor follows its node.
@@ -2673,7 +2673,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the pointer leaving is flowtty's hover, already drawn: nothing here, and
               // a press waiting for its release keeps waiting.
               if (isMouseKey(key.name)) return isMouseButton(key.name) && mouse(key);
-              // A subagent's y/n: an answer counts only after a pause (AGENTS.md (subagent
+              // A subagent's y/n: an answer counts only after a pause (ask-children-spec.md (subagent
               // y/n)). Every key is noted, whoever takes it; the pause is read as of before it.
               askGuard.current.show(guardSees(childAskNow() ?? watchAskNow()));
               const askArmed = askGuard.current.press();
@@ -2694,7 +2694,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'escape') { setPager(null); host.notify(); }
                 return true;
               }
-              // A watched child is a reader too (AGENTS.md (watching a child)): its rows scroll
+              // A watched child is a reader too (ask-children-spec.md (watching a child)): its rows scroll
               // with PgUp/PgDn and the wheel, which the list hears first. The sessions key
               // opens the picker, Esc steps back, the details key and End act on the watched
               // rows, `x` asks to stop the node and `y` stops it with what it started; every
@@ -2773,7 +2773,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
                 return true;
               }
-              // The cursor in the tree rows (AGENTS.md (agent tree)): every key is the rows'.
+              // The cursor in the tree rows (ask-children-spec.md (agent tree)): every key is the rows'.
               // ↑/↓ move, ↑ on the first row and Esc go back to the field, `x` asks to stop
               // the node and `y` stops it with what it started. Besides the sessions key,
               // nothing reaches the field, the model, Esc's stages or a subagent's y/n

@@ -1,5 +1,5 @@
 // Which request each key reaches when several are up at once: the session's own y/n and
-// question, a subagent's y/n and a subagent's question (AGENTS.md (subagent y/n), (agent
+// question, a subagent's y/n and a subagent's question (ask-children-spec.md (subagent y/n), (agent
 // tree), (watching a child)). A holder of the keys — the tree cursor, a watch, the pager,
 // the `/context` panel, the session picker, a docked plugin panel — keeps them from a
 // subagent's request, which is offered again, armed afresh, once the holder is gone. The

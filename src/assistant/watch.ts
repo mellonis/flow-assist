@@ -1,4 +1,4 @@
-// Watching a child (AGENTS.md (watching a child)): the words and labels the chat draws around
+// Watching a child (ask-children-spec.md (watching a child)): the words and labels the chat draws around
 // a watched node's rows. Pure; the chat owns the watch and draws what these return.
 import type { Conversation } from './conversation.js';
 import type { TreeNode } from './conversation-types.js';

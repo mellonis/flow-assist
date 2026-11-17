@@ -1,5 +1,5 @@
 // `/subagent` (and `/sub`): the person starts a read-only job beside the chat, lists the
-// jobs of the conversation and stops one (AGENTS.md (subagent command)). The real app on
+// jobs of the conversation and stops one (ask-children-spec.md (subagent command)). The real app on
 // the scripted model; a child's requests are told from the session's by the prompt it
 // was given, and held with `{ hold: true }` until the test lets them go.
 import { afterEach, expect, test } from 'bun:test';

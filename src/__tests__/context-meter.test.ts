@@ -101,7 +101,7 @@ test('the chat shows the estimate first and the measured figure after an answer;
   expect(JSON.stringify(model.requests.at(-1))).not.toContain('of 100k tokens');
 });
 
-// `onRound` (AGENTS.md, "How full the context is, is shown"): the reading is drawn
+// `onRound` (model-wire-spec.md, "How full the context is, is shown"): the reading is drawn
 // from the last ROUND's usage, not only the turn's final one — a held multi-round
 // turn shows it rise after each round, before the answer.
 test('a multi-round turn shows the reading rising after each round, before the answer', async () => {
@@ -139,7 +139,7 @@ test('a multi-round turn shows the reading rising after each round, before the a
   expect(pct()).toBe('ctx 70%');
 });
 
-// A provider that never reports usage (AGENTS.md, "How full the context is, is shown"):
+// A provider that never reports usage (model-wire-spec.md, "How full the context is, is shown"):
 // the reading never gets stuck mid-turn either — it just
 // stays the character estimate, round after round.
 test('a provider without usage keeps the estimate through a multi-round turn', async () => {
@@ -220,7 +220,7 @@ test('past 80% the figure is drawn as a warning', async () => {
   expect(((ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer.get(col, row)).style.fg).toBe('yellow');
 });
 
-// Cache usage (AGENTS.md, "How full the context is, is shown"): the last request's
+// Cache usage (model-wire-spec.md, "How full the context is, is shown"): the last request's
 // `TokenUsage` may carry `cachedTokens` / `cacheWriteTokens` from either wire — never
 // defaulted to 0, only shown when the provider really reported them. `/context` draws
 // them as a `last request: …` line, and the session keeps them (session-wide `usage`

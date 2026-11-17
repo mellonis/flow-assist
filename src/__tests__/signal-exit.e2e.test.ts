@@ -1,7 +1,7 @@
 // A termination signal exits the way quitting does, with the app's renderer listening
 // for the same signal: every session is saved and unlocked, and each task still running
 // says in its session's journal that it stopped
-// (AGENTS.md (a host makes its conversations through one registry)).
+// (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

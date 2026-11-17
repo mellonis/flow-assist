@@ -1,4 +1,4 @@
-// A task's result goes to the session its chain started from (AGENTS.md (a conversation
+// A task's result goes to the session its chain started from (ask-children-spec.md (a conversation
 // starts a child)), never to whatever the chat shows when it ends; the conversation that
 // started a task counts it until its result is in.
 import { afterEach, expect, test } from 'bun:test';

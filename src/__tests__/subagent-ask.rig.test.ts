@@ -1,5 +1,5 @@
 // A child that may write parks its y/n like a session's, and the conversations above it
-// know what to offer the person (AGENTS.md (a conversation starts a child of its own)):
+// know what to offer the person (ask-children-spec.md (a conversation starts a child of its own)):
 // the oldest request of the subtree, labelled by its path, one at a time; the answer goes to its
 // owner; the settings-file guard never runs below a session.
 import { afterEach, expect, test } from 'bun:test';

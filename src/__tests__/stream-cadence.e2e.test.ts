@@ -1,7 +1,7 @@
 // How often a streamed answer draws. The chat draws its conversation's snapshot through
 // `useSyncExternalStore`, whose changes React renders as urgent work before the stream
 // reader's next await resumes; the conversation tells its subscribers once per
-// macrotask while a turn runs (AGENTS.md, "The chat draws a `Conversation`'s
+// macrotask while a turn runs (chat-spec.md, "The chat draws a `Conversation`'s
 // snapshot"), so an answer draws once per network read, never once per delta. Counted
 // in React commits, from the frame meter's every frame (its own window keeps only the
 // last ones), never in wall time.

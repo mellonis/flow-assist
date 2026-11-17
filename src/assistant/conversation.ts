@@ -205,7 +205,7 @@ export class Conversation {
 
   // ── the running thing
   private busyNow = false;
-  // A child's flip is a change of the tree it belongs to (`AGENTS.md (agent tree)`).
+  // A child's flip is a change of the tree it belongs to (`ask-children-spec.md (agent tree)`).
   get busy(): boolean { return this.busyNow; }
   set busy(on: boolean) {
     if (this.busyNow === on) return;

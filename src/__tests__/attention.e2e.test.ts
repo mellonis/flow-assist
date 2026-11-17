@@ -1,5 +1,5 @@
 // The hint row's count of the other sessions: `⏸ N` for ones left on a y/n or a question,
-// `● N` for ones put away with an answer nobody read (AGENTS.md (a host makes its
+// `● N` for ones put away with an answer nobody read (sessions-journal-spec.md (a host makes its
 // conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';

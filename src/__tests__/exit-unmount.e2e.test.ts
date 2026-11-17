@@ -1,7 +1,7 @@
 // The chat's unmount only writes and unlocks what is live: it stops no task, and a
 // session left while its task runs still gets the result — a test process unmounts chats
 // whose work goes on. Stopping everything is the exit hook's
-// (AGENTS.md (a host makes its conversations through one registry)).
+// (sessions-journal-spec.md (a host makes its conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

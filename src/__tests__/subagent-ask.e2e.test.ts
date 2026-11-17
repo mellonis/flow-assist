@@ -1,4 +1,4 @@
-// A subagent's y/n in the view of the conversation that started it (AGENTS.md (subagent
+// A subagent's y/n in the view of the conversation that started it (ask-children-spec.md (subagent
 // y/n)): drawn in the field's place or as a notice above the field, answered by `y` / `n`
 // alone, on an empty field, after a pause. The real app on the scripted model; the pause
 // is read from `askClock`, which the tests move instead of sleeping.

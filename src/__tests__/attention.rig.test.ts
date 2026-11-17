@@ -1,5 +1,5 @@
 // What the registry counts for the person's attention: the sessions left on a y/n or a
-// question, and the ones put away with an answer nobody read (AGENTS.md (a host makes its
+// question, and the ones put away with an answer nobody read (sessions-journal-spec.md (a host makes its
 // conversations through one registry)).
 import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { afterEach, expect, test } from 'bun:test';

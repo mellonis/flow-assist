@@ -1,7 +1,7 @@
 // The list as it stands (`Conversation.currentRows`): as the chat last drew it while a
 // port draws the conversation, its own list with none — the drawn list stopped when the
 // port left. A save writes it, and the project's instructions are said once against it
-// (AGENTS.md (sessions survive a restart)).
+// (sessions-journal-spec.md (sessions survive a restart)).
 import { expect, test } from 'bun:test';
 import { Conversation } from '../conversation.ts';
 import { snapshotSession } from '../conversation-session.ts';

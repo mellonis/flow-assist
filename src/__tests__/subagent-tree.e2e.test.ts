@@ -1,4 +1,4 @@
-// The conversation's live subagents and tasks as rows under the field (AGENTS.md (agent
+// The conversation's live subagents and tasks as rows under the field (ask-children-spec.md (agent
 // tree)). The real app on the scripted model; a child is held with `{ hold: true as const }` until
 // the test lets it go.
 import { afterEach, expect, test } from 'bun:test';
@@ -158,7 +158,7 @@ test('every chat row stays one terminal line at a narrow width', async () => {
   ui.app.unmount();
 });
 
-// ── the cursor in the rows (AGENTS.md (agent tree))
+// ── the cursor in the rows (ask-children-spec.md (agent tree))
 const KEYS = '↑↓ move · x stop · Esc back';
 const inRows = (ui: UI) => frameOf(ui).includes(KEYS);
 const COLLAPSE = { name: '\\', ctrl: true };
@@ -565,7 +565,7 @@ test('the chat collapsed and opened again has the cursor in the field', async ()
   ui.app.unmount();
 });
 
-// ── /agents (AGENTS.md (agent tree))
+// ── /agents (ask-children-spec.md (agent tree))
 const panelOpen = (ui: UI) => frameOf(ui).includes('Flow Assist · Agents');
 
 test('/agents with nothing to show says so, and Esc closes it', async () => {
