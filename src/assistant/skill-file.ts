@@ -15,7 +15,6 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { INSTRUCTIONS_CAP } from './project-instructions.js';
 import type { AgentError, AgentSource } from './agent-file.js';
 
 export type SkillSource = AgentSource;
@@ -37,7 +36,11 @@ export type ParsedSkill = { ok: true; skill: Omit<Skill, 'hash' | 'files' | 'byt
 export const SKILL_FILE = 'SKILL.md';
 // The core tool that loads a skill into the conversation.
 export const SKILL_TOOL = 'skill';
-export const SKILL_CAP = INSTRUCTIONS_CAP;
+// The skill file's own refusal threshold: a `SKILL.md` over it is an error, never a
+// cut prompt. Its own number, equal to `INSTRUCTIONS_CAP` by choice — the instruction
+// cut is the person's `project.instructionsCap` and moving it must not move what a
+// skill or an agent file may weigh.
+export const SKILL_CAP = 32 * 1024;
 const NAME = /^[A-Za-z0-9-]+$/;
 const KEY = /^([A-Za-z_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$/;
 const BLOCK = /^([>|])([+-]?)(\d?)$/;

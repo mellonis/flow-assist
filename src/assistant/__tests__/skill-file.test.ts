@@ -75,6 +75,12 @@ test('a file over the cap is an error, one at the cap is read', () => {
   expect(okOf(head + 'x'.repeat(SKILL_CAP - head.length)).body.length).toBe(SKILL_CAP - head.length);
 });
 
+// The refusal threshold is the skill file's OWN constant — never the instruction cap,
+// which is the person's `project.instructionsCap` to change. Same value, same wording.
+test('SKILL_CAP is the skill file\'s own 32 KiB refusal threshold', () => {
+  expect(SKILL_CAP).toBe(32 * 1024);
+});
+
 const skillDir = (files: Record<string, string>) => {
   const d = tmp('fa-skill-hash-');
   for (const [rel, text] of Object.entries(files)) { const f = path.join(d, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); }
