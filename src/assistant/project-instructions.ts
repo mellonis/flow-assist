@@ -11,8 +11,9 @@
 //   compared REAL (a link in a clone must not carry the read out of it).
 // - The name is exactly `AGENTS.md`, matched against the directory's listing — on a
 //   case-insensitive file system a stat would also find `agents.md`.
-// - Each file is capped at `INSTRUCTIONS_CAP` bytes, cut at a line boundary with a
-//   note saying how many lines were left out, so a stray huge file does not eat the
+// - Each file is capped at `project.instructionsCap` (default `INSTRUCTIONS_CAP`,
+//   `0` — no cut at all), cut at a line boundary with
+//   a note saying how many lines were left out, so a stray huge file does not eat the
 //   context. Only the head is kept in memory; the rest is counted as it is read.
 
 import fs from 'node:fs';
@@ -22,6 +23,16 @@ import { realOf, shellRoots, tildePath, within } from './shell.js';
 export const INSTRUCTIONS_FILE = 'AGENTS.md';
 export const INSTRUCTIONS_CAP = 32 * 1024;
 
+// The cap in force for this config: `project.instructionsCap` is the person's own
+// number (bytes per file, `0` — no cut), and anything that is not a non-negative
+// finite number reads as the default. Instruction size is an editorial decision of
+// the developer's — the model never sets this key (no mark on it), and the host
+// never truncates at anything but the person's number.
+export function instructionsCap(config: Parameters<typeof shellRoots>[0]): number {
+  const v = (config as { project?: { instructionsCap?: unknown } } | undefined)?.project?.instructionsCap;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : INSTRUCTIONS_CAP;
+}
+
 export interface InstructionFile {
   path: string; // real, absolute
   text: string; // the file's text, up to the cap
@@ -30,10 +41,11 @@ export interface InstructionFile {
 export interface ProjectInstructions {
   dir: string; // the directory asked about, real
   root: string | null; // the root that holds it, real; null — outside every root
+  cap: number; // the cap this read applied (0 — nothing is ever cut)
   files: InstructionFile[]; // outermost first
 }
 
-const NONE = (dir: string): ProjectInstructions => ({ dir, root: null, files: [] });
+const NONE = (dir: string, cap: number): ProjectInstructions => ({ dir, root: null, cap, files: [] });
 
 // The text a file keeps under the cap, and how many lines the cut left out. A file
 // of the cap or less is whole. Otherwise the head ends at the last line break within
@@ -54,6 +66,7 @@ function countLines(buf: Buffer): number {
 // A file read through the cap: the head (one byte past the cap, so a file of exactly
 // the cap is known to be whole) and the rest counted in chunks, never held.
 function readCapped(file: string, cap = INSTRUCTIONS_CAP): { text: string; cut: number } {
+  if (cap === 0) return { text: fs.readFileSync(file, 'utf8'), cut: 0 };
   const fd = fs.openSync(file, 'r');
   try {
     const head = Buffer.alloc(cap + 1);
@@ -85,12 +98,13 @@ const isDir = (p: string) => { try { return fs.statSync(p).isDirectory(); } catc
 
 // The instruction files for `dir`, from its root down to it.
 export function findInstructions(config: Parameters<typeof shellRoots>[0], dir: string): ProjectInstructions {
+  const cap = instructionsCap(config);
   const real = realOf(path.resolve(dir));
-  if (!isDir(real)) return NONE(real);
+  if (!isDir(real)) return NONE(real, cap);
   const roots = shellRoots(config).map(realOf);
   // The innermost root that holds the directory.
   const root = roots.filter((r) => within(real, r)).sort((a, b) => b.length - a.length)[0];
-  if (!root) return NONE(real);
+  if (!root) return NONE(real, cap);
   const dirs: string[] = [];
   for (let d = real; ; d = path.dirname(d)) {
     dirs.unshift(d);
@@ -106,13 +120,15 @@ export function findInstructions(config: Parameters<typeof shellRoots>[0], dir: 
     if (files.some((f) => f.path === file)) continue; // a link to a file already found
     try {
       if (!fs.statSync(file).isFile()) continue; // a directory, a FIFO — never read
-      files.push({ path: file, ...readCapped(file) });
+      files.push({ path: file, ...readCapped(file, cap) });
     } catch { /* gone, or unreadable: nothing to add */ }
   }
-  return { dir: real, root, files };
+  return { dir: real, root, cap, files };
 }
 
-const capNote = (cut: number) => `… (cut at ${INSTRUCTIONS_CAP / 1024} KiB — ${cut} more line${cut === 1 ? '' : 's'})`;
+// How the cap reads in a note: a whole number of KiB, or the raw bytes.
+const capLabel = (cap: number): string => (cap % 1024 === 0 ? `${cap / 1024} KiB` : `${cap} bytes`);
+const capNote = (cut: number, cap: number) => `… (cut at ${capLabel(cap)} — ${cut} more line${cut === 1 ? '' : 's'})`;
 
 // The system prompt's section — '' when there is nothing to say. It names the root,
 // never the shell's directory: a move inside a project (`cd src`, a command's own
@@ -126,7 +142,7 @@ export function instructionsBlock(p: ProjectInstructions): string {
   const files = p.files.map((f) => {
     const longest = Math.max(0, ...(f.text.match(/`+/g) ?? []).map((run) => run.length));
     const fence = '`'.repeat(Math.max(3, longest + 1));
-    return `### ${f.path}\n${fence}markdown\n${f.text}\n${fence}${f.cut ? `\n${capNote(f.cut)}` : ''}`;
+    return `### ${f.path}\n${fence}markdown\n${f.text}\n${fence}${f.cut ? `\n${capNote(f.cut, p.cap)}` : ''}`;
   });
   return [head, ...files].join('\n\n');
 }
@@ -153,7 +169,7 @@ export function instructionsPrompt(config: Parameters<typeof shellRoots>[0], she
 
 // The files as the person reads them: `~`-shortened, a cut one marked.
 export function instructionsSummary(p: ProjectInstructions): string {
-  return p.files.map((f) => `${tildePath(f.path)}${f.cut ? ` (cut at ${INSTRUCTIONS_CAP / 1024} KiB)` : ''}`).join(', ');
+  return p.files.map((f) => `${tildePath(f.path)}${f.cut ? ` (cut at ${capLabel(p.cap)})` : ''}`).join(', ');
 }
 
 // What the chat says when the files picked up change — null when they have not. A

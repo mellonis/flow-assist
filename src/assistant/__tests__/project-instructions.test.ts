@@ -237,3 +237,24 @@ test('instructionsPrompt: read once per directory, kept until the shell moves', 
   shell.setCwd(path.join(root, 'proj'));
   expect(instructions.systemPrompt()).toContain('v2');
 });
+
+test('project.instructionsCap: 0 reads the whole file and says nothing about a cut', () => {
+  const root = tmp();
+  write(path.join(root, 'AGENTS.md'), ('r'.repeat(99) + '\n').repeat(400)); // 40 000 bytes
+  const found = findInstructions({ shell: { roots: [root] }, project: { instructionsCap: 0 } }, root);
+  expect(found.files[0]!.cut).toBe(0);
+  expect(found.files[0]!.text.length).toBe(40_000);
+  expect(instructionsBlock(found)).not.toContain('cut at');
+  expect(instructionsSummary(found)).not.toContain('cut at');
+});
+
+test('a smaller project.instructionsCap cuts at that cap and names it in the note', () => {
+  const root = tmp();
+  write(path.join(root, 'AGENTS.md'), ('r'.repeat(99) + '\n').repeat(400)); // 40 000 bytes
+  const found = findInstructions({ shell: { roots: [root] }, project: { instructionsCap: 2000 } }, root);
+  const [f] = found.files;
+  expect(f!.text.length).toBe(1999);
+  expect(f!.cut).toBe(380);
+  expect(instructionsBlock(found)).toContain('(cut at 2000 bytes');
+  expect(instructionsSummary(found)).toContain('(cut at 2000 bytes)');
+});
