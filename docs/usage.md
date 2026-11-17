@@ -720,6 +720,14 @@ list; Esc on the list dismisses the question — the assistant is told you gave 
 and must not assume one (a question that is only a text field has no list, so its Esc
 dismisses at once).
 
+**A question waits out the sentence you are typing.** When it arrives while you are still
+typing, the block does not take the field from under your keys: they stay the field's and
+the strip above it says `? a question is waiting`, and the block comes up about half a
+second after you stop. A message you send in that time is sent as usual — it queues behind
+the turn, as any message does while an answer is coming. A `:` command line holds the
+question off while it is open: run the line or leave it, and the block follows. Nothing is
+answered for you either way; the question simply waits for you to finish.
+
 **Several questions come one page at a time, with a submit page last.** When the
 assistant asks more than one question in a call, the block becomes a small wizard: every
 question gets a page of its own, and a tab strip under the title names them (a tick on a

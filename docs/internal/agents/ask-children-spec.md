@@ -68,6 +68,17 @@
   `WatchView.question`, drawn with no field and so with no empty-field rule, and every other key is swallowed. The
   waiting badge, the left-session toast (`a question from «<label>»`) and the picker's status
   (`subtreeWaiting`) count only questions waiting for the person, not one waiting for a model.
+  **A question waits out the person's sentence** (`ASK_GRACE_MS`, 600 ms, the same
+  `askClock`): a question that parks — the session's own `ask_user` or a child's routed to
+  the person — takes the keyboard only once the last key the chat took is older than the
+  grace, and never while the `:` line is open, since a half-written command is a long
+  thought. While the grace holds it the field keeps every key and each such key re-arms the
+  grace (the key that sends a message clears it: the sentence went), the block is not drawn
+  in the field's place, and the strip above the field — or, with the chat collapsed, its
+  status — says `? a question is waiting`; a one-shot unref'd timer re-runs the claim when
+  the person goes quiet. A key a block, a picker, a panel or a reader (the pager, a watch)
+  takes is no typing and re-arms nothing. Past the grace the claim runs unchanged — the
+  arms above still hold — and a y/n gains no grace: its own `ASK_ARM_MS` pause stands.
 - **The question wizard (`ask_user`, `src/assistant/ask.ts`).** The model's call carries 1–4
   questions of 2–4 options, each optionally `multiSelect`; the block always offers `Other…`
   for the person's own words, so the model never spends an option on it. `AskState` holds

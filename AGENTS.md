@@ -612,7 +612,13 @@ past incident may motivate a rule; keep the rule, drop the incident.
   after the 600 ms guard pause (`child-ask-guard.ts`, `askClock` the seam a
   test moves). ⏎ and Esc never answer it. A question from a subagent the
   person started is the same request with its own block and machine
-  (`askKey`). "Closing is not an answer" (above). The picker, the pager and a
+  (`askKey`). **A question waits out the sentence the person is typing**: it
+  takes the keyboard only once the last key the chat took is older than
+  `ASK_GRACE_MS` (600 ms, the same clock) and never while the `:` line is open;
+  until then the field keeps the keys, the block is not drawn in the field's
+  place, and the strip says `? a question is waiting` (a one-shot unref'd timer
+  re-runs the claim). A y/n gains no grace — its own `ASK_ARM_MS` pause stands.
+  "Closing is not an answer" (above). The picker, the pager and a
   host panel hold every key while drawn and never reach the conversation
   beneath them.
 - **The session picker** opens on the current project's sessions, Tab for

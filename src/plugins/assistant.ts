@@ -73,7 +73,7 @@ import { startStateFiles, stateSources, type StateFileInput } from '../assistant
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
-import { ASK_ARM_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
+import { ASK_ARM_MS, ASK_GRACE_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
 import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
@@ -391,6 +391,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // takes no key for the pause from its appearing (ask-children-spec.md (subagent y/n)).
           const questionSeenRef = ui.useRef<unknown>(null);
           const questionArmedAt = ui.useRef<number | null>(null);
+          // The typing grace: the last key the chat took, and a tick that re-arms the
+          // one-shot claim when a key pushes it back (ask-children-spec.md (subagent y/n)).
+          const lastKeyAt = ui.useRef(Number.NEGATIVE_INFINITY);
+          const graceTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const [graceTick, setGraceTick] = ui.useState(0);
           const childBlockRef = ui.useRef(false);
           // The question of a subagent whose answer has begun: the pause guards the first key,
           // and the rest of the answer is typed without it.
@@ -2507,6 +2512,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (key.name === 'd' && inputRef.current !== '') return 'field';
             return undefined;
           };
+          // What the app itself holds, and what the chat shows: read before the strip, the
+          // grace and every key decide anything. A subagent's y/n counts only while it is
+          // drawn: the conversation list is what the chat shows, and the conversation
+          // itself asks nothing. Its block stands in the field's place when the field is
+          // empty, else as the notice line above the field. Under the runtime's own panel
+          // (`:plugins`) it is not drawn either: that panel holds the keys, and a `y`
+          // meant for the block would go to the panel's row.
+          const hostKeys = () => (host.services as { hostKeys?: () => { panel: boolean; line: boolean } }).hostKeys?.() ?? { panel: false, line: false };
+          const childAskNow = (): Offered | null => {
+            const c = convRef.current!;
+            // With the cursor in the tree rows a request is not answerable: it is the notice line.
+            if (treeSelRef.current.at !== null) return null;
+            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || watchRef.current || hostKeys().panel) return null;
+            const o = c.offered();
+            return o && o.path.length ? o : null;
+          };
+          const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
+          // The typing grace a question owes the person's sentence (ask-children-spec.md
+          // (subagent y/n)): it takes the keyboard only once the last key the chat took is
+          // older than ASK_GRACE_MS, and never while the `:` line is open — a half-written
+          // command is a long thought.
+          const graceLeft = (): number => ASK_GRACE_MS - (askClock.now() - lastKeyAt.current);
+          const claimHeld = (): boolean => hostKeys().line || graceLeft() > 0;
+          // The session's own question, held.
+          const ownHeld = (): boolean => claimHeld() && !!convRef.current!.question;
+          // Any question the grace holds back — the session's own or a subagent's.
+          const questionHeld = (): boolean => claimHeld() && (!!convRef.current!.question || childAskNow()?.kind === 'ask');
           // What the collapsed panel says of the running turn — on the plugin's bottom row
           // (the App draws it there) or on the one row a bottom panel keeps. The key that
           // brings the panel back, from its binding.
@@ -2516,7 +2548,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const focusCap = bindingGlyph(host.keys.chatFocus);
           const waiting = !open && (!!pendingAsk || !!pendingQuestion || !!conv.offered() || !!conv.askedBelow());
           const statusRow = !open && (layout === 'panel' || waiting)
-            ? renderChatStatus({ theme: host.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
+            ? renderChatStatus({ theme: host.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting, question: questionHeld() })
             : null;
           // The App draws that status on the plugin's footer row as a component that ticks
           // by itself (`liveChatStatus`), reading what this render built — so the seconds
@@ -2533,24 +2565,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // With Ctrl+]'s action unbound the status names no key, and the footer's own
           // hint is the only way back that is said.
           const footerStatus = statusRow != null && dock?.side !== 'bottom' && !!focusCap;
-          // The rows a pending question or y/n needs at a panel's width (the App grows a
-          // bottom panel to it, or draws the chat as a window while it waits — see
-          // `pendingChatRows`). Read from the refs: the App asks before this re-renders.
-          // A subagent's y/n counts only while it is drawn: the conversation list is what the
-          // chat shows, and the conversation itself asks nothing. Drawn in the field's
-          // place when the field is empty, else as the notice line above the field.
-          // Under the runtime's own panel (`:plugins`) it is not drawn either: that panel
-          // holds the keys, and a `y` meant for the block would go to the panel's row.
-          const hostKeys = () => (host.services as { hostKeys?: () => { panel: boolean; line: boolean } }).hostKeys?.() ?? { panel: false, line: false };
-          const childAskNow = (): Offered | null => {
-            const c = convRef.current!;
-            // With the cursor in the tree rows a request is not answerable: it is the notice line.
-            if (treeSelRef.current.at !== null) return null;
-            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || watchRef.current || hostKeys().panel) return null;
-            const o = c.offered();
-            return o && o.path.length ? o : null;
-          };
-          const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
           // The tree rows the chat draws for `props` (the chat's props without `tree`): the
           // render and the keys both ask here: the geometry is the render's, the nodes are read at the key.
           const treeNow = (props: Record<string, unknown>) => {
@@ -2594,6 +2608,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!fieldEmpty()) return 'notice';
             return childBlockRows(child, w, false) > dockLimit() ? 'notice' : 'block';
           };
+          // A subagent's question that would stand in the field's place, held.
+          const childHeldNow = (child: Offered | null = childAskNow(), w = dock?.panel.width ?? width): boolean =>
+            claimHeld() && !!child && child.kind === 'ask' && childShape(w) === 'block';
+          // Read once for the whole render: a question stands in the field's place only
+          // once the grace lets it through.
+          const ownHeldNow = ownHeld();
+          const childHeld = childHeldNow();
           // The y/n the watch shows: the oldest parked in the watched node or below it. None once
           // the node has ended.
           const watchAskNow = (): Offered | null => {
@@ -2618,13 +2639,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (room > 1) return `…${path.slice(path.length - room + 1)}${tail}`;
             return `no room for ${label}'s ${ask ? 'question' : 'y/n'}; /subagent stop ${label} declines it`;
           };
+          // The rows a pending question or y/n needs at a panel's width (the App grows a
+          // bottom panel to it, or draws the chat as a window while it waits — see
+          // `pendingChatRows`). Read from the refs: the App asks before this re-renders.
           const needRows = (w: number): number => {
             const asked = watchAskNow();
             if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, ...blockOf(asked), todo: [], queued: 0 }) : 0;
             const c = conv.confirm;
             const child = childAskNow();
             if (child) {
-              const block = childShape(w) === 'block';
+              // A block the grace holds back needs the field and the strip, as a notice does.
+              const block = childShape(w) === 'block' && !childHeldNow(child, w);
               const draft = inputVisualRows(inputRef.current, cursorRef.current, chatFieldWidth(w, true)).length;
               // With the plan when the block fits beside it, else the plan gives way.
               const plan = !block || childBlockRows(child, w, true) <= dockLimit();
@@ -2636,9 +2661,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 queued: conv.queue.length,
               });
             }
+            // A held question stands in the field's place no more than its block would:
+            // the field and the strip under it are what the person sees.
+            const held = !!conv.question && ownHeld();
+            const draft = held ? Math.min(5, inputVisualRows(inputRef.current, cursorRef.current, chatFieldWidth(w, true)).length) : 0;
             return pendingChatRows({
               width: w,
-              question: conv.question?.state ?? null,
+              question: held ? null : conv.question?.state ?? null,
+              notice: held ? draft + 1 : 0,
               confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args, (id) => conv.jobById(id)?.command) ?? undefined, line: configLineOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
               todo: conv.plan.snapshot(),
               queued: conv.queue.length,
@@ -2697,6 +2727,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             questionSeenRef.current = questionNow;
             questionArmedAt.current = questionNow && (wasChildBlock || keysHeld()) ? askClock.now() : null;
           }
+          // The typing grace, read once for the whole render: the request a question would
+          // claim the field's place with, held while the person is still in the sentence.
+          const heldQuestion = ownHeldNow ? questionNow : childHeld && shownChild ? shownChild.request : null;
+          // The grace is a clock, not an event: one timer re-runs the claim when the person
+          // goes quiet, and every key the chat takes while a question waits re-arms it.
+          ui.useEffect(() => {
+            if (!heldQuestion || hostKeys().line) return;
+            const left = graceLeft();
+            if (left <= 0) return;
+            const t = setTimeout(() => { graceTimer.current = null; host.notify(); }, left);
+            (t as { unref?: () => void }).unref?.();
+            graceTimer.current = t;
+            return () => { if (graceTimer.current === t) graceTimer.current = null; clearTimeout(t); };
+          }, [heldQuestion, graceTick, hostKeys().line]);
           // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
           // the session whose work it is, on screen or left (`workHome`); said from nowhere
           // (its own poller, a key), or for a session already put away, to the one on screen.
@@ -2822,7 +2866,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // keys: 'y'/⏎ — confirm, 'n'/Esc — decline; normal field input is paused.
               // An open question consumes every key too: arrows/digits/Space/⏎ answer it,
               // Esc dismisses it, and in the free-text field every printable key is text.
-              if (conv.question) {
+              // While the typing grace holds it, the field has the keys instead.
+              if (conv.question && !ownHeld()) {
                 if (questionArmedAt.current !== null && askClock.now() - questionArmedAt.current < ASK_ARM_MS) return true;
                 // The same width the block draws its field in, so the caret moves the
                 // way it is shown to move.
@@ -2891,8 +2936,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return true;
               }
               // A subagent's question, drawn on an empty field: its keys are the question's.
-              // A key before the pause goes on to the field, as a `y` does.
-              if (childAsk?.kind === 'ask' && childShape(dock?.panel.width ?? width) === 'block' && askTaken(childAsk.request, askArmed)) {
+              // A key before the pause goes on to the field, as a `y` does — and so does
+              // every key while the typing grace holds the block back.
+              if (childAsk?.kind === 'ask' && childShape(dock?.panel.width ?? width) === 'block' && !childHeldNow(childAsk) && askTaken(childAsk.request, askArmed)) {
                 childAsk.owner.stepParentAsk(askKey(childAsk.request.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current))));
                 return true;
               }
@@ -3128,12 +3174,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // pasted newline does not send and pasted letters fire no binding), and
               // the newline keys — Shift+Enter, Alt+Enter, backslash-then-Enter. It says
               // `submit` for a plain Enter; what that means here is the chat's business.
+              // A key that reaches the field is the person's typing, and it re-arms the grace
+              // a waiting question owes the sentence; a key a block, a picker, a panel or a
+              // reader took returned above and is no typing at all.
+              lastKeyAt.current = askClock.now();
+              if (convRef.current!.question || childAskNow()) setGraceTick((n) => n + 1);
               const act = editorReducer(
                 { value: inputRef.current, cursor: cursorRef.current },
                 key as unknown as Parameters<typeof editorReducer>[1],
                 { multiline: true, width: chatFieldWidth(width, fullscreenRef.current) },
               );
               if (act.kind === 'submit') {
+                // The sentence went, and so did the field's text: a question that parked
+                // behind it may take the keys at once.
+                lastKeyAt.current = Number.NEGATIVE_INFINITY;
+                if (convRef.current!.question || childAskNow()) setGraceTick((n) => n + 1);
                 const cmd = inputRef.current.trim();
                 disarmEsc();
                 if (bangLevel > 0) {
@@ -3294,7 +3349,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             toEnd: toEndRef,
             escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: watching ? null : pendingAsk ?? (shownChild?.kind === 'confirm' && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
-            askNotice: shownChild && shownShape === 'notice' && !pendingAsk
+            // A question the grace holds back is not drawn in the field's place: the field
+            // keeps its draft and a strip under it says what waits (ask-children-spec.md
+            // (subagent y/n)).
+            askNotice: ownHeldNow || childHeld
+              ? '? a question is waiting'
+              : shownChild && shownShape === 'notice' && !pendingAsk
               ? (!fieldEmpty()
                 ? (shownChild.kind === 'ask'
                   ? `⏸ a question from «${shownChild.owner.label}» waits — ${bangLevel > 0 ? 'leave shell mode' : 'clear the field'} to answer it`
@@ -3303,7 +3363,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               : treeSelRef.current.at !== null && !pendingAsk && convRef.current!.offered()?.path.length
               ? waitsText(convRef.current!.offered()!, keyGlyph('escape'))
               : null,
-            pendingQuestion: pendingQuestion ?? (!watching && shownChild?.kind === 'ask' && shownShape === 'block' ? shownChild.request.state : null),
+            pendingQuestion: ownHeldNow ? null : pendingQuestion ?? (!watching && shownChild?.kind === 'ask' && shownShape === 'block' && !childHeld ? shownChild.request.state : null),
             // The transcript's lead-in is lit for ITS conversation's own question only —
             // the same value `rowOpts` reads, never the field place's block (which may be
             // a child's ask): a child's narration lives in the child's rows.

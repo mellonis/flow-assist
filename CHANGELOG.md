@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A question waits out the sentence you are typing.** A question that parks while you
+  are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
+  no longer takes the field from under your keys: the field keeps them, the strip above it
+  says `? a question is waiting`, and the block comes up once you have been quiet for
+  about half a second (`ASK_GRACE_MS`, read from `askClock`). While it waits the block is
+  not drawn in the field's place and nothing is answered for you; a message you send in
+  that time is sent as usual, queuing behind the turn. A `:` command line open when the
+  question arrives holds it off outright — a half-written command is a long thought — and
+  the block follows when the line is run or left. A one-shot timer re-runs the claim when
+  the typing stops, and a y/n keeps its existing 600 ms pause with no grace of its own.
+
 - **A kept question and its answer keep a ground of their own.** Once an `ask_user`
   question is answered, the `?` row and the `→` row under it sit on one quiet tint, so
   every pair reads as a single band while scanning the transcript. A dismissed answer —
