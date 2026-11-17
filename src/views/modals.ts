@@ -591,15 +591,20 @@ export interface RowOpts {
   now: number;
   palette: Record<string, string | undefined>;
   onViewFail?: (kind: string, why: string) => void;
-  // A question waits for an answer (`conv.question`): the last run of the turn — the
-  // narration the `ask_user` call follows — draws unfolded and at full ink, so the
-  // question is read against what led into it. A display condition, not fold state
-  // (`src/assistant/folds.ts` is not touched): the run keeps its fold id, and the
-  // moment the question is answered the rows are built again without the flag.
+  // This conversation's own question waits for an answer (`conv.question`): the last
+  // run of its newest assistant message — the narration the `ask_user` call follows —
+  // draws unfolded and at full ink, so the question is read against what led into it.
+  // A display condition, not fold state (`src/assistant/folds.ts` is not touched): the
+  // run keeps its fold id, and the moment the question is answered the rows are built
+  // again without the flag. A question a child of this conversation waits on is not
+  // this: its narration lives in the child's own rows.
   askPending?: boolean;
 }
 
-function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+// `last` is the list's last message (its trailing gap); `lead` says this is the newest
+// ASSISTANT message — the only one a waiting question may light, however much furniture
+// (a view, a note) was drawn under it.
+function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = false): ChatRow[] {
   const views = (Array.isArray(m.views) ? m.views : []) as ViewRecord[];
   // A live view's seconds are part of its rows: without them in the key a cached
   // `12 s` stands still through a silent `sleep 30`. A finished view's time is in
@@ -632,11 +637,14 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // `viewRevision()`: a renderer's late answer (views.ts) — a done view's rows are
   // otherwise laid out once, and its placeholder would stay. Only a message that has
   // views reads it: every other message would gain a cache entry per late answer.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending ? 1 : 0}:${Object.values(o.palette).join(',')}`;
+  // `askPending`: only the message a waiting question is read against gains a new entry
+  // — a flag that is off for everything but one message must not invalidate the whole
+  // conversation's cache.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending && lead ? 1 : 0}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, o)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, lead, o)));
   return rows;
 }
 
@@ -647,6 +655,10 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
 // the messages on its own, which is what keeps grouping decided in exactly one place.
 function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   const drawn = messages.filter((m) => m.role !== 'system');
+  // The newest assistant message: the one a waiting question lights. It is not the last
+  // DRAWN message — a tool's view or a note lands below a turn's narration, and the
+  // question is still read against the narration that led into it.
+  const lastAssistant = drawn.reduce((n, m, i) => (m.role === 'assistant' ? i : n), -1);
   const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
   for (const g of viewGroups(drawn as GroupMsg[], o.notes)) {
     const open = groupOpen(o.folds, g);
@@ -654,15 +666,16 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   }
   return drawn.map((m, at) => {
     const last = at === drawn.length - 1;
+    const lead = at === lastAssistant;
     const inGroup = byAt.get(at);
-    if (!inGroup) return messageRows(m, at, last, o);
+    if (!inGroup) return messageRows(m, at, last, o, lead);
     const out: ChatRow[] = [];
     if (inGroup.g.head === at) {
       const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
       out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'), foldLine: true,
         spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
     }
-    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o));
+    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o, lead));
     else if (!inGroup.open && inGroup.g.members.at(-1) === at && !last) out.push({ gap: true });
     return out;
   });
@@ -732,7 +745,7 @@ export function anchorRow(messages: ChatMsg[], o: RowOpts, anchor: { at: number;
   return seen;
 }
 
-function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, o: RowOpts): ChatRow[] {
   const { wrap, folds, viewLines, notes, detailsKey } = o;
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
@@ -830,9 +843,9 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       const segs = turnSegments(parts);
       // The run a waiting question is read against: the last one of the turn's parts,
       // which the `ask_user` call follows and lands in (the call itself is not a part
-      // of the turn — the question's block is). Only the message being written can be
-      // the one asking, so only the list's last message may draw it this way.
-      const leadRun = o.askPending === true && last ? segs.reduce((n, s, i) => (s.kind === 'run' ? i : n), -1) : -1;
+      // of the turn — the question's block is). `lead` is the newest assistant message
+      // of the conversation whose question it is.
+      const leadRun = o.askPending === true && lead ? segs.reduce((n, s, i) => (s.kind === 'run' ? i : n), -1) : -1;
       for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'reasoning') {
           // Each thought is its own block where the model wrote it: folded in `step`,
@@ -891,7 +904,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           // the calls have anywhere else.
           seg.steps.forEach((text, si) => {
             if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
-            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' && !lead ? { quiet: true, fold: id } : {}));
+            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { fold: id, ...(lead ? {} : { quiet: true }) } : {}));
             const calls = seg.calls[si];
             if (!calls) return;
             if (notes === 'step') {
@@ -1711,6 +1724,7 @@ export function renderChatModal({
   pendingConfirm = null,
   askNotice = null,
   pendingQuestion = null,
+  askPending = false,
   queued = [],
   queueWaits = null,
   elapsed = 0,
@@ -1822,6 +1836,11 @@ export function renderChatModal({
   // take (ask-children-spec.md (subagent y/n)). It is a row of the field's place.
   askNotice?: string | null;
   pendingQuestion?: AskState | null;
+  // This conversation's own question waits (`conv.question`): the newest assistant
+  // message's last run draws unfolded and lit (`RowOpts.askPending`). Not
+  // `pendingQuestion` — that also carries a child's ask block, and the child's
+  // narration lives in the child's rows, never in this transcript's.
+  askPending?: boolean;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
   // the LAST one back, so the last one is what the line shows.
@@ -1983,7 +2002,7 @@ export function renderChatModal({
     // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and the
     // wheel are the pager's, and the conversation stays where it was left. With `/diff`
     // drawn they are the panel's body's.
-    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending: !!pendingQuestion }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
+    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
     // The pager, in the conversation's place: the block's rows at the conversation's
     // width, with a scroll of their own.
     pager

@@ -23,7 +23,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) { await flush(); await 
 
 // The style of the cell where `text` starts (plus `offset` cells) — the caret cell is
 // drawn inverse, so this is how a test tells where the field's caret rests.
-function styleAt(backend: { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean } } } | null; lastFrame: string }, text: string, offset = 0) {
+function styleAt(backend: { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean; dim?: boolean } } } | null; lastFrame: string }, text: string, offset = 0) {
   const rows = backend.lastFrame.split('\n');
   const y = rows.findIndex((r) => r.includes(text));
   if (y < 0) throw new Error(`"${text}" is not on screen:\n${backend.lastFrame}`);
@@ -107,6 +107,31 @@ test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as cons
     expect(backend.lastFrame).toContain('→ merge');
   }
   handle.unmount();
+});
+
+test('the narration that led into the question reads in full while it waits, and folds once answered', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: 'Checking the branch shape first.', tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+    [{ text: 'Using it.' }],
+  );
+  const ui = await bootApp(model, 110, 30);
+  await ui.press('F');
+  await ui.type('which branch should I use?');
+  await ui.press('return');
+  await settleUi(15);
+
+  // The step that led into the ask is drawn unfolded and at full ink: the context the
+  // question is read against, not one dim chrome row.
+  expect(ui.backend.lastFrame).toContain('Checking the branch shape first.');
+  expect(ui.backend.lastFrame).not.toContain('▸ Checking the branch shape first.');
+  expect(styleAt(ui.backend, 'Checking the branch shape first.').dim).toBeFalsy();
+
+  // Answered, it folds where it stands, with the turn's own display again.
+  ui.backend.press({ name: 'return' });
+  await settleUi(20);
+  expect(ui.backend.lastFrame).toContain('▸ Checking the branch shape first.');
+  ui.app.unmount();
 });
 
 test('typing starts the answer, the field takes a paste, and the model is sent the whole text', async () => {

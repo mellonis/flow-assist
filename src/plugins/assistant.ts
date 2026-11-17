@@ -3242,7 +3242,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Read while the node lives: a task that ends hands its children up, and a child's
             // labels from the session change with it.
             path: watching.ended === null ? watchPath(watching.node) : watching.path,
-            rows: chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], rowOpts(watchFolds)),
+            // The rows are the watched conversation's own, and so is the flag: the
+            // session's pending question is never the watched child's lead-in (a
+            // question of the session's ends the watch anyway).
+            rows: chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], { ...rowOpts(watchFolds), askPending: !!watched?.question }),
             state: watchState(watchedNode, watching.ended),
             ended: watching.ended !== null,
             ask: watching.ask ? stopQuestion({ label: watching.node.label, below: watchedNode?.below ?? 0 }) : null,
@@ -3301,6 +3304,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               ? waitsText(convRef.current!.offered()!, keyGlyph('escape'))
               : null,
             pendingQuestion: pendingQuestion ?? (!watching && shownChild?.kind === 'ask' && shownShape === 'block' ? shownChild.request.state : null),
+            // The transcript's lead-in is lit for ITS conversation's own question only —
+            // the same value `rowOpts` reads, never the field place's block (which may be
+            // a child's ask): a child's narration lives in the child's rows.
+            askPending: !!convRef.current?.question,
             picker,
             // A plugin command's panel: its rows as the plugin gives them now, its keys
             // with their caps.
