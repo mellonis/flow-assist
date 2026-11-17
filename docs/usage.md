@@ -706,6 +706,29 @@ out of rounds — Enter on the empty field sends "continue", and the assistant p
 work up where it stopped, or writes the answer again from the start when the loop began
 before any text was kept. `/export` says the turn was `stopped (the answer looped)`.
 
+## When the assistant asks you
+
+**A question stops the turn until you answer it.** The assistant asks when your answer
+changes what it does next, and the block takes the field's place while it waits; anything
+you had typed is kept, not lost. The block always offers `Other…` for your own words.
+A digit answers the option it numbers at once; ↑/↓ move the cursor and ⏎ picks the row
+under it (or opens `Other…`); Space toggles a row when the question allows several; and
+typing anything else starts the answer in your own words, with the field open on what
+you typed. Esc dismisses the question: the assistant is told you gave no answer and
+must not assume one.
+
+**Several questions come one page at a time, with a submit page last.** When the
+assistant asks more than one question in a call, the block becomes a small wizard: every
+question gets a page of its own, and a tab strip under the title names them (a tick on a
+tab means that page holds an answer). Answering a page — a digit, ⏎ on a row, Space in a
+multi-select, or your own words — keeps the answer and moves you to the next page. ←/→
+walk the pages at any time (they are the caret's keys while you are typing), so you can
+go back, change a pick, edit your words or leave a question empty; nothing is sent until
+the end. The last page sums the call up: every question with the answer its ⏎ will send,
+or `(not answered)`. Its ⏎ sends the whole call once, and that is the only answer the
+assistant gets. Esc on any page, the submit page included, dismisses the whole call, and
+the kept rows read `→ dismissed` for the questions you did not answer.
+
 ## Long answers
 
 **A long answer stays at its first line.** The conversation follows an answer while it

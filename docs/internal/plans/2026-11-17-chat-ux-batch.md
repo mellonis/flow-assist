@@ -755,14 +755,15 @@ git add -A && git commit -m "feat: /theme picks the look with the theme applied 
     questions: AskQuestion[];
     index: number;          // the page on screen; for n>1, page n is the submit page
     drafts: AskDraft[];     // one per question
-    answers: AskAnswer[];   // filled at submit; askResult/askShown read it
+    answers: AskAnswer[];   // written at page commit for pages that hold something;
+                            // rebuilt per question in order at submit
     done: boolean;
     cancelled: boolean;
   }
   export const askPageCount = (s: AskState): number  // n>1 → n+1, else n
   export interface AskTab { label: string; answered: boolean; current: boolean }
   export function askTabs(state: AskState): AskTab[] // n>1 only; last tab is "Submit"
-  export interface AskSubmitRow { title: string; answer: string }
+  export interface AskSubmitRow { title: string; answer: string; answered: boolean }
   export function askSubmitRows(state: AskState): AskSubmitRow[]  // the submit page
   ```
   Unchanged surfaces: `askStart`, `parseAskArgs`, `askRows` (reads

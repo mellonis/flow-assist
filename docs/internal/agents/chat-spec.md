@@ -51,6 +51,19 @@ there is no `/fullscreen`.
   question is usually about) and moves the layout by a few rows; the window is for the
   terminal where no growth can hold it (100×22: the default panel is 12 rows, the
   question 17). Collapsed, nothing is needed (the strip says it waits).
+- **A call with several questions is a wizard.** `ask_user`'s block
+  (`renderAsk`, `askBlockRows`, `src/assistant/ask.ts`) opens on the first question.
+  With more than one it carries ONE tab strip row under its title: a tab per question
+  (its header, else `question N`) and `Submit` last, a page whose draft holds a pick or
+  words ticked `✓`, the page on screen drawn inverse, and every label cut by cells to
+  the share of the row it has, so a wide label never wraps the strip onto a second
+  line. The page after the last is the submit page: it draws no options and each
+  question's title with the answer ⏎ will send under it — quiet and `(not answered)`
+  when the draft holds nothing. `askBlockRows` counts the strip and the submit rows the
+  render draws, so `pendingChatRows` and the window/panel arithmetic agree with the
+  screen. A single question draws no strip and no submit page: its rows answer in one
+  key. The hint names the keys of the page it is on (`←→ questions · ⏎ submit ·
+  Esc dismiss` on the submit page).
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
@@ -87,7 +100,10 @@ there is no `/fullscreen`.
   right, or a closed window / full chat) or on a bottom panel's strip — and opening
   the chat shows the block again. Esc keeps its meaning: it declines or dismisses first,
   in the chat's handler, so Esc Esc never closes over one; `/exit` cannot be typed
-  while one is up. Ctrl+C with a turn running still declines and stops.
+  while one is up. Ctrl+C with a turn running still declines and stops. **A dismissal is
+  not consent**: the question's Esc, on any page — the submit page included — answers
+  nothing, the model is told the person dismissed it and must not assume an answer, and
+  every question whose draft holds nothing is kept as `→ dismissed`.
 - **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
   the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.
   Both are the assistant's bindings (`keys`, so a person moves them — to a chord only:
