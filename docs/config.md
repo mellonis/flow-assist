@@ -69,6 +69,16 @@ assistant may set or save".
   highest auto mode an agent file may run in — its own `auto:` line says what it asks for,
   and the lower of the two applies. Only you can set it; the assistant cannot. See
   [usage.md](usage.md), "Agent files".
+- **Project instructions**: each `AGENTS.md` between the shell's directory and its
+  `shell.roots` entry rides in the system prompt — see
+  [usage.md](usage.md), "Project instructions". `project.instructionsCap` says how
+  many bytes of each file are read (32 768 when unset; `0` — no cut, the files ride
+  whole). A file under the cap is never touched; one over it is cut at a line
+  boundary and the cut is said — a note in the prompt with how many lines were left
+  out, and the chat's note naming the cap. How big your instructions are is your
+  editorial call; only you can set the key, and the assistant cannot. The chat names
+  the chain's share of the context window when it grows large, and `/context` shows
+  it as `instructions`.
 - **Reading the web** (`web_fetch`): `web.allowlist`, `web.maxBytes` and
   `web.timeoutMs` — see [safety.md](safety.md), "Reading the web".
 

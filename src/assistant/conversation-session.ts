@@ -11,6 +11,7 @@ import {
   sessionFingerprint, sessionFingerprintsEqual, sessionTitle, subJournalPath, type Session, type SessionFingerprint,
 } from './sessions.js';
 import { retryWait } from './conversation-turn.js';
+import { emptyProject } from './project-instructions.js';
 import type { RetryInfo } from './llm-retry.js';
 import { autoRestored } from './auto.js';
 import { shellAutoRun, shellRoots } from './shell.js';
@@ -367,7 +368,7 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
     const note = autoRestored(c.autoMode, shellAutoRun(c.deps.config() as { shell?: unknown }));
     if (c.currentRows().at(-1)?.content !== note) c.pushNote(note);
   }
-  c.project = { dir: '', root: null, files: [] };
+  c.project = emptyProject();
   c.shell.setCwd(s.shellCwd ?? null);
   // What the session's commands told the model is told again.
   c.shell.told.clear();

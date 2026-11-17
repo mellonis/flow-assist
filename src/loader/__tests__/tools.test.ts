@@ -340,6 +340,19 @@ test('config_schema says what ai.backgroundFollowUp does, from the config side',
   expect(out).toMatch(/config set ai\.backgroundFollowUp false/);
 });
 
+test('config_schema says what project.instructionsCap does: the cut is the person\'s call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-cap-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', { key: 'project.instructionsCap' }, { configLocalPath: local }));
+  expect(out).toMatch(/- project\.instructionsCap: number — unset \(default: 32768 — each AGENTS\.md is cut at this many bytes/);
+  expect(out).toContain('0 — no cut');
+  // How big the instructions ride is the developer's editorial call — the model sets nothing here.
+  expect(out).not.toContain('· model may set');
+  await expect(reg.exec('config_set', { key: 'project.instructionsCap', value: 0, scope: 'session' }, { configLocalPath: local })).rejects.toThrow();
+});
+
 test('config_schema says what ai.autoCompact does, and the model may not set it', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-ac-'));
   const local = join(dir, 'config.local.json');

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.ts';
-import { findAgents, resolveAgent } from '../agent-find.ts';
+import { findAgents, resolveAgent, AGENT_FILE_CAP } from '../agent-find.ts';
 
 const made: string[] = [];
 const tmp = (p: string) => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p))); made.push(d); return d; };
@@ -98,12 +98,18 @@ test('a whole agents directory that is a link out of the roots is not read', () 
   expect(found.errors).toEqual([{ path: path.join(w.proj, '.flow-assist', 'agents'), line: 1, message: expect.stringContaining('link out of shell.roots') }]);
 });
 
-test('a file over the instructions\' cap is an error, not a cut prompt', () => {
+test('a file over the agent file\'s cap is an error, not a cut prompt', () => {
   const w = world();
   projectFile(w, 'huge', doc('big', 'x'.repeat(33 * 1024)));
   const found = findAgents({ config: w.config, cwd: w.proj, personDir: w.personDir });
   expect(found.agents).toEqual([]);
   expect(found.errors[0]).toMatchObject({ line: 1, message: expect.stringContaining('larger than 32 KiB') });
+});
+
+// The refusal threshold is the agent file's OWN constant — never the instruction cap,
+// which is the person's `project.instructionsCap` to change. Same value, same wording.
+test('AGENT_FILE_CAP is the agent file\'s own 32 KiB refusal threshold', () => {
+  expect(AGENT_FILE_CAP).toBe(32 * 1024);
 });
 
 test('a file with errors is not offered; its errors name path and line', () => {

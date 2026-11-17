@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { INSTRUCTIONS_CAP, capInstructions, findInstructions, instructionsBlock, instructionsNote, instructionsPrompt, instructionsSummary } from '../project-instructions.ts';
+import { INSTRUCTIONS_CAP, capInstructions, emptyProject, findInstructions, instructionsBlock, instructionsNote, instructionsPrompt, instructionsSummary, type ProjectInstructions } from '../project-instructions.ts';
 import { createShellState } from '../shell.ts';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-instr-')));
@@ -236,4 +236,50 @@ test('instructionsPrompt: read once per directory, kept until the shell moves', 
   shell.setCwd(root);
   shell.setCwd(path.join(root, 'proj'));
   expect(instructions.systemPrompt()).toContain('v2');
+});
+
+test('project.instructionsCap: 0 reads the whole file and says nothing about a cut', () => {
+  const root = tmp();
+  write(path.join(root, 'AGENTS.md'), ('r'.repeat(99) + '\n').repeat(400)); // 40 000 bytes
+  const found = findInstructions({ shell: { roots: [root] }, project: { instructionsCap: 0 } }, root);
+  expect(found.files[0]!.cut).toBe(0);
+  expect(found.files[0]!.text.length).toBe(40_000);
+  expect(instructionsBlock(found)).not.toContain('cut at');
+  expect(instructionsSummary(found)).not.toContain('cut at');
+});
+
+test('a smaller project.instructionsCap cuts at that cap and names it in the note', () => {
+  const root = tmp();
+  write(path.join(root, 'AGENTS.md'), ('r'.repeat(99) + '\n').repeat(400)); // 40 000 bytes
+  const found = findInstructions({ shell: { roots: [root] }, project: { instructionsCap: 2000 } }, root);
+  const [f] = found.files;
+  expect(f!.text.length).toBe(1999);
+  expect(f!.cut).toBe(380);
+  expect(instructionsBlock(found)).toContain('(cut at 2000 bytes');
+  expect(instructionsSummary(found)).toContain('(cut at 2000 bytes)');
+});
+
+// The growth note: one note at start and when the chain changes, saying how much of
+// the window the chain takes once that share is large — ticket #124, "warn in chat
+// instead of relying on the cut". The threshold is a share of the conversation's
+// context window; the note points at /context.
+test('the note warns when the chain takes a large share of the window, and names the share', () => {
+  const p = (chars: number): ProjectInstructions => ({
+    dir: '/w/p', root: '/w/p', cap: 0,
+    files: [{ path: '/w/p/AGENTS.md', text: 'x'.repeat(chars), cut: 0 }],
+  });
+  // 60 000 characters ≈ 15 000 tokens of a 100 000 window — exactly at the threshold.
+  const note = instructionsNote(emptyProject(), p(60_000), 100_000)!;
+  expect(note).toContain('Project instructions: /w/p/AGENTS.md');
+  expect(note).toContain('~15k tokens — 15% of the window');
+  expect(note).toContain('/context');
+  // Under the threshold the note keeps its plain wording — no tokens, no percents.
+  const small = instructionsNote(emptyProject(), p(40_000), 100_000)!;
+  expect(small).toContain('Project instructions: /w/p/AGENTS.md');
+  expect(small).not.toContain('tokens');
+  expect(small).not.toContain('%');
+  // The same chain against a bigger window is under the threshold too.
+  expect(instructionsNote(emptyProject(), p(60_000), 200_000)).not.toContain('%');
+  // No window, no share: the two-argument form is unchanged.
+  expect(instructionsNote(emptyProject(), p(60_000))).not.toContain('%');
 });

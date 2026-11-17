@@ -16,12 +16,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.js';
 import { readPluginManifest } from '../loader/compat.js';
-import { INSTRUCTIONS_CAP } from './project-instructions.js';
 import { gitRootOf } from './sessions.js';
 import { realOf, shellRoots, within } from './shell.js';
 import { agentNameOf, parseAgentFile, type Agent, type AgentError, type AgentSource } from './agent-file.js';
 
 export const PROJECT_AGENTS_DIR = path.join('.flow-assist', 'agents');
+// The agent file's own refusal threshold: a file over it is an error naming the size,
+// never a cut prompt. Its own number, equal to `INSTRUCTIONS_CAP` by choice — the
+// instruction cut is the person's `project.instructionsCap` and moving it must not
+// move what a skill or an agent file may weigh.
+export const AGENT_FILE_CAP = 32 * 1024;
 
 export interface FoundAgent extends Agent {
   id: string; // what `@` takes: the name, or `<plugin>/<name>` for a plugin's
@@ -76,7 +80,7 @@ export function findAgents({ config, cwd, plugins = [], personDir = path.join(ho
     try {
       const st = fs.statSync(real);
       if (!st.isFile()) return null; // a directory, a FIFO — never read
-      if (st.size > INSTRUCTIONS_CAP) { refuse(id, file, source, `the file is larger than ${INSTRUCTIONS_CAP / 1024} KiB`); return null; }
+      if (st.size > AGENT_FILE_CAP) { refuse(id, file, source, `the file is larger than ${AGENT_FILE_CAP / 1024} KiB`); return null; }
       bytes = fs.readFileSync(real);
     } catch (e) {
       refuse(id, file, source, `the file cannot be read: ${(e as Error).message}`);

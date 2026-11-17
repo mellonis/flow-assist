@@ -164,6 +164,11 @@ export const hostConfigSchema = z.object({
   // The agent workspace (src/assistant/workspace.ts): `dir` is where every project's
   // workspace lives, `projects/` under the host's state by default.
   workspace: z.object({ dir: z.string() }).partial().optional(),
+  // Project instruction files (src/assistant/project-instructions.ts): how many bytes
+  // of each AGENTS.md ride in the prompt (`0` — the files ride whole, never cut).
+  // The developer's editorial call over their own documentation: no mark for the
+  // model, read live on every read of the chain.
+  project: z.object({ instructionsCap: z.number().int().nonnegative() }).partial().optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept, and for how many days a
   // session's journal may outlast its last write (0 — as long as the session).

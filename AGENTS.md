@@ -460,7 +460,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   Whenever the shell's directory is SET, the chat reads `AGENTS.md` (exactly
   that name) in every directory from the shell's up to the innermost
   `shell.roots` entry, outermost first, nearest last — nothing outside the
-  roots, each file capped at `INSTRUCTIONS_CAP`, the section framed as the
+  roots, each file capped at `project.instructionsCap` (default
+  `INSTRUCTIONS_CAP`, 0 — no cut), the section framed as the
   repository's words, never the person's or the host's. A `cd` is seen by the
   next round; the block is read again before EVERY round
   (`AgentOpts.systemPrompt`) and is never a message in the history.

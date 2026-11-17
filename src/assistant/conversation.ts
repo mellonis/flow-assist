@@ -13,7 +13,7 @@ import { readFacts } from './memory-store.js';
 import { markFacts, memoryRecordNotes } from './memory-trust.js';
 import { baseModel, modelWindow } from './model-roles.js';
 import { createPlan, type Plan } from './plan.js';
-import { findInstructions, instructionsNote, type ProjectInstructions } from './project-instructions.js';
+import { emptyProject, findInstructions, instructionsNote, type ProjectInstructions } from './project-instructions.js';
 import { applyRecall, bulkyItems, createRecallState, recallLimits, type BulkyItem, type RecallState } from './recall.js';
 import { screenBlock, type ContextItem } from './screen-context.js';
 import { wholeOrDefault } from './rounds.js';
@@ -157,7 +157,7 @@ export class Conversation {
   // request as "## Project instructions". `projectNote`: a note waiting for the turn to
   // end, when the directory moved in the middle of one (the `cd` tool): a note between a
   // turn's rounds would split its message in two.
-  project: ProjectInstructions = { dir: '', root: null, files: [] };
+  project: ProjectInstructions = emptyProject();
   projectNote: string | null = null;
   // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
   // The conversation's, like the plan: its history calls them, so it is saved with the
@@ -1931,7 +1931,7 @@ export class Conversation {
   // the files picked up changed.
   refreshProject(): void {
     const next = findInstructions(this.deps.config() as Record<string, unknown>, this.shell.cwd());
-    const note = instructionsNote(this.project, next);
+    const note = instructionsNote(this.project, next, this.contextWindow());
     this.project = next;
     if (!note) return;
     if (this.inTurn) this.projectNote = note;
