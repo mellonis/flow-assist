@@ -2035,7 +2035,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The person's own appearance. The menu marks the mode the config names;
                 // a cursor move previews it at once (`setThemeMode` pins the palette and
                 // saves nothing), Enter keeps it and saves it, Esc puts back the mode the
-                // menu opened with, and `/theme <mode>` applies and saves in one step.
+                // config names then, and `/theme <mode>` applies and saves in one step.
                 const saved = (): ThemeMode => (host.config.ui as { theme?: ThemeMode } | undefined)?.theme ?? 'system';
                 const preview = (mode: ThemeMode) => (host.services as { setThemeMode: (m: ThemeMode) => void }).setThemeMode(mode);
                 const save = (mode: ThemeMode): boolean => {
@@ -2048,17 +2048,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (typeof got !== 'string') { setError(got.error); return false; }
                   setField('');
                   const was = saved();
-                  preview(got);
                   // A save that failed leaves nothing changed: the look goes back to what
                   // it was, as `/model` leaves the model alone.
                   if (!save(got)) { preview(was); return false; }
+                  // The config names the mode now, so the pin is its agreement with the
+                  // config (the app records it) and a drop that follows has nothing stale.
+                  preview(got);
                   conv.pushNote(`theme: ${got}`);
                   host.notify();
                   return true;
                 };
                 if (arg.trim()) { set(arg.trim().toLowerCase()); return; }
                 setField('');
-                const opened = saved();
                 openPanel({
                   title: 'Theme',
                   rows: () => THEME_MODES.map((mode) => ({
@@ -2069,10 +2070,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   })),
                   onCursor: (id) => preview(id as ThemeMode),
                   // The menu went WITHOUT a choice — Esc, the chat folding away, a session
-                  // change: what the person saw before it opened is what they see again.
-                  // `system` is honest — it follows the terminal as it is now, not as it
-                  // was at open. A `⏎` that saves is a decision and closes without this.
-                  onDrop: () => preview(opened),
+                  // change: the mode the config names is the one on screen again, not the one
+                  // the menu opened with (the config may have changed under it). `system` is
+                  // honest — it follows the terminal as it is now, not as it was at open. A
+                  // `⏎` that saves is a decision and closes without this.
+                  onDrop: () => preview(saved()),
                   keys: [{ key: 'return', label: 'use', run: (id) => {
                     // The same path as `/theme <mode>`: a save that fails keeps the menu up
                     // with its error, as `/model` keeps its panel.

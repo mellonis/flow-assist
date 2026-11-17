@@ -122,6 +122,34 @@ test('a panel that goes without a choice puts the preview back', async () => {
   ui.app.unmount();
 });
 
+test('a mode changed under the menu is the mode Esc leaves the screen on', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { ui: { theme: 'light' } }, { scheme: 'unknown' });
+  await ui.press('F');
+  await settle();
+  expect(look(ui)).toBe(LIGHT);
+  await theme(ui);
+  // The cursor opens on the first row; ↓ moves it onto light, the saved mode, and the
+  // preview is the mode already on screen.
+  await ui.press('down');
+  await settle();
+  expect(look(ui)).toBe(LIGHT);
+  // The config changes under the menu, as an outside write the settings guard accepts
+  // does: it reaches the running config and the app is drawn again with it.
+  const { setConfigValue } = await import('../config/load');
+  expect(setConfigValue(ui.config as Record<string, unknown>, 'ui.theme', 'dark', { scope: 'saved' }).ok).toBe(true);
+  (ui.services as unknown as { notify: () => void }).notify();
+  await settle();
+  expect(look(ui)).toBe(DARK);
+  // Esc decides nothing, so the screen goes to what the config says NOW — dark — not to
+  // the mode the menu opened with (light).
+  await ui.press('escape');
+  await settle();
+  expect(frame(ui)).not.toContain('Flow Assist · Theme');
+  expect(look(ui)).toBe(DARK);
+  expect(savedTheme()).toBe('dark');
+  ui.app.unmount();
+});
+
 test('the theme command applies its argument', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { scheme: 'unknown' });
   await ui.press('F');

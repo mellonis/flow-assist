@@ -380,6 +380,11 @@ export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?
 // chat's own rate for a view that updates fast.
 const CONSOLE_REDRAW_MS = 200;
 
+// The width the `:` line's field is laid out in: the footer's box pads both sides, and
+// that padding is chrome. The key handler (the editor reducer's motion) and the drawn
+// completion list are read from the same number, so the offer never sits past the row.
+const lineFieldWidth = (width: number): number => Math.max(1, width - 2);
+
 export async function renderApp(
   root: Backend,
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late: lateIn, untrusted: untrustedIn = [], trustNotes = [], site: siteIn }: RenderAppInput,
@@ -483,6 +488,11 @@ export async function renderApp(
   // read of it, so there is one helper, not two.
   const setThemeMode = (mode: ThemeMode) => {
     pinnedScheme = mode;
+    // A mode the config names is the app's agreement with it: a preview of the config's
+    // own mode, and a save (`/theme` writes `ui.theme` before the pin). Recorded here so
+    // the reconcile below agrees with the write instead of reading it as an outside
+    // change to pin over.
+    if (configThemeMode() === mode) seenConfigMode = mode;
     terminalScheme = root.colorScheme?.().scheme ?? terminalScheme;
     applyTheme(schemeFor(mode, terminalScheme));
     redraw();
@@ -1061,7 +1071,7 @@ export async function renderApp(
           shift: !!key.shift,
           ...(name === 'paste' ? { text: String((key as { text?: unknown }).text ?? '').replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ') } : {}),
         };
-        const act = editorReducer({ value, cursor: cmdline.current.caret }, editorKey, { multiline: false, width: Math.max(1, region.width - 2) });
+        const act = editorReducer({ value, cursor: cmdline.current.caret }, editorKey, { multiline: false, width: lineFieldWidth(region.width) });
         if (act.kind === 'edit') {
           // A content edit ends the history recall (`ListState.fromHistory`), and only a
           // value change counts: a moved caret alone brings no list back.
@@ -1418,7 +1428,7 @@ export async function renderApp(
         // not know it, so an `as any` would hide that the footer is never dimmed.
         line
           ? h(Box, { flexDirection: 'column' },
-            shownLine?.list ? renderCompletionList(shownLine.list, region.width - 2) : null,
+            shownLine?.list ? renderCompletionList(shownLine.list, lineFieldWidth(region.width)) : null,
             h(Box, { flexDirection: 'row' },
               // The prompt, the inline offer and the candidate list are the host
               // speaking, not text anyone asked for: a copy of the command line is
