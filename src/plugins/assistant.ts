@@ -395,8 +395,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ownArmedAt = ui.useRef<number | null>(null);
           // The conversation's own question that ended a watch, or came over the tree cursor,
           // takes no key for the pause from its appearing (ask-children-spec.md (subagent y/n)).
+          // The pause runs from the block's draw, which the grace may put a sentence's while
+          // after the arrival: `questionOverHolder` records that it took a holder's keys over
+          // at all, and `questionArmedAt` is stamped at the draw.
           const questionSeenRef = ui.useRef<unknown>(null);
           const questionArmedAt = ui.useRef<number | null>(null);
+          const questionOverHolder = ui.useRef(false);
           // The typing grace: the last key the chat took, and a tick that re-arms the
           // one-shot claim when a key pushes it back (ask-children-spec.md (subagent y/n)).
           const lastKeyAt = ui.useRef(Number.NEGATIVE_INFINITY);
@@ -1015,13 +1019,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // The session's own y/n or question ends the watch, takes the keys with the 600 ms
           // pause an own request over the tree cursor has, and counts the session's end seen.
+          // The y/n draws at once and is armed here; the question's window starts when its
+          // block draws and takes the keys.
           const endWatchForOwnAsk = () => {
             endWatch();
             const c = convRef.current!;
             ownSeenRef.current = c.confirm ?? null;
             ownArmedAt.current = c.confirm ? askClock.now() : null;
             questionSeenRef.current = c.question ?? null;
-            questionArmedAt.current = c.question ? askClock.now() : null;
+            questionOverHolder.current = !!c.question;
+            questionArmedAt.current = null;
             // As the pager's close: the session's end is on screen.
             markSeenRef.current();
           };
@@ -2691,7 +2698,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // older than ASK_GRACE_MS, and never while the `:` line is open — a half-written
           // command is a long thought.
           const graceLeft = (): number => ASK_GRACE_MS - (askClock.now() - lastKeyAt.current);
-          const claimHeld = (): boolean => hostKeys().line || graceLeft() > 0;
+          // The grace waits out the sentence the person is TYPING (ask-children-spec.md
+          // (subagent y/n)): with an empty field there is no sentence to finish, so a key
+          // that only walked away from the field — ↑/↓ into the history or the tree rows,
+          // a key the editor never saw — is no typing and the claim runs at once. A
+          // half-written `:` command is a sentence of its own: its line holds the claim.
+          const claimHeld = (): boolean => hostKeys().line || (graceLeft() > 0 && !fieldEmpty());
           // The session's own question, held.
           const ownHeld = (): boolean => claimHeld() && !!convRef.current!.question;
           // Any question the grace holds back — the session's own or a subagent's.
@@ -2861,17 +2873,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The guard counts a block only while the chat has the keyboard: with the plugin,
           // the runtime's panel or the `:` line holding the keys, it is told nothing is
           // shown, and getting the keyboard back arms afresh.
-          // A child's ask the typing grace holds back is still handed over as shown: only
-          // its placement waits, and the guard's own last-key rule (`press` at every key)
-          // still keeps the first key from answering sooner than `ASK_ARM_MS` after it.
-          const guardSees = (c: Offered | null): object | null => (c && focusedRef.current && !hostKeys().panel && !hostKeys().line ? c.request : null);
+          // Its window runs from the takeover — the moment the block is DRAWN and takes the
+          // keys (ask-children-spec.md (subagent y/n): an answer counts 600 ms after the
+          // request "first came on screen with the keyboard in the chat"). A request the
+          // typing grace holds back, or one standing beside a draft as the notice line, is
+          // not that moment: the guard is shown none, and the pause is owed again when the
+          // block draws.
+          const guardSees = (c: Offered | null, from: 'session' | 'watch' = 'session'): object | null => {
+            if (!c || !focusedRef.current || hostKeys().panel || hostKeys().line) return null;
+            const w = dock?.panel.width ?? width;
+            const drawn = from === 'watch' ? watchAskShape(w) === 'block' : childShape(w) === 'block' && !childHeldNow(c, w);
+            return drawn ? c.request : null;
+          };
           const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
           // A watched child's request is shown the same way: one request at a time.
           // A watch is never up over the session's own y/n or question: it ends here if one
           // got through, and the session's y/n is never drawn inside it.
           if (watchRef.current && (convRef.current!.confirm || convRef.current!.question)) endWatchForOwnAsk();
           if (watchRef.current?.ask && watchAskNow()) setWatch({ ...watchRef.current, ask: false });
-          askGuard.current.show(guardSees(shownChild ?? (open ? watchAskNow() : null)));
+          askGuard.current.show(shownChild ? guardSees(shownChild, 'session') : guardSees(open ? watchAskNow() : null, 'watch'));
           // The pause an answer needs is owed again whenever the question has not been on
           // screen as a block: what was typed is kept (it lives in the question), but a key
           // right behind whatever took the keys over must not send it.
@@ -2887,17 +2907,27 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ownNow = convRef.current!.confirm ?? null;
           if (ownNow !== ownSeenRef.current) {
             ownSeenRef.current = ownNow;
+            // A y/n has no grace: it draws and takes the keys at once, so its takeover IS
+            // this moment ("for 600 ms from that moment" — it takes a block's place, or the
+            // keys a holder held).
             ownArmedAt.current = ownNow && (childBlockRef.current || keysHeld()) ? askClock.now() : null;
           }
           const wasChildBlock = childBlockRef.current;
           childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
           // Its own question that takes the keys over the tree cursor, or over a subagent's
-          // block the person may be typing into, is armed too.
+          // block the person may be typing into, is armed too — from the moment it APPEARS
+          // (every key is swallowed for 600 ms from its appearing), which the grace may put
+          // a sentence's while after the arrival: the first key behind the DRAWN block is
+          // what the pause swallows. The arrival records only that the question took a
+          // holder's keys over at all; with no holder its first key answers it at once, and
+          // the draw stamps the window.
           const questionNow = convRef.current!.question ?? null;
           if (questionNow !== questionSeenRef.current) {
             questionSeenRef.current = questionNow;
-            questionArmedAt.current = questionNow && (wasChildBlock || keysHeld()) ? askClock.now() : null;
+            questionOverHolder.current = !!questionNow && (wasChildBlock || keysHeld());
+            questionArmedAt.current = null;
           }
+          if (questionNow && !ownHeldNow && questionArmedAt.current === null && questionOverHolder.current) questionArmedAt.current = askClock.now();
           // The typing grace, read once for the whole render: the request a question would
           // claim the field's place with, held while the person is still in the sentence.
           const heldQuestion = ownHeldNow ? questionNow : childHeld && shownChild ? shownChild.request : null;
@@ -2960,12 +2990,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (isMouseKey(key.name)) return isMouseButton(key.name) && mouse(key);
               // A subagent's y/n: an answer counts only after a pause (ask-children-spec.md (subagent
               // y/n)). Every key is noted, whoever takes it; the pause is read as of before it.
-              askGuard.current.show(guardSees(childAskNow() ?? watchAskNow()));
+              const liveChild = childAskNow();
+              askGuard.current.show(liveChild ? guardSees(liveChild, 'session') : guardSees(watchAskNow(), 'watch'));
               const askArmed = askGuard.current.press();
-              // A question that arrived over the tree cursor is armed from this key.
+              // A question that arrived over the tree cursor took a holder's keys over;
+              // its window is stamped when the block draws (or at the claim below).
               if (conv.question && conv.question !== questionSeenRef.current) {
                 questionSeenRef.current = conv.question;
-                questionArmedAt.current = childBlockRef.current || keysHeld() ? askClock.now() : null;
+                questionOverHolder.current = childBlockRef.current || keysHeld();
+                questionArmedAt.current = null;
               }
               // A request that took a block's place under this key is armed from this key.
               if (conv.confirm && conv.confirm !== ownSeenRef.current) {
@@ -3039,6 +3072,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // Esc dismisses it, and in the free-text field every printable key is text.
               // While the typing grace holds it, the field has the keys instead.
               if (conv.question && !ownHeld()) {
+                // The window runs from the block's appearance: this key is the first one
+                // behind a block that just claimed the keys, and owes the pause itself.
+                if (questionArmedAt.current === null && questionOverHolder.current) questionArmedAt.current = askClock.now();
                 if (questionArmedAt.current !== null && askClock.now() - questionArmedAt.current < ASK_ARM_MS) return true;
                 // The same width the block draws its field in, so the caret moves the
                 // way it is shown to move.
