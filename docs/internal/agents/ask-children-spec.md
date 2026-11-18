@@ -36,8 +36,9 @@
   answer it, and only after a pause: `src/assistant/child-ask-guard.ts` — an answer counts
   600 ms after the request first came on screen with the keyboard in the chat (a request
   seen anew after a gap with none shown, or a different one, arms from then; on screen
-  means the block owning the field's place — beside a draft the notice stands instead and
-  the clock starts where the notice ends) and 600 ms
+  means the request's block owning the field's place — the shape `block`, which beside a
+  grace-held ask on an empty field holds while only the strip is drawn, and gives way to
+  the notice beside a draft, where the pause's clock starts when the notice ends) and 600 ms
   after the person's last key of any kind: every key the chat handler gets is noted, and
   so is every key the App takes first (`store.chat.noteKey`, from `keyPath.first` when it
   consumes a key). While the chat lacks the keyboard — collapsed, the plugin's side

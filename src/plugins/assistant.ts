@@ -3187,11 +3187,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
               // ↓ on an empty field with no history entry shown (before this key) steps into the
               // tree rows, when any are drawn: a handoff to another holder, not editing — the
-              // rows keep the key and nothing here re-arms the grace. Like the holders above it
-              // returns before the Esc-Esc disarm below, and the rows' own keys disarm there.
+              // rows keep the key and nothing here re-arms the grace. The handoff still was a
+              // key the person pressed, so it disarms an Esc-Esc arm like every field key below.
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
                 const first = treeStops()[0];
-                if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); return true; }
+                if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); disarmEsc(); return true; }
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its rows
