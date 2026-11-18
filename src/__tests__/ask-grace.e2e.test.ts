@@ -177,6 +177,29 @@ test('a message sent during the grace queues and survives the takeover', async (
   ui.app.unmount();
 });
 
+test('a run that erases the draft through empty keeps the keys: the retyping lands in the field while the graced question waits', async () => {
+  const { model, ui } = await booted();
+  await ui.type('half');
+  model.release();
+  await settleUntil(() => parked() && frameOf(ui).includes(HELD));
+  expect(frameOf(ui)).toContain(HELD);
+
+  // The grace keys on the last KEY the chat took and not on the field's emptiness: the run
+  // that erases the draft through empty keeps the keys, so the retyping that follows the
+  // emptying is the field's and the question takes nothing mid-run — not the emptying
+  // keystroke's keys, not the letters behind it.
+  await ui.press('backspace');
+  await ui.press('backspace');
+  await ui.press('backspace');
+  await ui.press('backspace');
+  await ui.type('way');
+  await settle(2);
+  expect(rowsOf(ui).some((r) => /^\s*│ › way/.test(r))).toBe(true); // the chat's own field row
+  expect(frameOf(ui)).toContain(HELD);
+  expect(frameOf(ui)).not.toContain('1. rebase');
+  ui.app.unmount();
+});
+
 test('a collapsed chat names the question that waits', async () => {
   const { model, ui } = await booted('panel');
   await ui.type('half');

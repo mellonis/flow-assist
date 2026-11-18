@@ -28,6 +28,8 @@ const pause = () => { clock.t += 700; };
 const BLOCK = 'Confirm write: run_command';
 const title = (label: string) => `? from «${label}»`;
 const notice = (label: string) => `a question from «${label}» waits — clear the field to answer it`;
+// The strip that stands where the block will claim while the typing grace holds it back.
+const STRIP = '? a question is waiting';
 const ynNotice = (label: string) => `${label} waits for a y/n — clear the line to answer`;
 const OWN_Q = 'Pick one?';
 // The session's own question is UP — its two options are drawn, so it still takes the
@@ -322,7 +324,7 @@ test('the session\'s y/n arriving over a drawn subagent question is armed too; t
 }, 20_000);
 
 // ─── a question appearing while the person types ─────────────────────────────────────
-test('a draft that stays after the question came: clearing the field draws the block, and the key right after the clearing is a letter, however long the question has been up', async () => {
+test('a draft that stays after the question came: the run that erases it keeps the keys (the strip stands, the block waits), the key right after the emptying is the field\'s letter however long the question has been up, and after a pause the typed answer goes through', async () => {
   const rig = await boot([{ mark: 'DRAFT', kind: 'ask' }]);
   await spawn(rig, 0);
   await rig.ui.type('hi'); // the draft, before the request
@@ -332,14 +334,21 @@ test('a draft that stays after the question came: clearing the field draws the b
   pause();
   pause();
   await rig.ui.press('backspace', 'backspace'); // the second key clears the field
-  await settleUntil(() => shows(rig.ui, rig.kids[0]!));
+  // The grace keys on the last KEY: the keystroke run that erases the draft holds the
+  // block off through the emptying — the strip stands where it will claim.
+  await settle(4);
+  expect(frameOf(rig.ui)).toContain(STRIP);
+  expect(shows(rig.ui, rig.kids[0]!)).toBe(false);
   await rig.ui.press('q');
   await settle(4);
   expect(answered(rig, 0)).toBe(false);
   expect(frameOf(rig.ui)).toContain(notice(labelOf('DRAFT'))); // the q went to the field
   await rig.ui.press('backspace');
+  await settle(4);
+  expect(frameOf(rig.ui)).toContain(STRIP); // the run's grace holds the block back still
+  expect(shows(rig.ui, rig.kids[0]!)).toBe(false);
+  pause(); // the run is over: past the grace the block draws and takes the keys
   await settleUntil(() => shows(rig.ui, rig.kids[0]!));
-  pause();
   await rig.ui.type('now');
   await rig.ui.press('return');
   await settleUntil(() => answered(rig, 0));

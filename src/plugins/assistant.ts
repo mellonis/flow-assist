@@ -2873,11 +2873,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The guard counts a block only while the chat has the keyboard: with the plugin,
           // the runtime's panel or the `:` line holding the keys, it is told nothing is
           // shown, and getting the keyboard back arms afresh.
-          // Its window runs from the takeover — the moment the block is DRAWN in the field's
-          // place and takes the keys (ask-children-spec.md (subagent y/n): an answer counts
-          // 600 ms after the request "first came on screen with the keyboard in the chat").
-          // A request standing beside a draft as the notice line is not that moment: the
-          // guard is shown none, and the pause is owed again when the block draws.
+          // What it is shown is the request whose block owns the field's place — the shape
+          // `block`: beside an empty field that is true whatever the typing grace draws (a
+          // held ask keeps only the strip on screen and is shown to the guard all the
+          // same), while beside a draft the notice line stands instead and the guard is
+          // shown none, so the pause is owed again where the notice ends (ask-children-spec.md
+          // (subagent y/n)).
           const guardSees = (c: Offered | null, from: 'session' | 'watch' = 'session'): object | null => {
             if (!c || !focusedRef.current || hostKeys().panel || hostKeys().line) return null;
             const w = dock?.panel.width ?? width;
@@ -3186,7 +3187,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
               // ↓ on an empty field with no history entry shown (before this key) steps into the
               // tree rows, when any are drawn: a handoff to another holder, not editing — the
-              // rows keep the key and nothing here re-arms the grace.
+              // rows keep the key and nothing here re-arms the grace. Like the holders above it
+              // returns before the Esc-Esc disarm below, and the rows' own keys disarm there.
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
                 const first = treeStops()[0];
                 if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); return true; }
@@ -3208,13 +3210,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   histShown.current = '';
                   setBangLevel(0);
                   stampTyping();
+                  disarmEsc();
                   setField(conv.takeBackLast()!);
                   return true;
                 }
                 const hist = conv.prompts;
                 const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
                 if (untouched) {
-                  if (!hist.length) return true;
+                  if (!hist.length) { disarmEsc(); return true; }
                   const at = histAt.current;
                   const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
                   histAt.current = next;
@@ -3231,6 +3234,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     stampTyping();
                   }
                   setField(histShown.current);
+                  disarmEsc();
                   return true;
                 }
               }
@@ -3239,7 +3243,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // Esc. Every one of them is typing and re-arms the grace a waiting question
               // owes the sentence; the holders above — a question, a y/n, the tree and the
               // walk into it, a subagent's ask, a panel, the picker, the pager, a watch, the
-              // other side — returned before this line and re-arm nothing.
+              // other side — returned before this line and re-arm nothing. The ↑/↓ group
+              // between them and this line splits: its recall is typing and stamps where it
+              // edits above, its walk back onto the line it already holds and its handoff to
+              // the tree rows are not.
               stampTyping();
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();

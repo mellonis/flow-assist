@@ -35,7 +35,9 @@
   notice). A chat that is already a window shows the block there. Only `y` and `n`, only on an empty field with the block drawn,
   answer it, and only after a pause: `src/assistant/child-ask-guard.ts` — an answer counts
   600 ms after the request first came on screen with the keyboard in the chat (a request
-  seen anew after a gap with none shown, or a different one, arms from then) and 600 ms
+  seen anew after a gap with none shown, or a different one, arms from then; on screen
+  means the block owning the field's place — beside a draft the notice stands instead and
+  the clock starts where the notice ends) and 600 ms
   after the person's last key of any kind: every key the chat handler gets is noted, and
   so is every key the App takes first (`store.chat.noteKey`, from `keyPath.first` when it
   consumes a key). While the chat lacks the keyboard — collapsed, the plugin's side
@@ -61,7 +63,8 @@
   where the block has no room the notice reads `a question from «<label>» waits — no room to show it; /subagent stop <label> declines it`. The session's own y/n and its own
   question come first, then the oldest child request of either kind; an own request that takes the place of a drawn
   child's block, y/n or question, is armed for 600 ms as above, and a child's typed answer owes the pause again after
-  its block was away. The first key of the answer counts after the guard's pause (an earlier key is the field's, as a
+  its block was away (the grace serves that pause for a request the typing grace holds
+  back: the window runs from the notice's end). The first key of the answer counts after the guard's pause (an earlier key is the field's, as a
   `y` is); once one counted, the rest is typed without it. Every key then goes to the question's state machine
   (`askKey`), ⏎ answers it and Esc, even after text was typed, settles it with the no-answer text; the answer goes to the owner's
   `stepParentAsk`, never to the session's model. In a watch of the asking node (or above it) the block is
@@ -73,7 +76,9 @@
   the person — takes the keyboard only once the last key the chat took is older than the
   grace, and never while the `:` line is open, since a half-written command is a long
   thought. While the grace holds it the field keeps every key and each such key re-arms the
-  grace (the key that sends a message clears it: the sentence went), the block is not drawn
+  grace (the key that sends a message clears it: the sentence went; a ↑/↓ walk that lands
+  where it started recalls nothing, and a key that hands over to the tree rows is the
+  handoff it is — neither is a key of the field's editing and neither re-arms), the block is not drawn
   in the field's place, and the strip above the field — or, with the chat collapsed, its
   status — says `? a question is waiting`; a one-shot unref'd timer re-runs the claim when
   the person goes quiet. A key a block, a picker, a panel or a reader (the pager, a watch)
