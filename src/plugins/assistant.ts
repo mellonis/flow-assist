@@ -2698,12 +2698,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // older than ASK_GRACE_MS, and never while the `:` line is open — a half-written
           // command is a long thought.
           const graceLeft = (): number => ASK_GRACE_MS - (askClock.now() - lastKeyAt.current);
-          // The grace waits out the sentence the person is TYPING (ask-children-spec.md
-          // (subagent y/n)): with an empty field there is no sentence to finish, so a key
-          // that only walked away from the field — ↑/↓ into the history or the tree rows,
-          // a key the editor never saw — is no typing and the claim runs at once. A
-          // half-written `:` command is a sentence of its own: its line holds the claim.
-          const claimHeld = (): boolean => hostKeys().line || (graceLeft() > 0 && !fieldEmpty());
+          // The grace takes the keyboard only once the last key the chat took is older than
+          // `ASK_GRACE_MS` (ask-children-spec.md (subagent y/n)) — every key the chat takes
+          // while editing counts, Tab, ↑/↓ recall and token-Backspace included, whatever the
+          // field holds after it. Only a half-written `:` command is a sentence of its own,
+          // held in its line's place.
+          const claimHeld = (): boolean => hostKeys().line || graceLeft() > 0;
           // The session's own question, held.
           const ownHeld = (): boolean => claimHeld() && !!convRef.current!.question;
           // Any question the grace holds back — the session's own or a subagent's.
@@ -2873,16 +2873,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The guard counts a block only while the chat has the keyboard: with the plugin,
           // the runtime's panel or the `:` line holding the keys, it is told nothing is
           // shown, and getting the keyboard back arms afresh.
-          // Its window runs from the takeover — the moment the block is DRAWN and takes the
-          // keys (ask-children-spec.md (subagent y/n): an answer counts 600 ms after the
-          // request "first came on screen with the keyboard in the chat"). A request the
-          // typing grace holds back, or one standing beside a draft as the notice line, is
-          // not that moment: the guard is shown none, and the pause is owed again when the
-          // block draws.
+          // Its window runs from the takeover — the moment the block is DRAWN in the field's
+          // place and takes the keys (ask-children-spec.md (subagent y/n): an answer counts
+          // 600 ms after the request "first came on screen with the keyboard in the chat").
+          // A request standing beside a draft as the notice line is not that moment: the
+          // guard is shown none, and the pause is owed again when the block draws.
           const guardSees = (c: Offered | null, from: 'session' | 'watch' = 'session'): object | null => {
             if (!c || !focusedRef.current || hostKeys().panel || hostKeys().line) return null;
             const w = dock?.panel.width ?? width;
-            const drawn = from === 'watch' ? watchAskShape(w) === 'block' : childShape(w) === 'block' && !childHeldNow(c, w);
+            const drawn = from === 'watch' ? watchAskShape(w) === 'block' : childShape(w) === 'block';
             return drawn ? c.request : null;
           };
           const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
@@ -3185,12 +3184,62 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
+              // ↓ on an empty field with no history entry shown (before this key) steps into the
+              // tree rows, when any are drawn: a handoff to another holder, not editing — the
+              // rows keep the key and nothing here re-arms the grace.
+              if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
+                const first = treeStops()[0];
+                if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); return true; }
+              }
+              // ── ↑/↓ — prompt history, but only while the field is empty or still shows
+              // the history entry untouched; in a draft they move the caret between its rows
+              // (the editor below), so a draft is never replaced. A `!cmd`/`!!cmd` entry (how
+              // a shell command is stored, see `runShell`, src/assistant/conversation-shell.ts)
+              // is shown the way it was typed: the matching bang level, the field holding
+              // `cmd` with its bang(s) stripped. A recall edits the field and owes the grace
+              // like every key below; a walk that lands where it started recalls nothing and
+              // re-arms nothing.
+              if (key.name === 'up' || key.name === 'down') {
+                // ↑ on an EMPTY field takes the last queued message back for editing,
+                // before history — which it reaches once the queue is empty. The bang
+                // level goes to 0: a message is not a command.
+                if (key.name === 'up' && inputRef.current === '' && conv.queue.length) {
+                  histAt.current = null;
+                  histShown.current = '';
+                  setBangLevel(0);
+                  stampTyping();
+                  setField(conv.takeBackLast()!);
+                  return true;
+                }
+                const hist = conv.prompts;
+                const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
+                if (untouched) {
+                  if (!hist.length) return true;
+                  const at = histAt.current;
+                  const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
+                  histAt.current = next;
+                  const raw = next == null ? '' : hist[next]!;
+                  const { level, cmd: shown } = decodeBangLine(raw);
+                  histShown.current = shown;
+                  setBangLevel(level);
+                  // No list and no rest on a recalled line (`ListState.fromHistory`).
+                  if (shown !== inputRef.current) {
+                    listRef.current.fromHistory = true;
+                    // A recall — or the walk off history's end, which empties the field —
+                    // is the person editing and owes the grace; a walk back onto the line
+                    // it already holds is not.
+                    stampTyping();
+                  }
+                  setField(histShown.current);
+                  return true;
+                }
+              }
               // ── From here the key is the person's own composition: the bang level, an
-              // attached image, completion, history, the folds, the field's editing and its
+              // attached image, completion, the folds, the field's editing and its
               // Esc. Every one of them is typing and re-arms the grace a waiting question
-              // owes the sentence; the holders above — a question, a y/n, the tree, a
-              // subagent's ask, a panel, the picker, the pager, a watch, the other side —
-              // returned before this line and re-arm nothing.
+              // owes the sentence; the holders above — a question, a y/n, the tree and the
+              // walk into it, a subagent's ask, a panel, the picker, the pager, a watch, the
+              // other side — returned before this line and re-arm nothing.
               stampTyping();
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
@@ -3325,47 +3374,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   }
                 } else tabRef.current = null;
                 return true;
-              }
-              // ── ↑/↓ — prompt history, but only while the field is empty or still shows
-              // the history entry untouched; in a draft they move the caret between its
-              // rows (the editor below), so a draft is never replaced. A `!cmd`/`!!cmd`
-              // entry (how a shell command is stored, see `runShell`, src/assistant/
-              // conversation-shell.ts) is shown the way it was typed: the matching bang
-              // level, the field holding `cmd` with its bang(s) stripped.
-              if (key.name === 'up' || key.name === 'down') {
-                // ↑ on an EMPTY field takes the last queued message back for editing,
-                // before history — which it reaches once the queue is empty. The bang
-                // level goes to 0: a message is not a command.
-                if (key.name === 'up' && inputRef.current === '' && conv.queue.length) {
-                  histAt.current = null;
-                  histShown.current = '';
-                  setBangLevel(0);
-                  setField(conv.takeBackLast()!);
-                  return true;
-                }
-                // ↓ on an empty field with no history entry shown (before this key) steps into
-                // the tree rows, when any is drawn. The ↓ that ends a history walk is the
-                // history's: it lands on the empty field, and the next one enters.
-                if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
-                  const first = treeStops()[0];
-                  if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); return true; }
-                }
-                const hist = conv.prompts;
-                const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
-                if (untouched) {
-                  if (!hist.length) return true;
-                  const at = histAt.current;
-                  const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
-                  histAt.current = next;
-                  const raw = next == null ? '' : hist[next]!;
-                  const { level, cmd: shown } = decodeBangLine(raw);
-                  histShown.current = shown;
-                  setBangLevel(level);
-                  // No list and no rest on a recalled line (`ListState.fromHistory`).
-                  if (shown !== inputRef.current) listRef.current.fromHistory = true;
-                  setField(histShown.current);
-                  return true;
-                }
               }
               // `details` — the master switch: with anything folded it opens
               // everything, pressed again it closes everything, and either way the

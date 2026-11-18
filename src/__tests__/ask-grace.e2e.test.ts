@@ -1,8 +1,12 @@
 // The typing grace (ask-children-spec.md (subagent y/n)): a question that parks while the person
 // is still typing waits out the sentence — the field keeps the keys and says so — and
-// takes the keyboard once the typing stops. Timing is split: `askClock` is faked and moved
-// by hand, and the one-shot timer is a real `setTimeout`, so a test that crosses the grace
-// polls in `settle`'s 4 ms steps (up to ~2.4 s) for the real 600 ms timer to fire.
+// takes the keyboard once the typing stops. The rule is the last KEY, not the field's
+// content: the question takes the keyboard only once the last key the chat took is older
+// than the grace, and every key the chat takes while editing counts — Tab, ↑/↓ recall and
+// token-Backspace included — whatever the field holds after it. Timing is split: `askClock`
+// is faked and moved by hand, and the one-shot timer is a real `setTimeout`, so a test that
+// crosses the grace polls in `settle`'s 4 ms steps (up to ~2.4 s) for the real 600 ms timer
+// to fire.
 import { afterEach, expect, test } from 'bun:test';
 import { ASK_GRACE_MS, askClock } from '../assistant/child-ask-guard.ts';
 import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
