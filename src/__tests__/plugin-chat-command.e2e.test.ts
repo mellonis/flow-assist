@@ -58,11 +58,14 @@ test('/name runs a plugin command marked for the chat; its later words complete;
   expect(state.ran).toEqual(['chat:restart safari']);
   expect(frame(ui)).toContain('[srv] restarting safari');
   ui.app.unmount();
-  // An unknown command names the plugin's among the ones there are.
-  const wide = await bootApp(new ScriptedModel(), 300, 30, guest({ ran: [] }));
+  // An unknown command names the plugin's among the ones there are. The list is one row,
+  // cut to the frame's width: the boot is wide enough to hold every command there is (and
+  // some room for the next), or the row would end mid-list and the tail would mean nothing.
+  const wide = await bootApp(new ScriptedModel(), 640, 30, guest({ ran: [] }));
   await wide.press('F');
   await wide.type('/nope');
   await wide.press('return');
+  expect(frame(wide)).toMatch(/unknown command \/nope — available: /);
   expect(frame(wide)).toMatch(/unknown command \/nope — available: .*\/exit, \/plugins, \/srv/);
   wide.app.unmount();
 });

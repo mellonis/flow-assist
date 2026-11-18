@@ -175,15 +175,31 @@ test('the list keeps its place while typing narrows it, and a count says where t
   expect(rows(ui)).toHaveLength(before);
   ui.app.unmount();
 
-  // More candidates than eight rows: a count, scrolling around the selection.
+  // More candidates than eight rows: a count, scrolling around the selection. The count
+  // row is drawn just above the field's. It is the app's own tally of the command list —
+  // its denominator is read from the frame, since the list grows with every command added
+  // — while the numerator says where the selection is, which is what the count is for.
   const big = await bootApp(new ScriptedModel(), 100, 30);
   await big.press('F');
   await big.type('/');
-  expect(big.backend.lastFrame).toContain('1/25');
+  const countOf = (ui: Ui) => {
+    const lines = rows(ui);
+    const field = lines.findLastIndex((r) => r.includes('› '));
+    const m = field > 0 ? /(\d+)\/(\d+)/.exec(lines[field - 1]!) : null;
+    return m ? [Number(m[1]), Number(m[2])] as [number, number] : null;
+  };
+  const start = countOf(big);
+  expect(start).not.toBeNull();
+  const [at, total] = start!;
+  expect(at).toBe(1);
+  expect(total).toBeGreaterThan(8); // the count row is drawn only past the rows the list shows
   await big.press('up');
-  expect(big.backend.lastFrame).toContain('25/25');
+  expect(countOf(big)).toEqual([total, total]); // ↑ wraps to the last of the same list
   expect(big.backend.lastFrame).toMatch(/exit +close the chat/);
   expect(big.backend.lastFrame).not.toMatch(/compact +fold/);
+  await big.press('down');
+  expect(countOf(big)).toEqual([1, total]); // and the count follows the selection back
+  expect(big.backend.lastFrame).toMatch(/compact +fold/);
   big.app.unmount();
 });
 
