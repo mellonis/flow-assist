@@ -57,3 +57,24 @@ dispatcher; or a full daemon with an attachable client — large, because a scre
 state lives in the React tree today, so the host would have to be split into a brain
 process and a thin view. Take the socket if the need is stopping work and answering a
 y/n from the menu bar.
+
+---
+
+## The lead-in of a child's question (2026-11)
+
+### A subagent's question shows its block but not what led to it
+
+The chat-ux batch (2026-11-17) makes the narration that leads into a pending question
+read at full ink and gives an answered question a ground of its own — for the
+**session's own** `ask_user` questions only. A child's `ask_parent` question keeps its
+block-and-answer flow: its narration lives in the watch view and stays folded and dim
+there, so the same "why is it asking?" gap remains beside a waiting subagent.
+
+**Hit when:** scoping the chat-ux batch — the person chose to cover their own
+questions first, since the child's question already surfaces and its answer returns
+to the child.
+
+**Action:** when the watch view draws a waiting child question, lift the dim/fold on
+the child's narration run before it exactly as `askPending` does in the chat's row
+building; a child question that was already answered can carry the same ground the
+session's answered rows carry. Small, and it rides the same display-flag seam.

@@ -6,7 +6,8 @@ import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
-import { askStart } from '../../assistant/ask.js';
+import { askKey, askStart, type AskState } from '../../assistant/ask.js';
+import { keyGlyph } from '../../playback/keys.js';
 import { bumpViewRevision } from '../../assistant/views.js';
 import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
@@ -79,6 +80,108 @@ test('chat marks a background result with its own marker and ground, never as th
   expect(cell.fg).toBe('magenta');
   expect(cell.bg).toBe('#2a2438');
   expect(cell.bg).not.toBe('#2b2b40');
+  handle.unmount();
+});
+
+// A kept question and its answer are one block, not two loose lines: both rows sit on
+// a quiet ground of their own, the question and the answer in `askInk`. A dismissed
+// answer keeps the ground and its ink steps back, so a question nobody answered is
+// still one band on the screen.
+test('answered question rows carry the ask ground', async () => {
+  // Colours the test can tell apart from every other ground and ink the chat ships: the
+  // rows take the palette's tokens, whatever a scheme's own values are.
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const messages = [
+    { role: 'ask', content: 'Which branch?', answer: 'master' },
+    { role: 'ask', content: 'Which checks?', answer: 'dismissed', dismissed: true },
+  ];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      theme: { modals: { chat } },
+      messages,
+    }),
+    backend,
+  );
+  const lines = backend.lastFrame.split('\n');
+  const find = (needle: string) => {
+    const y = lines.findIndex((r) => r.includes(needle));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const row = lines[y]!;
+    return { y, row, x: row.indexOf(needle) };
+  };
+  const styleAt = (needle: string) => {
+    const { y, x } = find(needle);
+    return backend.lastBuffer!.get(x, y).style;
+  };
+  // The question and its answer on one ground, in the palette's own ink.
+  const question = styleAt('Which branch?');
+  expect(question.bg).toBe(chat.askBg);
+  expect(question.fg).toBe(chat.askInk);
+  const answer = styleAt('master');
+  expect(answer.bg).toBe(chat.askBg);
+  expect(answer.fg).toBe(chat.askInk);
+  expect(answer.dim).toBeFalsy();
+  // The ground runs across the message column, so the pair reads as one band while
+  // scanning — not a tint that stops at the end of the words.
+  const { y, row, x } = find('Which branch?');
+  const border = row.lastIndexOf('│');
+  const right = border >= 0 ? border - 2 : row.trimEnd().length - 1;
+  expect(right).toBeGreaterThan(x + 'Which branch?'.length);
+  expect(backend.lastBuffer!.get(right, y).style.bg).toBe(chat.askBg);
+  // The gutters keep their place and their glyphs: `?` over the question, `→` under it,
+  // both painted on the same band.
+  expect(lines[y]![x - 2]).toBe('?');
+  expect(backend.lastBuffer!.get(x - 2, y).style.bg).toBe(chat.askBg);
+  const arrow = find('master');
+  expect(lines[arrow.y]![arrow.x - 2]).toBe('→');
+  expect(backend.lastBuffer!.get(arrow.x - 2, arrow.y).style.bg).toBe(chat.askBg);
+  // A dismissed answer keeps the ground and dims its ink.
+  const gone = styleAt('dismissed');
+  expect(gone.bg).toBe(chat.askBg);
+  expect(gone.fg).toBe(chat.askInk);
+  expect(gone.dim).toBe(true);
+  handle.unmount();
+  // The palette is read when the row is drawn: changing a token repaints the rows the
+  // conversation already has, with no reload.
+  const second = new TestBackend(80, 24);
+  const again = await render(
+    h(renderChatModal, { ...baseChat, theme: { modals: { chat: { ...chat, askBg: 'red', askInk: 'green' } } }, messages }),
+    second,
+  );
+  const repainted = second.lastFrame.split('\n');
+  const y2 = repainted.findIndex((r) => r.includes('Which branch?'));
+  const cell = second.lastBuffer!.get(repainted[y2]!.indexOf('Which branch?'), y2).style;
+  expect(cell.bg).toBe('red');
+  expect(cell.fg).toBe('green');
+  again.unmount();
+});
+
+// A question or an answer wider than the column wraps: every row of the pair keeps the
+// band, out to the column's edge — not only the first row of each.
+test('a wrapped question paints the ask ground on every continuation row', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      theme: { modals: { chat } },
+      messages: [{ role: 'ask', content: 'q'.repeat(160), answer: 'a'.repeat(160) }],
+    }),
+    backend,
+  );
+  const lines = backend.lastFrame.split('\n');
+  const rowsOf = (ch: string) => lines.map((row, i) => ({ row, i })).filter(({ row }) => row.includes(ch.repeat(3)));
+  const pair = [...rowsOf('q'), ...rowsOf('a')];
+  const q = rowsOf('q').length;
+  expect(q).toBeGreaterThan(1);
+  expect(rowsOf('a').length).toBeGreaterThan(1);
+  for (const { row, i } of pair) {
+    const border = row.lastIndexOf('│');
+    const right = border >= 0 ? border - 2 : row.trimEnd().length - 1;
+    expect(backend.lastBuffer!.get(right, i).style.bg).toBe(chat.askBg);
+  }
   handle.unmount();
 });
 
@@ -806,6 +909,94 @@ test("a folded run's ✗ carries the trail's tone: warn when the same tool recov
   expect(markOf([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).toBe('error');
 });
 
+// ─── The lead-in above a pending question (ticket 5) ─────────────────────────
+// The narration that led into an `ask_user` call is the context the question is read
+// against, so while the question waits its last run draws unfolded and at full ink. A
+// display condition only: the fold state is untouched, and the moment the question is
+// answered the run folds again with the turn's older runs.
+const LEAD_PARTS = [
+  { kind: 'text', text: 'Read the log first.' },
+  { kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] },
+  { kind: 'reasoning', text: 'Weighing the branch.' },
+  { kind: 'text', text: 'The branch is unclear.' },
+  // A round that wrote nothing before the ask: its calls are a segment of their own.
+  { kind: 'text', text: '' },
+  { kind: 'tools', runs: [{ name: 'ask_user', outcome: 'ok' }] },
+];
+const leadMsg = { role: 'assistant', content: '', parts: LEAD_PARTS };
+const leadOpts = (askPending?: boolean): RowOpts => ({
+  wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o',
+  renderers: {}, now: 0, palette: {}, ...(askPending ? { askPending } : {}),
+});
+// The chat drawn with the question in the field's place, at the ink it uses for a row.
+const leadFrame = async (extra: Record<string, unknown>) => {
+  const backend = new TestBackend(120, 30);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 120, height: 30, messages: [leadMsg],
+    pendingQuestion: askStart([{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }]),
+    ...extra,
+  } as never), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean } } } }).lastBuffer;
+  const dimAt = (text: string) => {
+    const y = lines.findIndex((l) => l.includes(text));
+    return y < 0 ? null : grid.get(lines[y]!.indexOf(text), y).style.dim === true;
+  };
+  handle.unmount();
+  return { lines, dimAt };
+};
+
+test('the run before a pending question draws open and lit', async () => {
+  // Folded: two chrome rows — one per run — and the thought between them.
+  const folded = chatRows([leadMsg] as never, leadOpts());
+  const foldedText = folded.map(rowText);
+  expect(foldedText).toContain('▸ Read the log first.');
+  expect(foldedText).toContain('▸ The branch is unclear.');
+  expect(folded.some((r) => r.reasonHeader)).toBe(true);
+  expect(folded.some((r) => r.reason)).toBe(false);
+
+  // The question waits: the last run — the one the ask follows — draws each step in
+  // full at full ink, and keeps its fold id so a click still folds it. The older run
+  // and the thought keep their folded look.
+  const lit = chatRows([leadMsg] as never, leadOpts(true));
+  const litText = lit.map(rowText);
+  expect(litText).toContain('The branch is unclear.');
+  const lead = lit.find((r) => rowText(r) === 'The branch is unclear.');
+  expect(lead?.quiet).not.toBe(true);
+  expect(lead?.step).not.toBe(true);
+  expect(lead?.fold).toBe('0:steps:1');
+  expect(litText).toContain('▸ Read the log first.');
+  expect(lit.some((r) => r.reasonHeader)).toBe(true);
+  expect(lit.some((r) => r.reason)).toBe(false);
+
+  // On the screen, one question or a wizard alike: the block in the field's place says
+  // nothing about the rows — `pendingQuestion` alone leaves them folded, and only the
+  // transcript's own flag lights the run. Lit, the run's rows are at full ink and the
+  // folded run beside them is dim.
+  const waiting = await leadFrame({});
+  expect(waiting.dimAt('▸ The branch is unclear.')).toBe(true);
+  const litFrame = await leadFrame({ askPending: true });
+  expect(litFrame.dimAt('The branch is unclear.')).toBe(false);
+  expect(litFrame.dimAt('▸ Read the log first.')).toBe(true);
+  expect(litFrame.dimAt('▸ thought')).toBe(true);
+});
+
+test('the lead-in lights under a message drawn after it, and nowhere else', () => {
+  // A view or a note lands below the turn's narration (a command's block, /compact's
+  // line); the question is still read against the narration above it.
+  const note = { role: 'note', content: 'compacted', summary: 'kept 12 messages' };
+  const lit = chatRows([leadMsg, note] as never, leadOpts(true)).map(rowText);
+  expect(lit).toContain('The branch is unclear.');
+  expect(lit).toContain('▸ Read the log first.');
+  // Without the flag, the same list folds it again.
+  const folded = chatRows([leadMsg, note] as never, leadOpts()).map(rowText);
+  expect(folded).toContain('▸ The branch is unclear.');
+  // And an older turn is never the one lit: only the newest assistant message is.
+  const older = { role: 'assistant', content: 'Done.' };
+  const both = chatRows([leadMsg, older] as never, leadOpts(true)).map(rowText);
+  expect(both).toContain('▸ The branch is unclear.');
+});
+
 test('the chat title that fits by clusters is not cut', async () => {
   // 46 cells by clusters, 106 summed per code point; the title has 72.
   const subject = FAMILY.repeat(15);
@@ -1359,4 +1550,80 @@ test('the body is one walk: the files ↑/↓ move among, in the drawn order, an
   const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40, gitless: false, failed: false });
   expect(gone.cursorRow).toBe(-1);
   expect(gone.rows).toHaveLength(4);
+});
+
+// ─── The question wizard (ticket 4) ─────────────────────────────────────────
+// A call with more than one question is a wizard: one page per question under a tab
+// strip, then a submit page that shows what its Enter will send. The single-question
+// box has no strip and no submit page, and draws as it always has.
+type AskGrid = { width: number; height: number; get(x: number, y: number): { char: string; style: { inverse?: boolean; dim?: boolean } } };
+const twoQuestions = () => askStart([
+  { question: 'Which one?', header: 'First', options: [{ label: 'alpha' }, { label: 'beta' }] },
+  { question: 'Where?', header: 'Second', options: [{ label: 'x' }, { label: 'y' }] },
+]);
+const askFrame = async (state: AskState, width = 120) => {
+  const backend = new TestBackend(width, 30);
+  const handle = await render(h(renderChatModal, { ...baseChat, width, height: 30, pendingQuestion: state } as never), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: AskGrid }).lastBuffer;
+  handle.unmount();
+  return { lines, grid };
+};
+
+test('a one-question box keeps its own hint and grows no strip', async () => {
+  const one = askStart([{ question: 'Which one?', header: 'First', options: [{ label: 'alpha' }, { label: 'beta' }] }]);
+  const { lines } = await askFrame(one);
+  const text = lines.join('\n');
+  // The single question answers in its own keys — the digits still pick — and has no
+  // pages to walk and no strip to walk them on.
+  expect(text).toContain(`${keyGlyph('up')}${keyGlyph('down')} move · ${keyGlyph('return')} or a digit to answer · type your own words · ${keyGlyph('escape')} dismiss`);
+  expect(text).not.toContain('←→');
+  expect(text).not.toContain('✓');
+});
+
+test('the ask box draws the tabs strip and the submit page', async () => {
+  // Page one answered with its first option, so the strip says so on page two.
+  const answered = askKey(twoQuestions(), { name: '1' });
+  const { lines, grid } = await askFrame(answered);
+  const stripY = lines.findIndex((l) => l.includes('✓ First') && l.includes('Second'));
+  expect(stripY).toBeGreaterThanOrEqual(0);
+  const x = (text: string) => lines[stripY]!.indexOf(text);
+  const inverseAt = (text: string) => {
+    for (let i = 0; i < text.length; i++) if (grid.get(x(text) + i, stripY).style.inverse) return true;
+    return false;
+  };
+  // One strip row: both tabs on it, the page on screen inverse, the answered one not.
+  expect(inverseAt('Second')).toBe(true);
+  expect(inverseAt('First')).toBe(false);
+  expect(lines.join('\n')).toContain(
+    `${keyGlyph('left')}${keyGlyph('right')} questions · ${keyGlyph('up')}${keyGlyph('down')} move · ${keyGlyph('return')} answer · type your own words · ${keyGlyph('escape')} dismiss`);
+
+  // The submit page (page three of three): every question's title dim, its answer at
+  // full ink — or `(not answered)` dim — and the hint naming the keys that act there.
+  const submitting = askKey(answered, { name: 'right' });
+  const sub = await askFrame(submitting);
+  const row = (text: string) => sub.lines.findIndex((l) => l.includes(text));
+  const dimAt = (text: string) => sub.grid.get(sub.lines[row(text)]!.indexOf(text), row(text)).style.dim === true;
+  expect(row('First — Which one?')).toBeGreaterThanOrEqual(0);
+  expect(dimAt('First — Which one?')).toBe(true);
+  expect(dimAt('alpha')).toBe(false);
+  expect(dimAt('Second — Where?')).toBe(true);
+  expect(dimAt('(not answered)')).toBe(true);
+  expect(sub.lines.findIndex((l) => l.includes('✓ First') && l.includes('Submit'))).toBeGreaterThanOrEqual(0);
+  const text = sub.lines.join('\n');
+  expect(text).toContain(`${keyGlyph('left')}${keyGlyph('right')} questions · ${keyGlyph('return')} submit · ${keyGlyph('escape')} dismiss`);
+  // The page is the sum, not a question: no option list and no free-text row.
+  expect(text).not.toContain('Other…');
+
+  // A wide label is cut by cells, so the strip stays ONE row between the title and the
+  // list: a tab never pushes a row onto a second line.
+  const wide = askStart([
+    { question: 'One?', header: `${'🙂'.repeat(20)} first`, options: [{ label: 'a' }, { label: 'b' }] },
+    { question: 'Two?', header: `${'回答'.repeat(20)} second`, options: [{ label: 'a' }, { label: 'b' }] },
+    { question: 'Three?', header: 'third', options: [{ label: 'a' }, { label: 'b' }] },
+  ]);
+  const narrow = await askFrame(wide, 80);
+  const title = narrow.lines.findIndex((l) => l.includes('? 1/3'));
+  expect(title).toBeGreaterThanOrEqual(0);
+  expect(narrow.lines[title + 2]).toContain('1. a');
 });

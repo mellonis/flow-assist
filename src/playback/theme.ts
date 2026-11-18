@@ -138,7 +138,7 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   // no background; the full-width Box wrappers in the render carry it). Overridable
   // via config.plugins.chat.colors.userBg. If removed the background disappears,
   // leaving only the separators and the sticky dump without a background.
-  // The chat's own colours, every one overridable via config.plugins.assistant.colors:
+  // The chat's own colours, every one overridable via config.plugins.chat.colors:
   //   accent   — the `›` prompt, shared by the input field and the person's messages
   //   shell    — the `!`/`‼` prompt of shell/interactive mode, and a command's own
   //              `! `/`‼ ` marker while it still runs (pulsing) — so a shell command
@@ -152,18 +152,25 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   //   ok       — finished work, and a command's marker on exit 0
   //   idleBorder — the frame of a docked chat while the plugin has the keyboard; with
   //              it, the frame is in `accent`
-  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', idleBorder: 'gray' },
+  //   askBg    — the ground under a kept question and the answer it got: a quiet
+  //              slate-teal tint on black, its own band apart from the person's
+  //              violet bubble and a background result's plum ground
+  //   askInk   — the ink of those rows; a dismissed answer keeps the ground and dims it
+  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', idleBorder: 'gray', askBg: '#243036', askInk: '#dfe8e6' },
 };
 
-// The same for a light terminal (light grounds; accents dark enough to read on them),
-// and for an unknown one (no grounds of the chat's own).
+// The same for a light terminal (light grounds; accents dark enough to read on them) —
+// the ask ground is a pale teal over the light `#f4f4f6`, quieter than the person's
+// lavender and a background result's pink — and for an unknown one (no grounds of the
+// chat's own — a tint on a terminal colour nobody knows would be a blind guess, so the
+// ask rows keep the terminal's own).
 const LIGHT_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},
-  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', idleBorder: '#a0a0b0' },
+  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', idleBorder: '#a0a0b0', askBg: '#e3eeec', askInk: '#2b3f3b' },
 };
 const UNKNOWN_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},
-  chat: { ...MODAL_COLOR_DEFAULTS.chat, userBg: 'default', fieldBg: 'default', bgBg: 'default' },
+  chat: { ...MODAL_COLOR_DEFAULTS.chat, userBg: 'default', fieldBg: 'default', bgBg: 'default', askBg: 'default', askInk: 'default' },
 };
 
 export function modalColorDefaults(scheme: ColorScheme): Record<string, Record<string, string>> {

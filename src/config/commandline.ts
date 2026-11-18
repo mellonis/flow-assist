@@ -4,7 +4,12 @@
 // the selection, Tab and Enter take it, Esc closes it until the text changes, and the
 // inline rest shows the selected candidate. The list keeps one height while it is open,
 // so typing does not move the screen by a row at a time. While the list is closed (Esc)
-// Tab still takes the offer and walks the other candidates, one per press.
+// Tab still takes the offer and walks the other candidates, one per press. A line
+// recalled from ↑/↓ history is not one being typed: it opens no list and shows no rest
+// until a content edit — a typed character or a paste — clears the mark beside its
+// state (`ListState.fromHistory`). The hint the field draws beside it — the candidate's
+// label and the others Tab walks — stays on a recalled line, so a Tab that rewrites the
+// line is never silent.
 //
 // Pure: what to draw and what a key does are computed from the text and the list's
 // state, so both are tested without a terminal. The chat's field goes through the same
@@ -19,8 +24,12 @@ import type { CompleteResult } from './commands.js';
 export interface TabWalk { stem: string; head: string; idx: number; shown: string }
 
 export interface LineView {
-  // The untyped rest of the suggestion, drawn after the caret. '' when there is
-  // nothing to offer, or while walking (the line already holds a whole candidate).
+  // Where the caret sits in the input, as the editor's own index into it.
+  caret: number;
+  // The untyped rest of the suggestion, drawn at the end of the line where the caret
+  // sits. '' when there is nothing to offer, while walking (the line already holds a
+  // whole candidate), and anywhere but the end of the line: the rest belongs after
+  // the text, not mid-line.
   ghost: string;
   // What the offered candidate's label says (a session's title beside its number);
   // '' when it has none.
@@ -40,22 +49,27 @@ const walking = (input: string, walk: TabWalk | null): walk is TabWalk => !!walk
 
 const named = (c: string, labels: Record<string, string> | undefined) => (labels?.[c] ? `${c} ${labels[c]}` : c);
 
-export function lineView(input: string, walk: TabWalk | null, complete: Complete): LineView {
-  if (!input.trim()) return { ghost: '', label: '', others: [] };
+// A caret past either end of the line is the line's own end: the views are total
+// whatever the line's text did to the caret.
+const caretAt = (input: string, caret: number): number => Math.max(0, Math.min(input.length, caret));
+
+export function lineView(input: string, caret: number, walk: TabWalk | null, complete: Complete): LineView {
+  const at = caretAt(input, caret);
+  if (!input.trim()) return { caret: at, ghost: '', label: '', others: [] };
   if (walking(input, walk)) {
     // The candidates of the walk, taken from where it STARTED — from the line as it
     // stands they would narrow to the one Tab just picked.
     const comp = complete(walk.stem + walk.head);
     const all = comp.candidates;
     if (all.length > 1) {
-      const at = walk.idx % all.length;
-      return { ghost: '', label: comp.labels?.[all[at]!] ?? '', others: all.filter((_, i) => i !== at).map((c) => named(c, comp.labels)) };
+      const pick = walk.idx % all.length;
+      return { caret: at, ghost: '', label: comp.labels?.[all[pick]!] ?? '', others: all.filter((_, i) => i !== pick).map((c) => named(c, comp.labels)) };
     }
   }
   const comp = complete(input);
   const fits = comp.best && comp.best.toLowerCase().startsWith(comp.head.toLowerCase()) && input.endsWith(comp.head);
-  const ghost = fits ? comp.best.slice(comp.head.length) : '';
-  return { ghost, label: fits ? comp.labels?.[comp.best] ?? '' : '', others: comp.candidates.filter((c) => c !== comp.best).map((c) => named(c, comp.labels)) };
+  const ghost = fits && at === input.length ? comp.best.slice(comp.head.length) : '';
+  return { caret: at, ghost, label: fits ? comp.labels?.[comp.best] ?? '' : '', others: comp.candidates.filter((c) => c !== comp.best).map((c) => named(c, comp.labels)) };
 }
 
 export function lineTab(input: string, walk: TabWalk | null, complete: Complete): { input: string; walk: TabWalk | null } {
@@ -88,9 +102,11 @@ export const LIST_ROWS = 8;
 // the line is anything else the selection and the Esc are void. `sel` indexes the
 // candidates (-1: the completer's best), `moved` whether an arrow moved it since the
 // list opened or the text changed, `closed` is Esc, and `height` the rows the list has
-// needed since it opened, so it never shrinks while it is open.
-export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number }
-export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0 });
+// needed since it opened, so it never shrinks while it is open. `fromHistory` is a line
+// the person recalled with ↑/↓ — not one being typed — which opens no list and shows no
+// rest until a content edit clears the mark.
+export interface ListState { text: string; sel: number; moved: boolean; closed: boolean; height: number; fromHistory: boolean }
+export const newListState = (): ListState => ({ text: '', sel: -1, moved: false, closed: false, height: 0, fromHistory: false });
 
 export interface ListRow { value: string; detail: string }
 export interface CompletionList {
@@ -115,13 +131,13 @@ export interface CompletionList {
 }
 
 // The list for `input`, or null when none is open: fewer than two candidates, a line
-// the completion does not end, or one closed by Esc. Reading it syncs `state` to the
-// line — a changed line forgets the selection and the Esc — and keeps `height`, so it
-// is safe to call from both the drawing and the keys.
+// the completion does not end, one closed by Esc, or one recalled from history. Reading
+// it syncs `state` to the line — a changed line forgets the selection and the Esc — and
+// keeps `height`, so it is safe to call from both the drawing and the keys.
 export function openList(input: string, state: ListState, complete: Complete): CompletionList | null {
   if (state.text !== input) { state.text = input; state.sel = -1; state.moved = false; state.closed = false; }
   const shut = () => { state.height = 0; state.moved = false; return null; };
-  if (state.closed || !input.trim()) return shut();
+  if (state.closed || state.fromHistory || !input.trim()) return shut();
   const comp = complete(input);
   const all = comp.candidates;
   if (all.length < 2 || !input.endsWith(comp.head)) return shut();
@@ -187,9 +203,16 @@ function take(input: string, state: ListState, list: CompletionList, complete: C
 }
 
 // The line as drawn: the list's selection as the inline rest, or the inline view alone
-// while no list is open.
-export function lineViewWithList(input: string, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
+// while no list is open. Both belong to the line's LAST word, so they hold only while
+// the caret is at the end: mid-line the rows, the ⏎/Tab take and the rest would all
+// target the wrong word, and the rest would be spliced in at the caret. A line recalled
+// from history offers neither the rows nor the rest; the hint beside it stays, so Tab's
+// rewriting is never silent.
+export function lineViewWithList(input: string, caret: number, walk: TabWalk | null, state: ListState, complete: Complete): { view: LineView; list: CompletionList | null } {
   const once = lastOnly(complete);
-  const list = openList(input, state, once);
-  return list ? { view: { ghost: list.ghost, label: list.label, others: [] }, list } : { view: lineView(input, walk, once), list: null };
+  const at = caretAt(input, caret);
+  const list = at === input.length ? openList(input, state, once) : null;
+  if (list) return { view: { caret: at, ghost: list.ghost, label: list.label, others: [] }, list };
+  const view = lineView(input, caret, walk, once);
+  return { view: state.fromHistory && view.ghost ? { ...view, ghost: '' } : view, list: null };
 }

@@ -14,7 +14,7 @@
 //   - `theme` may be undefined / lack a resolved `modals` map, so every
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
-import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { askRows, askSubmitRows, askTabs, type AskRow, type AskState, type AskSubmitRow, type AskTab } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
 import type { TreeRow } from '../assistant/agent-tree.js';
@@ -521,6 +521,7 @@ const CAP = {
   tab: keyGlyph('tab'),
   space: keyGlyph(' '),
   upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
+  leftRight: `${keyGlyph('left')}${keyGlyph('right')}`,
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
   // `details` is NOT here: it is a bound action (`config.keys.details`), so its cap is
   // drawn from the binding and handed in as a prop — the rule for every key a person
@@ -590,9 +591,20 @@ export interface RowOpts {
   now: number;
   palette: Record<string, string | undefined>;
   onViewFail?: (kind: string, why: string) => void;
+  // This conversation's own question waits for an answer (`conv.question`): the last
+  // run of its newest assistant message — the narration the `ask_user` call follows —
+  // draws unfolded and at full ink, so the question is read against what led into it.
+  // A display condition, not fold state (`src/assistant/folds.ts` is not touched): the
+  // run keeps its fold id, and the moment the question is answered the rows are built
+  // again without the flag. A question a child of this conversation waits on is not
+  // this: its narration lives in the child's own rows.
+  askPending?: boolean;
 }
 
-function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+// `last` is the list's last message (its trailing gap); `lead` says this is the newest
+// ASSISTANT message — the only one a waiting question may light, however much furniture
+// (a view, a note) was drawn under it.
+function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = false): ChatRow[] {
   const views = (Array.isArray(m.views) ? m.views : []) as ViewRecord[];
   // A live view's seconds are part of its rows: without them in the key a cached
   // `12 s` stands still through a silent `sleep 30`. A finished view's time is in
@@ -625,11 +637,14 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // `viewRevision()`: a renderer's late answer (views.ts) — a done view's rows are
   // otherwise laid out once, and its placeholder would stay. Only a message that has
   // views reads it: every other message would gain a cache entry per late answer.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
+  // `askPending`: only the message a waiting question is read against gains a new entry
+  // — a flag that is off for everything but one message must not invalidate the whole
+  // conversation's cache.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending && lead ? 1 : 0}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, o)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, lead, o)));
   return rows;
 }
 
@@ -640,6 +655,10 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
 // the messages on its own, which is what keeps grouping decided in exactly one place.
 function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   const drawn = messages.filter((m) => m.role !== 'system');
+  // The newest assistant message: the one a waiting question lights. It is not the last
+  // DRAWN message — a tool's view or a note lands below a turn's narration, and the
+  // question is still read against the narration that led into it.
+  const lastAssistant = drawn.reduce((n, m, i) => (m.role === 'assistant' ? i : n), -1);
   const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
   for (const g of viewGroups(drawn as GroupMsg[], o.notes)) {
     const open = groupOpen(o.folds, g);
@@ -647,15 +666,16 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   }
   return drawn.map((m, at) => {
     const last = at === drawn.length - 1;
+    const lead = at === lastAssistant;
     const inGroup = byAt.get(at);
-    if (!inGroup) return messageRows(m, at, last, o);
+    if (!inGroup) return messageRows(m, at, last, o, lead);
     const out: ChatRow[] = [];
     if (inGroup.g.head === at) {
       const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
       out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'), foldLine: true,
         spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
     }
-    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o));
+    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o, lead));
     else if (!inGroup.open && inGroup.g.members.at(-1) === at && !last) out.push({ gap: true });
     return out;
   });
@@ -725,7 +745,7 @@ export function anchorRow(messages: ChatMsg[], o: RowOpts, anchor: { at: number;
   return seen;
 }
 
-function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, o: RowOpts): ChatRow[] {
   const { wrap, folds, viewLines, notes, detailsKey } = o;
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
@@ -821,6 +841,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         }
       };
       const segs = turnSegments(parts);
+      // The run a waiting question is read against: the last one of the turn's parts,
+      // which the `ask_user` call follows and lands in (the call itself is not a part
+      // of the turn — the question's block is). `lead` is the newest assistant message
+      // of the conversation whose question it is.
+      const leadRun = o.askPending === true && lead ? segs.reduce((n, s, i) => (s.kind === 'run' ? i : n), -1) : -1;
       for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'reasoning') {
           // Each thought is its own block where the model wrote it: folded in `step`,
@@ -854,7 +879,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           continue;
         }
         const id = foldId(at, 'steps', seg.n);
-        if (notes === 'step' && !isOpen(folds, id)) {
+        const lead = si === leadRun;
+        if (notes === 'step' && !isOpen(folds, id) && !lead) {
           // The run folded: ONE dim row where it began, saying the newest step and
           // how many there are. Chrome — the host's account of what was said. Its
           // marks say what happened inside without a click: `✗` a call failed or was
@@ -871,12 +897,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           rows.push({ role, step: true, fold: id, foldLine: true, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
-          // its rows folds the run again), the normal colour in `open`. Under each,
-          // the calls it made: in `step` a line per call, part of the run; in `open`
-          // the trail line the calls have anywhere else.
+          // its rows folds the run again), the normal colour in `open` — and, while a
+          // question waits, the normal colour for the run that led into it, which is
+          // the whole of what the question is read against. Under each, the calls it
+          // made: in `step` a line per call, part of the run; in `open` the trail line
+          // the calls have anywhere else.
           seg.steps.forEach((text, si) => {
             if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
-            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { quiet: true, fold: id } : {}));
+            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { fold: id, ...(lead ? {} : { quiet: true }) } : {}));
             const calls = seg.calls[si];
             if (!calls) return;
             if (notes === 'step') {
@@ -989,8 +1017,9 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
 }): (row: ChatRow, i: number) => ReactNode {
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
-  // A `!command` is the person's own action, so it sits on the person's ground.
-  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  // A `!command` is the person's own action, so it sits on the person's ground. A kept
+  // question and its answer share a ground of their own, so the pair reads as one band.
+  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : role === 'ask' ? m.askBg : undefined);
   // The gutter is frame, never copied: a drag across an answer returns its text
   // without the `ƒ ` (or `› `, `! `/`‼ `, `◆ `) in front of it.
   const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
@@ -1110,6 +1139,10 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
       }
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
+      // A kept question and its answer take the ask ink on that ground; a span's own
+      // colour (a token, an accent) still wins, and a dismissed answer's dims are on
+      // its spans, so it keeps the ground while its ink steps back.
+      const ink = row.role === 'ask' ? m.askInk : undefined;
       if (row.spans && row.spans.length) {
         return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
           content(row, (s, j) => h(Text, {
@@ -1120,7 +1153,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
             dim: s.dim || row.role === 'note' || row.quiet === true,
             // Lit, the text is underlined and a code block's bar (chrome) is not.
             underline: s.underline || (lit && j >= (row.chrome ?? 0)),
-            color: s.token || s.accent ? m.accent : s.color,
+            color: s.token || s.accent ? m.accent : s.color ?? ink,
             selectable: j < (row.chrome ?? 0) ? false : undefined,
           }, String(s.text ?? ''))));
       }
@@ -1337,7 +1370,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     () => chatRows(messages, { ...rowOpts, renderers, onViewFail: (kind, why) => onViewFailRef.current?.(kind, why) }),
     // The palette by its values: the theme object is updated in place. A renderer's
     // late answer bumps `viewRevision()` (views.ts) and changes nothing else.
-    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, renderers, liveSeconds, rowPaletteKey, viewRevision()],
+    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, rowOpts.askPending, renderers, liveSeconds, rowPaletteKey, viewRevision()],
   );
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
@@ -1696,6 +1729,7 @@ export function renderChatModal({
   pendingConfirm = null,
   askNotice = null,
   pendingQuestion = null,
+  askPending = false,
   queued = [],
   queueWaits = null,
   elapsed = 0,
@@ -1807,6 +1841,11 @@ export function renderChatModal({
   // take (ask-children-spec.md (subagent y/n)). It is a row of the field's place.
   askNotice?: string | null;
   pendingQuestion?: AskState | null;
+  // This conversation's own question waits (`conv.question`): the newest assistant
+  // message's last run draws unfolded and lit (`RowOpts.askPending`). Not
+  // `pendingQuestion` — that also carries a child's ask block, and the child's
+  // narration lives in the child's rows, never in this transcript's.
+  askPending?: boolean;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
   // the LAST one back, so the last one is what the line shows.
@@ -1968,7 +2007,7 @@ export function renderChatModal({
     // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and the
     // wheel are the pager's, and the conversation stays where it was left. With `/diff`
     // drawn they are the panel's body's.
-    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
+    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
     // The pager, in the conversation's place: the block's rows at the conversation's
     // width, with a scroll of their own.
     pager
@@ -2380,11 +2419,12 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
 // `/mcp` and the like: a plugin's list in the chat's own frame, in the conversation's
 // place — the same docked, as a window and full, as the session picker. One row per
 // item, each ONE terminal line: the cursor mark, the text, the detail dim (or in its
-// tone's colour) and cut first. The notice under the list, then the keys: the panel's
-// own and the plugin's. The state and what a key does are src/assistant/command-panel.ts.
+// tone's colour) and cut first; a group header row is dim throughout and no key runs on
+// it. The notice under the list, then the keys: the panel's own and the plugin's. The
+// state and what a key does are src/assistant/command-panel.ts.
 export type CommandPanelView = {
   title: string;
-  rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error' }>;
+  rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error'; kind?: 'group' }>;
   cursor: number;
   notice: string;
   empty: string;
@@ -2422,7 +2462,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
     return h(ListRow, { key: r.id, hover: hover && !!onPickRow, onClick: onPickRow ? () => onPickRow(i) : undefined, draw: (lit: boolean) => [
       h(Text, { key: 'mark', bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
       h(Box, { key: 'text', flexShrink: 0, overflow: 'hidden', width: textCol },
-        h(Text, { wrap: 'truncate', bold: active, underline: lit, color: active ? m.accent : undefined }, r.text)),
+        h(Text, { wrap: 'truncate', bold: active, underline: lit, dim: r.kind === 'group', color: active ? m.accent : undefined }, r.text)),
       r.detail ? h(Box, { key: 'detail', flexShrink: 1000, overflow: 'hidden' }, h(Text, { ...(color ? { color } : { dim: true }), wrap: 'truncate' }, `  ${r.detail}`)) : null] });
   });
   const offset = windowAround(lines, panel.cursor, listRows).start;
@@ -2461,7 +2501,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
 // tool or the request's word with the same shimmer — and the key that brings it back.
 // Null when nothing runs. A y/n or a question the turn is waiting on wins over all of
 // it: folding the chat away is not an answer, and the person is the one holding it up.
-export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'writing', verb = '', elapsed = 0, keyHint = '', waiting = false }: {
+export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'writing', verb = '', elapsed = 0, keyHint = '', waiting = false, question = false }: {
   theme: Theme | undefined;
   streaming: boolean;
   toolLabel?: string;
@@ -2472,10 +2512,13 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
   keyHint?: string;
   // A y/n or a question is pending.
   waiting?: boolean;
+  // The question that waits is still held by the person's typing: it has not taken the
+  // field's place yet, and the strip says which of the two it waits on.
+  question?: boolean;
 }) {
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   if (waiting) {
-    return h(Text, { key: 'chat-status', color: m.warn, wrap: 'truncate', selectable: false }, `? waiting for you${keyHint ? ` · ${keyHint}` : ''}`);
+    return h(Text, { key: 'chat-status', color: m.warn, wrap: 'truncate', selectable: false }, `? ${question ? 'a question is waiting' : 'waiting for you'}${keyHint ? ` · ${keyHint}` : ''}`);
   }
   if (!streaming && !toolLabel) return null;
   return h(Box, { key: 'chat-status', flexDirection: 'row', flexShrink: 0, selectable: false },
@@ -2766,24 +2809,56 @@ export const askFieldWidth = (wrap: number) => Math.max(10, wrap - ASK_PROMPT.le
 // The question block's pieces, shared by its render and by the count of its rows
 // (`pendingChatRows`), so the two cannot drift apart.
 function askView(state: AskState, wrap: number) {
-  const q = state.questions[state.index]!;
-  const many = state.questions.length > 1 ? `${state.index + 1}/${state.questions.length} · ` : '';
-  // The hint says the rule the list itself cannot: the digits pick, and anything else
-  // typed starts an answer in the person's own words.
-  const hint = state.typing
-    ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
-    : q.multiSelect
-      ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
-      : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
+  // The page after the last is the submit page (several questions only): it sums the
+  // drafts instead of holding one question's list.
+  const submitting = state.index >= state.questions.length;
+  const many = state.questions.length > 1;
+  // The working state of the page on screen. On the submit page this is the last
+  // question's — it draws no rows of its own, and its keys are the submit page's.
+  const at = Math.min(state.index, state.questions.length - 1);
+  const q = state.questions[at]!;
+  const d = state.drafts[at]!;
+  const page = many ? `${at + 1}/${state.questions.length} · ` : '';
+  // The hint says the rule the list itself cannot: the digits pick, anything else typed
+  // starts an answer in the person's own words, and — with several questions — the
+  // arrows walk the pages (inside the field they are the caret's, so it is not said
+  // there).
+  const pageKeys = many ? `${CAP.leftRight} questions · ` : '';
+  const hint = submitting
+    ? `${pageKeys}${CAP.enter} submit · ${CAP.esc} dismiss`
+    : d.typing
+      ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
+      : q.multiSelect
+        ? `${pageKeys}${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
+        : `${pageKeys}${CAP.upDown} move · ${CAP.enter} ${many ? 'answer' : 'or a digit to answer'} · type your own words · ${CAP.esc} dismiss`;
   return {
     q,
-    title: `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`,
-    rows: askRows(state),
+    d,
+    title: submitting ? '? Submit' : `? ${page}${q.header ? `${q.header} — ` : ''}${q.question}`,
+    // The wizard's page strip (nothing for a single question) and, on the submit page,
+    // every question's title with the answer Enter will send under it.
+    tabs: askTabs(state),
+    submitRows: submitting ? askSubmitRows(state) : null,
+    rows: submitting ? [] : askRows(state),
     hint,
     // The field is an editor, so it has a caret of its own to draw — wherever it is in
     // the text, not always at the end.
-    fieldRows: state.typing ? inputVisualRows(state.text, state.caret, askFieldWidth(wrap)) : [],
+    fieldRows: !submitting && d.typing ? inputVisualRows(d.text, d.caret, askFieldWidth(wrap)) : [],
   };
+}
+
+// The wizard's page strip: ONE row, a tab per page (`✓` once its draft holds an
+// answer), the page on screen in inverse. Each tab is cut by cells to the share of the
+// row it has, so a wide label never pushes the strip onto a second line. The gap
+// between two tabs belongs to neither, so it is never part of the inverse.
+function askTabRow(tabs: AskTab[], inner: number) {
+  const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
+  return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
+    ...tabs.flatMap((t, i) => [
+      i ? h(Text, { key: `gap${i}`, selectable: false }, '  ') : null,
+      h(Text, { key: i, inverse: t.current, wrap: 'truncate', selectable: false },
+        cutStep(`${t.answered ? '✓ ' : ''}${t.label}`, room)),
+    ]));
 }
 
 // What a y/n block is given: a write the model asked for, or — with `title` and `hint`
@@ -2848,7 +2923,12 @@ export function pendingChatRows({ width, question, confirm, notice = 0, todo, qu
 function askBlockRows(state: AskState, wrap: number): number {
   const v = askView(state, wrap);
   const inner = wrap - 2;
-  return 2 + textRows(v.title, inner) + v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0) + v.fieldRows.length + textRows(v.hint, inner);
+  // A submit row is a title and its answer, each one row; an option may carry a
+  // description under it.
+  const body = v.submitRows
+    ? v.submitRows.reduce((n) => n + 2, 0)
+    : v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0);
+  return 2 + textRows(v.title, inner) + (v.tabs.length ? 1 : 0) + body + v.fieldRows.length + textRows(v.hint, inner);
 }
 function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): number {
   const inner = wrap - 2;
@@ -2865,14 +2945,23 @@ function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, re
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
-  const { q, title, rows, hint, fieldRows } = askView(state, wrap);
+  const { q, d, title, tabs, submitRows, rows, hint, fieldRows } = askView(state, wrap);
+  const inner = Math.max(1, wrap - 2);
   const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
+  // What Enter will send for one question: its title in the quiet ink, its answer under
+  // it — unless there is none, which is said in the quiet ink too.
+  const answerRow = (r: AskSubmitRow, i: number) => h(Box, { key: `s${i}`, flexDirection: 'column' },
+    h(Text, { dim: true, wrap: 'truncate', selectable: false }, cutStep(r.title, inner)),
+    h(Text, { dim: !r.answered, wrap: 'truncate' }, `  ${cutStep(r.answer, Math.max(1, inner - 2))}`));
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
-    ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
-      h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
-      r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${headClusters(r.description, Math.max(10, wrap - 8))}`) : null)),
-    state.typing
+    tabs.length ? askTabRow(tabs, inner) : null,
+    ...(submitRows
+      ? submitRows.map(answerRow)
+      : rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
+          h(Text, { bold: r.active, inverse: r.active && !d.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
+          r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${headClusters(r.description, Math.max(10, wrap - 8))}`) : null))),
+    fieldRows.length
       ? h(Box, { flexDirection: 'column' }, fieldRows.map((row, i) =>
           h(Box, { key: `f${i}`, flexDirection: 'row' },
             h(Text, null, i === 0 ? ASK_PROMPT : ' '.repeat(ASK_PROMPT.length)),
@@ -2986,14 +3075,14 @@ export function helpEntries(commands: HelpCommand[]): { usage: string; descripti
 const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
   open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
-  toEnd: 'to the end of the conversation',
+  toEnd: 'to the end of the conversation', work: 'the work picker — /work does the same',
 };
-// Keys the HOST acts on from anywhere — the assistant's `chat` and `sessions` included,
-// whose keys work on every screen. Everything else in the key map belongs to a
+// Keys the HOST acts on from anywhere — the assistant's `chat`, `sessions` and `work`
+// included, whose keys work on every screen. Everything else in the key map belongs to a
 // plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
 // merely defines a default for) — listed separately, because on the start screen they
 // do nothing and a key in a help list is an instruction.
-const HOST_ACTIONS = ['chat', 'sessions', 'commandLine', 'log', 'back', 'quit'];
+const HOST_ACTIONS = ['chat', 'work', 'sessions', 'commandLine', 'log', 'back', 'quit'];
 const actionLabel = (action: string) => ACTION_LABELS[action] ?? action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 
 export function renderHelp({

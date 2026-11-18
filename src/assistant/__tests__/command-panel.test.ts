@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { panelAnswer, panelCursor, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec } from '../command-panel';
+import { panelAnswer, panelCursor, panelDrop, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec } from '../command-panel';
 
 const spec = (rows: string[], ran: string[] = []): PanelSpec => ({
   title: 'Servers',
@@ -98,6 +98,89 @@ test('a panel that does not follow records no row id on ↑/↓ or on a key', ()
   s = panelKey(s, { name: 'down' }).state!;
   expect(s.at).toBeUndefined();
   expect(panelKey(s, { name: 'r' }).state!.at).toBeUndefined();
+});
+
+test('onCursor runs as the cursor moves', () => {
+  const seen: Array<[string, number]> = [];
+  const preview: PanelSpec = {
+    title: 'Theme',
+    rows: () => ['system', 'light', 'dark'].map((id) => ({ id, text: id })),
+    keys: [{ key: 'r', label: 'use', run: () => 'used' }],
+    onCursor: (id, index) => { seen.push([id, index]); },
+  };
+  const s = panelStart(preview);
+  const moved = panelKey(s, { name: 'down' });
+  expect(seen).toEqual([['light', 1]]);
+  // Up at the top is no move: nothing is said.
+  expect(panelKey(s, { name: 'up' }).state!.cursor).toBe(0);
+  expect(seen).toEqual([['light', 1]]);
+  // A key is a decision, not a move: its run is untouched and no preview is said.
+  expect(panelKey(moved.state!, { name: 'r' }).run?.def.run(null)).toBe('used');
+  expect(seen).toEqual([['light', 1]]);
+  panelKey(moved.state!, { name: 'up' });
+  expect(seen).toEqual([['light', 1], ['system', 0]]);
+});
+
+test('the drop hook runs only when the panel goes without a decision', () => {
+  const seen: string[] = [];
+  const inner: PanelSpec = { title: 'inner', rows: () => [{ id: 'a', text: 'a' }], onDrop: () => { seen.push('inner'); } };
+  const outer: PanelSpec = {
+    title: 'outer',
+    rows: () => [{ id: 'x', text: 'x' }],
+    keys: [{ key: 'r', label: 'use', run: () => 'used' }],
+    onDrop: () => { seen.push('outer'); },
+  };
+  const start = panelStart(outer);
+  // A key's run is a decision: the panel closes by `run`'s own answer, not by a drop.
+  expect(panelKey(start, { name: 'r' }).run).toBeDefined();
+  expect(seen).toEqual([]);
+  // A panel over it: Esc goes back, and that is no drop either.
+  const nested = panelAnswer(start, inner);
+  const back = panelKey(nested, { name: 'escape' });
+  expect(back.state).not.toBeNull();
+  expect(seen).toEqual([]);
+  // Esc on the last one is a drop: the chat puts it away through `panelDrop`.
+  const closed = panelKey(back.state!, { name: 'escape' });
+  expect(closed.state).toBeNull();
+  expect(seen).toEqual([]);
+  expect(panelDrop(back.state!)).toBeNull();
+  expect(seen).toEqual(['outer']);
+  // Nothing to drop says nothing.
+  expect(panelDrop(null)).toBeNull();
+  expect(seen).toEqual(['outer']);
+});
+
+test('no key runs on a group header, bare or chord', () => {
+  const ran: string[] = [];
+  const grouped: PanelSpec = {
+    title: 'Work',
+    rows: () => [
+      { id: 'group:agents', text: 'Agents', kind: 'group' },
+      { id: 'a', text: 'agent a' },
+      { id: 'group:shells', text: 'Shells', kind: 'group' },
+      { id: 's', text: 'shell s' },
+    ],
+    keys: [
+      { key: 'x', label: 'stop', run: (id) => { ran.push(`x:${id}`); } },
+      { key: 'ctrl+d', label: 'kill', run: (id) => { ran.push(`kill:${id}`); } },
+    ],
+  };
+  // The cursor opens on the first row a key can run on, and ↑ takes it onto the header.
+  let s = panelStart(grouped);
+  expect(s.cursor).toBe(1);
+  s = panelKey(s, { name: 'up' }).state!;
+  expect(s.cursor).toBe(0);
+  // Neither a bare key nor a chord runs on it — nothing was handed to `run`.
+  expect(panelKey(s, { name: 'x' }).run).toBeUndefined();
+  expect(panelKey(s, { name: 'd', ctrl: true }).run).toBeUndefined();
+  expect(ran).toEqual([]);
+  // Arrow keys still move the cursor off the header and back onto a row.
+  s = panelKey(s, { name: 'down' }).state!;
+  expect(s.cursor).toBe(1);
+  const onRow = panelKey(s, { name: 'x' });
+  expect(onRow.run?.id).toBe('a');
+  onRow.run!.def.run(onRow.run!.id);
+  expect(ran).toEqual(['x:a']);
 });
 
 test('a panel pushed over a following one starts without the parent\'s row id', () => {

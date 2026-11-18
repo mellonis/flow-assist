@@ -301,9 +301,9 @@ plain key, applied live — no `appliesOnRestart` mark); the app's resolved
 - Row building takes an `askPending: boolean`: when set, the step rows of the current
   run draw unfolded and not dim. No fold state changes; the condition dies with the
   question.
-- The answered `? / →` rows take `chat` palette tokens `askBg` (and `askFg` where the
-  ground needs its own ink): all three palettes, drawn as `${askBg}`, spanning the
-  message column's width per row. Overridable by a `theme` key as every token is.
+- The answered `? / →` rows take `chat` palette tokens `askBg` and `askInk`: all three
+  palettes, drawn as `${askBg}`/`${askInk}`, spanning the message column's width per row.
+  Overridable via `config.plugins.chat.colors`, as every chat token is.
 
 ### Typing grace (item 3)
 
@@ -755,14 +755,15 @@ git add -A && git commit -m "feat: /theme picks the look with the theme applied 
     questions: AskQuestion[];
     index: number;          // the page on screen; for n>1, page n is the submit page
     drafts: AskDraft[];     // one per question
-    answers: AskAnswer[];   // filled at submit; askResult/askShown read it
+    answers: AskAnswer[];   // written at page commit for pages that hold something;
+                            // rebuilt per question in order at submit
     done: boolean;
     cancelled: boolean;
   }
   export const askPageCount = (s: AskState): number  // n>1 → n+1, else n
   export interface AskTab { label: string; answered: boolean; current: boolean }
   export function askTabs(state: AskState): AskTab[] // n>1 only; last tab is "Submit"
-  export interface AskSubmitRow { title: string; answer: string }
+  export interface AskSubmitRow { title: string; answer: string; answered: boolean }
   export function askSubmitRows(state: AskState): AskSubmitRow[]  // the submit page
   ```
   Unchanged surfaces: `askStart`, `parseAskArgs`, `askRows` (reads
@@ -962,8 +963,9 @@ dim folded row. A `reasoning` block beside them stays folded and dim.
 - Produces: two tokens on `theme.modals.chat`: `askBg`, `askInk`, present in all three
   palettes and drawn as `${askBg}`/`${askInk}`. A kept `? …` / `→ …` row paints them
   across the message column's width; the question row keeps its `?` gutter and the
-  answer its `→`; a dismissed answer keeps the ground and dims its ink. A person's
-  `theme` key overrides either token like any other.
+  answer its `→`; a dismissed answer keeps the ground and dims its ink. Overridable via
+  `config.plugins.chat.colors`, as every chat token is; a `theme` record cannot set a
+  per-modal token.
 
 - [ ] **Step 1: Write the failing tests**
 

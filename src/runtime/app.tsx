@@ -11,7 +11,7 @@
 
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
-import { isPrintable, type Backend } from '@flowtty/core';
+import { editorReducer, nextGrapheme, type Backend, type Key } from '@flowtty/core';
 import { Fragment, createContext, createElement as h, useContext, useEffect, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
@@ -62,6 +62,7 @@ import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
+import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
@@ -197,6 +198,9 @@ export interface RenderAppInput {
 interface CommandLineState {
   open: boolean;
   input: string;
+  // Where the next key edits: the person's caret, an index into `input` (the line is
+  // one row, so the caret is the only thing that says where a key goes).
+  caret: number;
   // History of executed `:`-commands + the cursor index. `historyIdx` = -1 (or
   // history.length) means "the live edit buffer, not a recalled line"; up
   // decrements toward the newest recallable entry, down returns toward the
@@ -376,7 +380,12 @@ export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?
 // chat's own rate for a view that updates fast.
 const CONSOLE_REDRAW_MS = 200;
 
-export function renderApp(
+// The width the `:` line's field is laid out in: the footer's box pads both sides, and
+// that padding is chrome. The key handler (the editor reducer's motion) and the drawn
+// completion list are read from the same number, so the offer never sits past the row.
+const lineFieldWidth = (width: number): number => Math.max(1, width - 2);
+
+export async function renderApp(
   root: Backend,
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late: lateIn, untrusted: untrustedIn = [], trustNotes = [], site: siteIn }: RenderAppInput,
 ) {
@@ -400,8 +409,27 @@ export function renderApp(
   // point that takes them out of text reads this set (src/assistant/secrets.ts).
   refreshSecrets(config);
   const userTheme = config.theme as Theme | undefined;
-  let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
+  // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
+  // the terminal's own light/dark scheme, `light` and `dark` pin one whatever the
+  // terminal says. `seenConfigMode` is what the config last said, so a mode a picker
+  // pinned (below) is not undone by the next render.
+  const configThemeMode = (): ThemeMode | undefined => (config.ui as { theme?: ThemeMode } | undefined)?.theme;
+  let seenConfigMode: ThemeMode | undefined = configThemeMode();
+  let pinnedScheme: ThemeMode | null = seenConfigMode ?? 'system';
+  let terminalScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
+  let themeScheme: ColorScheme = schemeFor(pinnedScheme, terminalScheme);
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
+  // The ONE place a resolved palette is laid into the running app's theme object — the
+  // same object the plugins and the renderers were given (a plugin may hold the
+  // reference), emptied and refilled, never replaced. The resolve above builds it; every
+  // later change (a plugin joining, the terminal's scheme, a pinned mode) comes here.
+  const applyTheme = (scheme: ColorScheme) => {
+    themeScheme = scheme;
+    const theme = config.theme as Theme;
+    const next = resolveAppTheme(userTheme, plugins, config, scheme);
+    for (const key of Object.keys(theme)) delete theme[key];
+    Object.assign(theme, next);
+  };
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
@@ -453,6 +481,22 @@ export function renderApp(
     (services as unknown as ReactBoundServices).logs = services.log.read();
   };
   const redraw = () => (services as unknown as ReactBoundServices).notify();
+  // What a picker pins (`host.services.setThemeMode`, src/playback/theme-mode.ts): the
+  // mode is stored and the palette re-resolved in place at once — the same resolve the
+  // terminal's own scheme change does — then the screen is drawn again with it. A mode
+  // set as a config value (`ui.theme`) reaches the same resolve through the App's own
+  // read of it, so there is one helper, not two.
+  const setThemeMode = (mode: ThemeMode) => {
+    pinnedScheme = mode;
+    // A mode the config names is the app's agreement with it: a preview of the config's
+    // own mode, and a save (`/theme` writes `ui.theme` before the pin). Recorded here so
+    // the reconcile below agrees with the write instead of reading it as an outside
+    // change to pin over.
+    if (configThemeMode() === mode) seenConfigMode = mode;
+    terminalScheme = root.colorScheme?.().scheme ?? terminalScheme;
+    applyTheme(schemeFor(mode, terminalScheme));
+    redraw();
+  };
   // The host's own commands. `plugins` carries its `run`: on the `:` line it opens the
   // runtime's panel, in the chat (`chat: true`) the same panel in the chat's frame.
   const hostCommands: Command[] = BASE_COMMANDS.map((c) => (c.name === 'plugins'
@@ -510,10 +554,8 @@ export function renderApp(
     Object.assign(keys, nextKeys);
     Object.assign(viewRegistry, buildViewRegistry(plugins));
     commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins, hostCommands));
-    const theme = config.theme as Theme;
-    const nextTheme = resolveAppTheme(userTheme, plugins, config, themeScheme);
-    for (const key of Object.keys(theme)) delete theme[key];
-    Object.assign(theme, nextTheme);
+    // The palette follows the config and the mode, not the timing of a plugin's arrival.
+    applyTheme(schemeFor(pinnedScheme ?? 'system', terminalScheme));
     tools?.refresh?.();
     const aiTools = (services as unknown as HostServices).pluginAiTools;
     aiTools.splice(0, aiTools.length, ...(tools?.groups ?? []).filter((g) => g.id.endsWith(':aiTools')).flatMap((g) => g.tools as typeof aiTools));
@@ -547,7 +589,7 @@ export function renderApp(
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
   (services as unknown as HostServices).hostKeys = () => ({ panel: !!ui.hostPanel, line: !!ui.cmdOpen });
-  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null, list: newListState() } as CommandLineState };
+  const cmdline = { current: { open: false, input: '', caret: 0, history: [], historyIdx: -1, walk: null, list: newListState() } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
   const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pressed: () => undefined, pass: 1, heard: false };
 
@@ -565,14 +607,17 @@ export function renderApp(
     // The terminal switched between light and dark (macOS does it by itself at
     // sunset and sunrise): lay the other scheme's palette into the SAME theme object
     // — a plugin may hold a reference to it — before anything below renders with it.
+    // A pinned mode (`ui.theme`, or a picker's `setThemeMode`) answers its own scheme
+    // whatever the terminal says.
     const { scheme } = useColorScheme();
-    if (scheme !== themeScheme) {
-      themeScheme = scheme;
-      const theme = config.theme as Theme;
-      const next = resolveAppTheme(userTheme, plugins, config, scheme);
-      for (const key of Object.keys(theme)) delete theme[key];
-      Object.assign(theme, next);
-    }
+    terminalScheme = scheme;
+    // `ui.theme` is a live key: a value set while the app runs (`config set ui.theme
+    // light`) is read here and is the mode from then on. A mode a picker pinned is not
+    // undone by a render that follows it — the config still says what it said.
+    const fromConfig = configThemeMode();
+    if (fromConfig !== seenConfigMode) { seenConfigMode = fromConfig; pinnedScheme = fromConfig ?? 'system'; }
+    const wanted = schemeFor(pinnedScheme ?? 'system', terminalScheme);
+    if (wanted !== themeScheme) applyTheme(wanted);
 
     // React-bound services rebound on every render (merged into the shared
     // `services` object so plugins see the live channels). `showMessage` uses
@@ -615,6 +660,10 @@ export function renderApp(
       ui.overlay = overlay ?? undefined;
       notify();
     };
+    // The appearance channel (src/playback/theme-mode.ts): a picker pins `system`, `light`
+    // or `dark`; the mode is stored and the palette re-resolved in place at once, then the
+    // screen is drawn with it. `ui.theme` in the config reaches the same helper.
+    (services as unknown as HostServices).setThemeMode = setThemeMode;
     // The chat's outside channel (`postToChat`), on the SHARED services every plugin's
     // per-plugin view inherits from: the assistant registers the deliverer on its chat
     // store each render, so this delegate always asks the current one (`liveChat`, read
@@ -915,6 +964,15 @@ export function renderApp(
     // tracker-agnostic host — consumes the key, defers the URL to a tracker).
     // One completer for what is drawn and for what Tab does, so they cannot disagree.
     const completeLine = (text: string) => completeCommand(text, commandRegistry as never, config, hostConfigSchema);
+    // A line recalled from history: the caret after it, and the list marked
+    // `fromHistory` (src/config/commandline.ts) — no list and no rest until a content
+    // edit clears the mark; the Tab hint stays.
+    const recallLine = (text: string) => {
+      if (text !== cmdline.current.input) cmdline.current.list.fromHistory = true;
+      cmdline.current.input = text;
+      cmdline.current.caret = text.length;
+      notify();
+    };
     const hostFallback = (key: InputKey): boolean => {
       const name = key.name ?? '';
       // `:` OPENS the command line (when it is closed). It never toggles it closed
@@ -922,6 +980,8 @@ export function renderApp(
       // is Esc's job.
       if (isKey(keys.commandLine, name) && !cmdline.current.open) {
         cmdline.current.open = true;
+        // The line opens empty, the caret at its start.
+        cmdline.current.caret = 0;
         ui.cmdOpen = true;
         notify();
         return true;
@@ -933,12 +993,14 @@ export function renderApp(
       if (cmdline.current.open) {
         // The completion list, while two or more candidates match: ↑/↓ and ⇧⇥ move its
         // selection, ⇥ and ⏎ take it (⏎ never runs the line then), Esc closes the list
-        // and keeps the text. Ahead of the keys below, whose Esc closes the line and
-        // whose ↑/↓ walk the history — with no list open they are all theirs.
-        if (!key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
+        // and keeps the text. It belongs to the line's last word, so it holds keys only
+        // while the caret is at the end — as the chat's field. Ahead of the keys below,
+        // whose Esc closes the line and whose ↑/↓ walk the history — with no list open
+        // they are all theirs.
+        if (cmdline.current.caret === cmdline.current.input.length && !key.ctrl && !key.meta && !(name === 'return' && key.shift)) {
           const step = listKey(cmdline.current.input, cmdline.current.list, { name, shift: !!key.shift }, completeLine);
           if (step.handled) {
-            if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.walk = null; }
+            if (step.input !== undefined) { cmdline.current.input = step.input; cmdline.current.caret = step.input.length; cmdline.current.walk = null; }
             notify();
             return true;
           }
@@ -948,6 +1010,7 @@ export function renderApp(
           ui.cmdOpen = false;
           // Discard the half-typed buffer on close so the next `:` opens fresh.
           cmdline.current.input = '';
+          cmdline.current.caret = 0;
           cmdline.current.historyIdx = cmdline.current.history.length;
           notify();
           return true;
@@ -957,88 +1020,17 @@ export function renderApp(
         // a character like any other — a URL, a time, `host:port` or `repo:git_status`
         // keeps its colons.
         if (isKey(keys.commandLine, name) && cmdline.current.input === '') return true;
-        // Enter/Return runs a command. This is a HOST concern — it must not depend on
-        // the plugin-namespaced `open` action: tracker defines `open:'enter'`
-        // (open an issue), which overrides the host's `open:['enter','return']`
-        // in buildKeys and drops `return` — yet the real TTY reports Enter as
-        // `{name:'return'}` (see TtyBackend). Relying on isKey(keys.open, name)
-        // there made `:help`/`:ask` silently dead on Enter in a real terminal
-        // while working in a headless probe that pressed `enter`. Check the key
-        // directly.
-        if (name === 'return') {
-          const input = cmdline.current.input.trim();
-          // The command is the FIRST WORD; the rest is its argument. Looking up the
-          // whole line instead would fail to find every plugin command given an
-          // argument — `:ask hi`, a tracker's `:open ABC-1` — and fall through to the
-          // host's own dispatch, which knows nothing of it and says nothing.
-          const [head = '', ...rest] = input.split(/\s+/);
-          const cmd = findIn(commandRegistry, head);
-          const arg = rest.join(' ');
-          // The command context carries the REAL closures (F1): setView/back
-          // mutate ui state + notify, setHelpModal opens core's help modal via
-          // host.store.help, runConfigCommand/runCacheCommand route to the
-          // config/cache handlers. Before, most were no-ops/absent, so
-          // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
-          const ctx = {
-            // Where the command runs: here, the `:` line — the chat runs a command marked
-            // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
-            surface: 'line',
-            showMessage: (m: string) => toast.showMessage(redactSecrets(String(m))),
-            setView: (v: string) => { ui.view = v; notify(); },
-            onExit,
-            back: () => { ui.view = undefined; notify(); },
-            clearCache: () => services.clearCache(),
-            runConfigCommand: (a: string) => runConfigCmd(a),
-            runCacheCommand: (a: string) => runCacheCmd(a),
-            setHelpModal: (open: boolean) => setHelpModalOpen(open),
-            toggleKeycaps: (a: string) => toggleKeycaps(a),
-            // `:ask`/`:chat` route to the assistant plugin's live `openChat`,
-            // published on the shared host.store.chat by its ChatModal (the same
-            // bridge pattern setHelpModal uses for the help modal). Absent until
-            // the chat surface mounts — the optional chaining makes it a no-op,
-            // exactly like the other not-yet-mounted plugin channels.
-            openChat: (t?: string) => (hostBase.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
-          };
-          if (cmd?.run) {
-            try {
-              // A plugin command (`tracker:open`) forwards its `run(ctx, arg)` into a
-              // plugin-specific ctx (TrackerCommandCtx). The base ctx carries only
-              // host-owned closures — a `:open`/`:board` would find no `openIssue`
-              // and silently no-op. Extend it with the OWNING plugin's own-key
-              // services (mutated live by its mount) so tracker commands reach real
-              // nav/modals; the host base closures stay on top (name collisions win
-              // for the host — `showMessage` stays the toast, not a plugin no-op).
-              const ctxForCmd = commandContextFor(cmd, ctx, apiMap as never);
-              cmd.run(ctxForCmd as never, arg);
-            } catch {
-              // A failing host command must not crash the shell.
-            }
-          } else {
-            // Base commands (BASE_COMMANDS) have no `run` — dispatch by name.
-            runHostCommand(cmd?.name ?? head, arg);
-          }
-          // Remember the executed command (no empty lines) and CLEAR the buffer so
-          // the next `:` opens fresh — before, the leftover input was shown again
-          // on the next open (a real defect).
-          // A command that says `history: false` (its argument may be a secret) is not.
-          if (input && cmd?.history !== false) cmdline.current.history.push(input);
-          cmdline.current.historyIdx = cmdline.current.history.length;
-          cmdline.current.input = '';
-          cmdline.current.open = false;
-          ui.cmdOpen = false;
-          notify();
-          return true;
-        }
-        // Up/Down recall the `:`-command history (the executed commands above).
+        // Up/Down recall the `:`-command history (the executed commands below).
         // Up walks back toward the oldest entry, Down toward the newest; past the
         // newest you land back on the live edit buffer. historyIdx starts at
-        // history.length (buffer), so Up immediately recalls the newest entry.
+        // history.length (buffer), so Up immediately recalls the newest entry. A
+        // recalled line puts the caret after it, ready to be typed on at the end
+        // (`recallLine`).
         if (name === 'up') {
           const h = cmdline.current.history;
           if (h.length && cmdline.current.historyIdx > 0) {
             cmdline.current.historyIdx -= 1;
-            cmdline.current.input = h[cmdline.current.historyIdx];
-            notify();
+            recallLine(h[cmdline.current.historyIdx]!);
           }
           return true;
         }
@@ -1046,40 +1038,122 @@ export function renderApp(
           const h = cmdline.current.history;
           if (cmdline.current.historyIdx < h.length) {
             cmdline.current.historyIdx += 1;
-            cmdline.current.input = h[cmdline.current.historyIdx] ?? '';
-            notify();
+            recallLine(h[cmdline.current.historyIdx] ?? '');
           }
           return true;
         }
         // Tab takes the completion offered inline, then walks the other candidates
         // (config/commandline.ts). It replaces the WORD being completed — a command
-        // name, or a `config get|set|unset` argument.
+        // name, or a `config get|set|unset` argument — wherever the caret was, and
+        // leaves the caret after the whole line.
         if (name === 'tab') {
           const next = lineTab(cmdline.current.input, cmdline.current.walk, completeLine);
           cmdline.current.input = next.input;
+          cmdline.current.caret = cmdline.current.input.length;
           cmdline.current.walk = next.walk;
           notify();
           return true;
         }
-        if (name === 'backspace') {
-          cmdline.current.input = cmdline.current.input.slice(0, -1);
-          notify();
-          return true;
-        }
+        // The rest of the line's keys are the chat field's: flowtty's `editorReducer`,
+        // single-line. The caret moves by character and by word, Home/End, Backspace,
+        // Delete and the kill bindings edit where the caret is, and a paste goes in
+        // there; Enter submits. Esc has its own branch above (it closes the line).
+        const value = cmdline.current.input;
         // A paste goes in whole, colons and all, a line break or other control character
         // as a space: the line is one row, and a pasted newline must not run the command.
-        if (name === 'paste') {
-          const text = String((key as { text?: unknown }).text ?? '');
-          cmdline.current.input += text.replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ');
+        // The reducer reads `width` only for a multiline field's wrapped motion; the line
+        // is one row, so this is the row's width and nothing wraps.
+        const editorKey: Key = {
+          name,
+          sequence: '',
+          ctrl: !!key.ctrl,
+          meta: !!key.meta,
+          shift: !!key.shift,
+          ...(name === 'paste' ? { text: String((key as { text?: unknown }).text ?? '').replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ') } : {}),
+        };
+        const act = editorReducer({ value, cursor: cmdline.current.caret }, editorKey, { multiline: false, width: lineFieldWidth(region.width) });
+        if (act.kind === 'edit') {
+          // A content edit ends the history recall (`ListState.fromHistory`), and only a
+          // value change counts: a moved caret alone brings no list back.
+          if (act.state.value !== value) cmdline.current.list.fromHistory = false;
+          cmdline.current.input = act.state.value;
+          cmdline.current.caret = act.state.cursor;
           notify();
           return true;
         }
-        // A character, not a chord: Ctrl+D or Alt+x typed no `d` / `x` into the line.
-        if (isPrintable(key as never)) {
-          cmdline.current.input += name;
-          notify();
-          return true;
+        // `cancel` never reaches here (Esc closed the line above); `noop` is a key the
+        // line has no meaning for. Either way the text stays as it is.
+        if (act.kind !== 'submit') return true;
+        // ⏎ runs the command. This is a HOST concern — it must not depend on
+        // the plugin-namespaced `open` action: tracker defines `open:'enter'`
+        // (open an issue), which overrides the host's `open:['enter','return']`
+        // in buildKeys and drops `return` — yet the real TTY reports Enter as
+        // `{name:'return'}` (see TtyBackend). Relying on isKey(keys.open, name)
+        // there made `:help`/`:ask` silently dead on Enter in a real terminal
+        // while working in a headless probe that pressed `enter`. Check the key
+        // directly.
+        const input = cmdline.current.input.trim();
+        // The command is the FIRST WORD; the rest is its argument. Looking up the
+        // whole line instead would fail to find every plugin command given an
+        // argument — `:ask hi`, a tracker's `:open ABC-1` — and fall through to the
+        // host's own dispatch, which knows nothing of it and says nothing.
+        const [head = '', ...rest] = input.split(/\s+/);
+        const cmd = findIn(commandRegistry, head);
+        const arg = rest.join(' ');
+        // The command context carries the REAL closures (F1): setView/back
+        // mutate ui state + notify, setHelpModal opens core's help modal via
+        // host.store.help, runConfigCommand/runCacheCommand route to the
+        // config/cache handlers. Before, most were no-ops/absent, so
+        // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
+        const ctx = {
+          // Where the command runs: here, the `:` line — the chat runs a command marked
+          // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
+          surface: 'line',
+          showMessage: (m: string) => toast.showMessage(redactSecrets(String(m))),
+          setView: (v: string) => { ui.view = v; notify(); },
+          onExit,
+          back: () => { ui.view = undefined; notify(); },
+          clearCache: () => services.clearCache(),
+          runConfigCommand: (a: string) => runConfigCmd(a),
+          runCacheCommand: (a: string) => runCacheCmd(a),
+          setHelpModal: (open: boolean) => setHelpModalOpen(open),
+          toggleKeycaps: (a: string) => toggleKeycaps(a),
+          // `:ask`/`:chat` route to the assistant plugin's live `openChat`,
+          // published on the shared host.store.chat by its ChatModal (the same
+          // bridge pattern setHelpModal uses for the help modal). Absent until
+          // the chat surface mounts — the optional chaining makes it a no-op,
+          // exactly like the other not-yet-mounted plugin channels.
+          openChat: (t?: string) => (hostBase.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
+        };
+        if (cmd?.run) {
+          try {
+            // A plugin command (`tracker:open`) forwards its `run(ctx, arg)` into a
+            // plugin-specific ctx (TrackerCommandCtx). The base ctx carries only
+            // host-owned closures — a `:open`/`:board` would find no `openIssue`
+            // and silently no-op. Extend it with the OWNING plugin's own-key
+            // services (mutated live by its mount) so tracker commands reach real
+            // nav/modals; the host base closures stay on top (name collisions win
+            // for the host — `showMessage` stays the toast, not a plugin no-op).
+            const ctxForCmd = commandContextFor(cmd, ctx, apiMap as never);
+            cmd.run(ctxForCmd as never, arg);
+          } catch {
+            // A failing host command must not crash the shell.
+          }
+        } else {
+          // Base commands (BASE_COMMANDS) have no `run` — dispatch by name.
+          runHostCommand(cmd?.name ?? head, arg);
         }
+        // Remember the executed command (no empty lines) and CLEAR the buffer so
+        // the next `:` opens fresh — before, the leftover input was shown again
+        // on the next open (a real defect).
+        // A command that says `history: false` (its argument may be a secret) is not.
+        if (input && cmd?.history !== false) cmdline.current.history.push(input);
+        cmdline.current.historyIdx = cmdline.current.history.length;
+        cmdline.current.input = '';
+        cmdline.current.caret = 0;
+        cmdline.current.open = false;
+        ui.cmdOpen = false;
+        notify();
         return true;
       }
       // Command line closed: the global host action keys fire here.
@@ -1269,8 +1343,14 @@ export function renderApp(
     // The command line completes inline with one candidate: the untyped rest of the
     // suggestion after the caret. With two or more, a list sits over the line; it keeps
     // its height while it is open, so typing does not move the screen by a row at a time.
-    const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.walk, cmdline.current.list, completeLine) : null;
+    const shownLine = cmdline.current.open ? lineViewWithList(cmdline.current.input, cmdline.current.caret, cmdline.current.walk, cmdline.current.list, completeLine) : null;
     const line = shownLine?.view ?? null;
+    // The line as drawn: the text before the caret, the caret cell — the whole cluster
+    // under it, or a space at the end — and the text after it. With an offer the caret
+    // sits on the first offered character instead, so there is no cell of its own.
+    const lineInput = cmdline.current.input;
+    const lineCaret = line?.caret ?? 0;
+    const caretCell = line && !line.ghost ? lineInput.slice(lineCaret, nextGrapheme(lineInput, lineCaret)) : '';
     // The runtime's panel as it is drawn: its rows as they are now, redacted — a
     // plugin's settings and its links' places may hold what should not be on screen.
     const hostView = hostPanel.current ? (() => {
@@ -1348,17 +1428,21 @@ export function renderApp(
         // not know it, so an `as any` would hide that the footer is never dimmed.
         line
           ? h(Box, { flexDirection: 'column' },
-            shownLine?.list ? renderCompletionList(shownLine.list, region.width - 2) : null,
+            shownLine?.list ? renderCompletionList(shownLine.list, lineFieldWidth(region.width)) : null,
             h(Box, { flexDirection: 'row' },
               // The prompt, the inline offer and the candidate list are the host
               // speaking, not text anyone asked for: a copy of the command line is
               // what was typed and nothing else.
               h(Text, { bold: true, color: 'cyan', selectable: false }, ': '),
-              h(Text, null, cmdline.current.input),
-              // The caret sits ON the first offered character, as in the chat's field.
+              lineCaret > 0 ? h(Text, null, lineInput.slice(0, lineCaret)) : null,
+              // The caret sits ON the character under it — the whole cluster, a flag or
+              // an emoji with its modifiers included — and on a space at the end of the
+              // line. With an offer, it sits on the first offered character instead, as
+              // in the chat's field.
               line.ghost
                 ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan', selectable: false }, line.ghost.slice(1))]
-                : h(Text, { inverse: true, selectable: false }, ' '),
+                : h(Text, { inverse: true, ...(caretCell ? {} : { selectable: false }) }, caretCell || ' '),
+              lineInput.length > lineCaret + caretCell.length ? h(Text, null, lineInput.slice(lineCaret + caretCell.length)) : null,
               // What the offered candidate's label says (a value declared as
               // `{ value, label }`): said, dim, never part of the command.
               line.label ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${redactSecrets(line.label)}`) : null,
@@ -1385,13 +1469,16 @@ export function renderApp(
   // keys (`HostKeyPath`).
   // The meter hears each key where the terminal reports it, under the host's key path
   // (which hands a key nothing took to flowtty twice), and every frame flowtty paints.
-  return render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(metered(root, meter), keyPath), {
+  const rendered = await render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(metered(root, meter), keyPath), {
     onFrame: (stats) => meter.frame(stats),
     onCopy: (event) => onCopySelection(event, {
       say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
       fallback: (text) => copyToClipboard(text),
     }),
   });
+  // The app's own host services go back with the render handle: a test reaches a channel
+  // the way a plugin does (`setThemeMode`), not through the terminal.
+  return Object.assign(rendered, { services });
 }
 
 // What a finished copy does beyond flowtty's own clipboard write. It fires for every

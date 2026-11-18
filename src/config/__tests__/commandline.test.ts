@@ -4,13 +4,24 @@ import { BASE_COMMANDS, completeCommand } from '../commands';
 
 const complete = (text: string) => completeCommand(text, BASE_COMMANDS, {});
 
+test('the line view keeps a caret and ghosts only at the end', () => {
+  // The caret is the line's own index, and the offer is drawn after the line only
+  // while the caret is at its end: mid-line the rest of a suggestion would land on
+  // the wrong side of the caret.
+  expect(lineView('config set', 6, null, complete)).toMatchObject({ caret: 6, ghost: '' });
+  expect(lineView('config set', 10, null, complete)).toMatchObject({ caret: 10, ghost: '' });
+  // A command with something left to offer: the rest at the end, none mid-line.
+  expect(lineView('config se', 8, null, complete).ghost).toBe('');
+  expect(lineView('config se', 9, null, complete)).toMatchObject({ caret: 9, ghost: 't' });
+});
+
 test('the untyped rest of the best match is offered after the caret', () => {
-  const v = lineView('he', null, complete);
+  const v = lineView('he', 2, null, complete);
   expect(`he${v.ghost}`).toBe('help');
   // Nothing typed → nothing offered: the full command list is noise.
-  expect(lineView('', null, complete)).toEqual({ ghost: '', label: '', others: [] });
+  expect(lineView('', 0, null, complete)).toEqual({ caret: 0, ghost: '', label: '', others: [] });
   // A whole command has nothing left to offer.
-  expect(lineView('help', null, complete).ghost).toBe('');
+  expect(lineView('help', 4, null, complete).ghost).toBe('');
 });
 
 test('Tab takes the offer, then walks the other candidates and comes back round', () => {
@@ -28,7 +39,7 @@ test('Tab takes the offer, then walks the other candidates and comes back round'
   expect(new Set(seen.slice(0, all.length))).toEqual(new Set(all));
   expect(seen[all.length]).toBe(seen[0]!);
   // While walking the line holds a whole candidate: no ghost, the OTHERS are named.
-  const v = lineView(input, walk, complete);
+  const v = lineView(input, input.length, walk, complete);
   expect(v.ghost).toBe('');
   expect(v.others).not.toContain(input);
   expect(v.others.length).toBe(all.length - 1);
@@ -38,13 +49,13 @@ test('typing anything ends the walk', () => {
   const first = lineTab('c', null, complete);
   const typed = `${first.input}x`;
   // The stale walk no longer applies: the view is computed from the line as it is.
-  expect(lineView(typed, first.walk, complete)).toEqual(lineView(typed, null, complete));
+  expect(lineView(typed, typed.length, first.walk, complete)).toEqual(lineView(typed, typed.length, null, complete));
 });
 
 test('Tab replaces the WORD being completed, not everything before the first space', () => {
   // Completing the whole line instead of just the word would give `config ge` + Tab → `get ge`.
   expect(lineTab('config ge', null, complete).input).toBe('config get');
-  expect(lineView('config ge', null, complete).ghost).toBe('t');
+  expect(lineView('config ge', 9, null, complete).ghost).toBe('t');
   // A config key is completed in place too.
   const key = lineTab('config get ai.mod', null, (t) => completeCommand(t, BASE_COMMANDS, { ai: { model: 'x' } }));
   expect(key.input).toBe('config get ai.model');
@@ -61,16 +72,16 @@ test('a labelled candidate is said beside the field, and the others carry their 
     const all = ['1', '2', '3'].filter((c) => c.startsWith(head));
     return { head, hasSpace: true, best: all.find((c) => c !== head) ?? all[0] ?? '', candidates: all, labels: { '1': 'first', '2': 'second' } };
   };
-  expect(lineView('open ', null, labelled)).toEqual({ ghost: '1', label: 'first', others: ['2 second', '3'] });
+  expect(lineView('open ', 5, null, labelled)).toEqual({ caret: 5, ghost: '1', label: 'first', others: ['2 second', '3'] });
   // Typed by hand, the whole word still says what it names.
-  expect(lineView('open 2', null, labelled)).toMatchObject({ ghost: '', label: 'second' });
+  expect(lineView('open 2', 6, null, labelled)).toMatchObject({ ghost: '', label: 'second' });
   // Walking: the label follows the candidate the line holds.
   const first = lineTab('open ', null, labelled);
   const second = lineTab(first.input, first.walk, labelled);
   expect(second.input).toBe('open 2');
-  expect(lineView(second.input, second.walk, labelled)).toEqual({ ghost: '', label: 'second', others: ['1 first', '3'] });
+  expect(lineView(second.input, second.input.length, second.walk, labelled)).toEqual({ caret: 6, ghost: '', label: 'second', others: ['1 first', '3'] });
   // No labels: the view says nothing beside the field.
-  expect(lineView('he', null, complete).label).toBe('');
+  expect(lineView('he', 2, null, complete).label).toBe('');
 });
 
 test('a walk over a single candidate completes anew: Tab after a unique directory walks into it', () => {
@@ -211,18 +222,62 @@ test('with a list open the line is drawn with the selected rest and the label, n
   const c = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'ab', candidates: ['ab', 'ac'], labels: { ab: 'first', ac: 'second' } });
   const st = newListState();
   listKey('a', st, { name: 'down' }, c);
-  const { view, list } = lineViewWithList('a', null, st, c);
-  expect(view).toEqual({ ghost: 'c', label: 'second', others: [] });
+  const { view, list } = lineViewWithList('a', 1, null, st, c);
+  expect(view).toEqual({ caret: 1, ghost: 'c', label: 'second', others: [] });
   expect(list?.selected).toBe('ac');
   // With one candidate it is the inline view.
-  const one = lineViewWithList('help', null, newListState(), (t) => completeCommand(t, BASE_COMMANDS, {}));
+  const one = lineViewWithList('help', 4, null, newListState(), (t) => completeCommand(t, BASE_COMMANDS, {}));
   expect(one.list).toBeNull();
+});
+
+test('the list and its ghost hold only while the caret is at the end of the line', () => {
+  // `c` has four candidates; the list belongs to the line's LAST word, so a caret
+  // moved into the middle of the line takes it away — the rows, the ⏎/Tab take and
+  // the inline rest would all target the wrong word there.
+  const st = newListState();
+  expect(openList('c', st, complete)?.total).toBe(4);
+  const mid = lineViewWithList('c', 0, null, st, complete);
+  expect(mid.list).toBeNull();
+  expect(mid.view).toMatchObject({ caret: 0, ghost: '' });
+  // Back at the end it is the same list again.
+  expect(lineViewWithList('c', 1, null, st, complete).list?.selected).toBe('cache');
+});
+
+test('a recalled line offers no list and no rest, but keeps the Tab hint', () => {
+  const two = (text: string): CompleteResult => ({ head: text, hasSpace: true, best: 'item00', candidates: ['item00', 'item01'] });
+  const st = newListState();
+  // ↑ recalled the line from history: the mark rides beside the list's state, so no rows
+  // open and the offer is not drawn — but the hint beside the line names the candidate
+  // Tab would walk to, so Tab is never silent.
+  st.fromHistory = true;
+  const recalled = lineViewWithList('item0', 5, null, st, two);
+  expect(recalled.list).toBeNull();
+  expect(recalled.view).toEqual({ caret: 5, ghost: '', label: '', others: ['item01'] });
+  // Mid-line too: no list, and the hint stays.
+  const mid = lineViewWithList('item0', 2, null, st, two);
+  expect(mid.list).toBeNull();
+  expect(mid.view).toEqual({ caret: 2, ghost: '', label: '', others: ['item01'] });
+  // Every list key is the line's own then: ↑ walks the history again.
+  expect(listKey('item0', st, { name: 'down' }, two)).toEqual({ handled: false });
+  // Tab walks a recalled line as it always does, its hint following the walk.
+  const tabbed = lineTab('item0', null, two);
+  expect(tabbed.input).toBe('item00');
+  expect(lineViewWithList(tabbed.input, tabbed.input.length, tabbed.walk, st, two)).toEqual({
+    view: { caret: 6, ghost: '', label: '', others: ['item01'] },
+    list: null,
+  });
+  // The next content edit (`editorReducer` `edit` from typing or a paste) brings the list
+  // and the rest back: the field clears the mark as it takes the edited text.
+  st.fromHistory = false;
+  const edited = lineViewWithList('item0', 5, null, st, two);
+  expect(edited.list?.total).toBe(2);
+  expect(edited.view.ghost).toBe('0');
 });
 
 test('a draw or a key runs the completer once for the line', () => {
   let calls = 0;
   const counted = (text: string): CompleteResult => { calls++; return many(1)(text); };
-  lineViewWithList('x item0', null, newListState(), counted);
+  lineViewWithList('x item0', 7, null, newListState(), counted);
   expect(calls).toBe(1);
   calls = 0;
   const two = (text: string): CompleteResult => { calls++; return many(3)(text); };

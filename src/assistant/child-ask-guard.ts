@@ -7,6 +7,10 @@
 // How long the block, and the person's last key, must have been quiet.
 export const ASK_ARM_MS = 600;
 
+// How long a question that parks while the person is typing waits for the sentence: the
+// field keeps the keys until the last one is this old.
+export const ASK_GRACE_MS = 600;
+
 // The clock the guard reads. A seam for tests, which move it instead of sleeping.
 export const askClock: { now: () => number } = { now: () => Date.now() };
 

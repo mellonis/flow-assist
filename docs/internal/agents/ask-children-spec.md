@@ -35,7 +35,10 @@
   notice). A chat that is already a window shows the block there. Only `y` and `n`, only on an empty field with the block drawn,
   answer it, and only after a pause: `src/assistant/child-ask-guard.ts` — an answer counts
   600 ms after the request first came on screen with the keyboard in the chat (a request
-  seen anew after a gap with none shown, or a different one, arms from then) and 600 ms
+  seen anew after a gap with none shown, or a different one, arms from then; on screen
+  means the request's block owning the field's place — the shape `block`, which beside a
+  grace-held ask on an empty field holds while only the strip is drawn, and gives way to
+  the notice beside a draft, where the pause's clock starts when the notice ends) and 600 ms
   after the person's last key of any kind: every key the chat handler gets is noted, and
   so is every key the App takes first (`store.chat.noteKey`, from `keyPath.first` when it
   consumes a key). While the chat lacks the keyboard — collapsed, the plugin's side
@@ -61,13 +64,55 @@
   where the block has no room the notice reads `a question from «<label>» waits — no room to show it; /subagent stop <label> declines it`. The session's own y/n and its own
   question come first, then the oldest child request of either kind; an own request that takes the place of a drawn
   child's block, y/n or question, is armed for 600 ms as above, and a child's typed answer owes the pause again after
-  its block was away. The first key of the answer counts after the guard's pause (an earlier key is the field's, as a
+  its block was away (the grace serves that pause for a request the typing grace holds
+  back: the window runs from the notice's end). The first key of the answer counts after the guard's pause (an earlier key is the field's, as a
   `y` is); once one counted, the rest is typed without it. Every key then goes to the question's state machine
   (`askKey`), ⏎ answers it and Esc, even after text was typed, settles it with the no-answer text; the answer goes to the owner's
   `stepParentAsk`, never to the session's model. In a watch of the asking node (or above it) the block is
   `WatchView.question`, drawn with no field and so with no empty-field rule, and every other key is swallowed. The
   waiting badge, the left-session toast (`a question from «<label>»`) and the picker's status
   (`subtreeWaiting`) count only questions waiting for the person, not one waiting for a model.
+  **A question waits out the person's sentence** (`ASK_GRACE_MS`, 600 ms, the same
+  `askClock`): a question that parks — the session's own `ask_user` or a child's routed to
+  the person — takes the keyboard only once the last key the chat took is older than the
+  grace, and never while the `:` line is open, since a half-written command is a long
+  thought. While the grace holds it the field keeps every key and each such key re-arms the
+  grace (the key that sends a message clears it: the sentence went; a ↑/↓ walk that lands
+  where it started recalls nothing, and a key that hands over to the tree rows is the
+  handoff it is — neither is a key of the field's editing and neither re-arms), the block is not drawn
+  in the field's place, and the strip above the field — or, with the chat collapsed, its
+  status — says `? a question is waiting`; a one-shot unref'd timer re-runs the claim when
+  the person goes quiet. A key a block, a picker, a panel or a reader (the pager, a watch)
+  takes is no typing and re-arms nothing. Past the grace the claim runs unchanged — the
+  arms above still hold — and a y/n gains no grace: its own `ASK_ARM_MS` pause stands.
+- **The question wizard (`ask_user`, `src/assistant/ask.ts`).** The model's call carries 1–4
+  questions of 2–4 options, each optionally `multiSelect`; the block always offers `Other…`
+  for the person's own words, so the model never spends an option on it. `AskState` holds
+  one page per question (`index`), one `AskDraft` per question (`cursor`, `picked`, `typing`,
+  `text`, `caret`) and the answers the call has written so far. A single question keeps its
+  own keys: on a single-select a digit answers the option it names at once and ⏎ answers
+  the row under the cursor (or opens `Other…`); in a multi-select a digit toggles the
+  option it names and Space toggles the option row under the cursor, and ⏎ commits the
+  picks. Any other printable key starts the answer with itself in the field. More than
+  one question is a WIZARD: the page after the last is the submit page, and only that
+  page's ⏎ answers the call — a page's ⏎ on an option commits its draft and moves on, a
+  digit does the same on a single-select, and in a multi-select a digit or Space toggles
+  an option row and ⏎ commits the picks; ←/→ walk the pages (clamped at both ends;
+  inside the open field they are the caret's). A draft survives every move, so going
+  back, changing a pick, editing the words or leaving a page empty costs nothing; a
+  page's words erased before the call goes read as the empty page they left, never as
+  words the person took back. **Submit is the answer**: the submit page lists every
+  question with the answer its ⏎ will send (`(not answered)` for a draft that holds
+  nothing), and its ⏎ rebuilds `answers` for every question in order — an empty one sent
+  as `- <question> → no answer given` — resolves the tool once, and writes the kept
+  `? / →` rows and journal rows, one per question. Esc leaves the answer field first (a
+  free-text question has no list, so there Esc dismisses at once); Esc on the list — or
+  on the submit page — dismisses the whole call: a dismissal is not consent — the model
+  reads `The user dismissed the question without answering` and that it must not assume
+  an answer. What a page COMMITTED and its draft still holds is kept as that question's
+  answer; every other question reads `dismissed`. A child's question (`ask_parent`) is a
+  free-text block and takes none of this: its field is open from the start and Esc
+  settles it.
 - **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
   rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's

@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -273,3 +273,27 @@ for (const stop of ['escape', 'ctrl+c'] as const) {
     ui.app.unmount();
   });
 }
+
+test('Esc Esc armed, then ↓ steps into the tree rows: the handoff disarms, and the hint is the rows\' keys', async () => {
+  const model = new ScriptedModel();
+  const child = model.when((req) => firstUser(req).includes('DISARM'));
+  child.script([{ hold: true as const }, { text: 'working.' }]);
+  const ui = await bootApp(model, 110, 30);
+  await ui.press('F');
+  await ui.type('/subagent DISARM do it');
+  await ui.press('return');
+  await settleUntil(() => /disarm-do/i.test(ui.backend.lastFrame));
+
+  await ui.press('escape');
+  await settle(2);
+  expect(ui.backend.lastFrame).toContain('again to exit');
+
+  // ↓ hands the keys to the tree rows (the field empty, nothing shown in history): the key
+  // was the person's, so the Esc-Esc arm goes with it — and the hint is the rows' own
+  // keys, where Esc means back rather than exit.
+  await ui.press('down');
+  await settle(2);
+  expect(ui.backend.lastFrame).not.toContain('again to exit');
+  expect(ui.backend.lastFrame).toContain('Esc back');
+  ui.app.unmount();
+});

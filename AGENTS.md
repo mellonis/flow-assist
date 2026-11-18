@@ -286,12 +286,14 @@ past incident may motivate a rule; keep the rule, drop the incident.
   component; the first press arms (`^c again to exit`, `ARM_MS` 2 s), the same
   key fires, any other key disarms. The open chat speaks first: Ctrl+C with a
   turn or `!command` running STOPS it exactly as Esc does and nothing is
-  armed; Ctrl+D in a field with text is the editor's forward delete. **The
+  armed; Ctrl+D in a field with text is the editor's forward delete; a chord
+  a drawn plugin's panel binds (its `ctrl+d`) is the panel's key. **The
   keys are claimed only while there is something to stop**
   (`Conversation.canStop`) — for Esc as well. No key quits by default: a
   stray `q` would close the whole app; quitting is `:quit` or Ctrl+C twice.
-  A capital opens something big (`F` the assistant, `L` the log); lower case
-  is for what is INSIDE a screen. A modal is closed by the key it is bound to
+  A capital opens something big (`F` the assistant, `L` the log, `J` the work
+  picker); lower case is for what is INSIDE a screen. A modal is closed by the
+  key it is bound to
   (`f.keys.<action>`), never by a letter written in the handler.
 - **One look for every host modal** — `frame()` and `overlay()` in
   `src/views/modals.ts`; a modal that draws its own frame doubles up. A window
@@ -529,9 +531,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
 
 - Who speaks is said by a **gutter marker and a ground**, not a label:
   `›` the person, `ƒ` the assistant (also signing the frame), `◆` a background
-  result, `!`/`‼` a command. A marker is ONE narrow-width code point (a wide
-  glyph shifts the row in a terminal that draws it two cells wide). Colours
-  come from `theme.modals.chat`.
+  result, `!`/`‼` a command. A kept question and the answer it got share a ground of
+  their own (`askBg` in `askInk`; a dismissed answer's ink is dim). A marker is ONE
+  narrow-width code point (a wide glyph shifts the row in a terminal that draws it two
+  cells wide). Colours come from `theme.modals.chat`.
 - Markdown in answers is laid out by flowtty's `layoutMarkdown`; **the person's
   own message is drawn as typed, not as markdown** (every line break and
   indent kept). Only role `user`: a background result and a `!command`'s block
@@ -582,8 +585,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
   (a category layout would move a round's text above every diff of the turn).
   A round's text never moves: while it streams it is dim under a live mark;
   the moment a tool-call fragment arrives it is a step, in its run. `step` (the
-  default) folds each run to ONE dim row; `open` draws every step in full. The
-  `Next:` token is never drawn; its sentence is the step. The reasoning is a
+  default) folds each run to ONE dim row; `open` draws every step in full. While a
+  question of its own waits, the run that led into it draws in full at full ink (a
+  display flag, not fold state — `folds.ts` untouched). The `Next:` token is never
+  drawn; its sentence is the step. The reasoning is a
   block of its own, where the model thought it. Round bookkeeping lives
   outside the state updaters. A round cut off keeps its text where it was
   drawn. Under the answer only the quiet line stays: how long, what it cost
@@ -609,7 +614,13 @@ past incident may motivate a rule; keep the rule, drop the incident.
   after the 600 ms guard pause (`child-ask-guard.ts`, `askClock` the seam a
   test moves). ⏎ and Esc never answer it. A question from a subagent the
   person started is the same request with its own block and machine
-  (`askKey`). "Closing is not an answer" (above). The picker, the pager and a
+  (`askKey`). **A question waits out the sentence the person is typing**: it
+  takes the keyboard only once the last key the chat took is older than
+  `ASK_GRACE_MS` (600 ms, the same clock) and never while the `:` line is open;
+  until then the field keeps the keys, the block is not drawn in the field's
+  place, and the strip says `? a question is waiting` (a one-shot unref'd timer
+  re-runs the claim). A y/n gains no grace — its own `ASK_ARM_MS` pause stands.
+  "Closing is not an answer" (above). The picker, the pager and a
   host panel hold every key while drawn and never reach the conversation
   beneath them.
 - **The session picker** opens on the current project's sessions, Tab for

@@ -72,6 +72,39 @@ test('completion is inline and the screen does not jump while typing', async () 
   ui.app.unmount();
 });
 
+test('a caret mid-line edits mid-line', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  const line = () => lastRow(ui);
+  await ui.press(':');
+  await ui.type('config et');
+  // Home, then seven steps right: `config et` is nine characters, so the caret rests
+  // at index 7 — just before the `e` — and the `s` goes in there, opening `set`.
+  await ui.press('home', 'right', 'right', 'right', 'right', 'right', 'right', 'right');
+  await ui.type('s');
+  expect(line()).toMatch(/^\s*: config set$/);
+  // Backspace takes the `s` just inserted from the middle.
+  await ui.press('backspace');
+  expect(line()).toMatch(/^\s*: config et$/);
+  // The start of the line is editable too.
+  await ui.press('home', 'delete');
+  expect(line()).toMatch(/^\s*: onfig et$/);
+  ui.app.unmount();
+});
+
+test('a caret mid-line takes the completion list away', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  await ui.press(':');
+  await ui.type('c');
+  // `c` has four candidates: the list is over the line, each row with its detail.
+  expect(ui.backend.lastFrame).toContain('Turn the cache on or off');
+  await ui.press('home');
+  // Mid-line the list is gone — its rows and its ⏎/Tab take belong to the line's last
+  // word — and the typed `c` stays on the row, under the caret, with no rest after it.
+  expect(ui.backend.lastFrame).not.toContain('Turn the cache on or off');
+  expect(lastRow(ui)).toMatch(/^\s*: c(?: |$)/);
+  ui.app.unmount();
+});
+
 // A value with a colon in it — a URL, a time, `host:port`, `repo:git_status` — reaches
 // the command whole, typed or pasted; only the key that opens the line is special, and
 // only while it is closed or empty.

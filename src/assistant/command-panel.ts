@@ -8,6 +8,7 @@
 // changes under it — a server that connects while the list is up. A key's `run` may
 // answer a line for the panel's notice, or a panel of its own, which is opened over this
 // one: Esc goes back to the one before it, and closes the last.
+import { canonicalBinding, isKey } from '../playback/keys.js';
 
 export type PanelRow = {
   // What the key's `run` is handed for the row under the cursor.
@@ -18,11 +19,14 @@ export type PanelRow = {
   // How the detail is coloured: `ok` a good state, `warn` one to look at, `error` one
   // that failed; none — dim.
   tone?: 'ok' | 'warn' | 'error';
+  // A group header over the rows that follow: drawn dim, and no key runs on it.
+  kind?: 'group';
 };
 
 export type PanelKeyDef = {
   // The key as the terminal names it (`d`, `r`, `return`) — a key the panel does not
-  // take for itself (`up`, `down`, `escape`).
+  // take for itself (`up`, `down`, `escape`). A chord is spelled with its modifier
+  // (`ctrl+d`) and matches only with that modifier held.
   key: string;
   label: string;
   // Runs on the row under the cursor (null — the panel has no rows). May answer a line
@@ -40,6 +44,16 @@ export type PanelSpec = {
   // ends, one that appears above), by the row's `id`; when that row is gone it stays at
   // the place it was. Without it the cursor is an index into the rows.
   follow?: boolean;
+  // A cursor move, observed: the row under it now, and its index. A preview is laid on
+  // screen here (`/theme`), never a decision — a key's `run` is the only thing that
+  // decides, and it never calls this. A move between rows observes; a panel's cursor
+  // reset (Esc back to the panel underneath, the last one closing) is not a move.
+  onCursor?: (id: string, index: number) => void;
+  // The panel went WITHOUT a decision, observed: Esc closing the last one, the chat
+  // closing, a session change, another panel taking its place. What a preview put on
+  // screen is put back here (`/theme`). A key's `run` that closes the panel is a
+  // decision and never calls it; Esc back to a panel underneath is not a drop either.
+  onDrop?: () => void;
 };
 
 // `at`: the id of the row the cursor was last moved to, read when the top panel follows.
@@ -48,7 +62,18 @@ export type PanelState = { stack: PanelSpec[]; cursor: number; notice: string; a
 // The keys the panel keeps for itself; a plugin's key of the same name is never run.
 export const PANEL_OWN_KEYS = ['up', 'down', 'escape'];
 
-export const panelStart = (spec: PanelSpec): PanelState => ({ stack: [spec], cursor: 0, notice: '' });
+export const panelStart = (spec: PanelSpec): PanelState => {
+  // The cursor starts on the first row a key can run on — a group header is nobody's
+  // row. A `rows()` that throws is left at the first row and drawn as its error at
+  // every draw, as it would be anyway.
+  let cursor = 0;
+  try {
+    const rows = spec.rows();
+    const at = rows.findIndex((r) => r && r.kind !== 'group');
+    cursor = at >= 0 ? at : 0;
+  } catch { /* the error is rows()'s own; the cursor starts at the top */ }
+  return { stack: [spec], cursor, notice: '' };
+};
 
 export const panelTop = (state: PanelState): PanelSpec => state.stack[state.stack.length - 1]!;
 
@@ -88,16 +113,46 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
   // The cursor's row is remembered by id only for a panel that follows its rows.
   const atOf = (to: number): { at?: string } => (panelTop(state).follow && rows[to] ? { at: rows[to]!.id } : {});
   if (key.name === 'escape') {
-    return { state: state.stack.length > 1 ? { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } : null };
+    if (state.stack.length > 1) return { state: { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } };
+    // The last panel closes. The preview a spec laid on screen is put back by whoever
+    // drops it (`panelDrop`) — the chat's one drop path, never a key's decision.
+    return { state: null };
   }
   if (key.name === 'up' || key.name === 'down') {
     const to = key.name === 'up' ? Math.max(0, cursor - 1) : Math.min(last, cursor + 1);
+    // A move is observed before the state is handed back; a key that is no move says
+    // nothing. A throw is no move's business — the cursor still goes where it goes.
+    const id = to !== cursor ? rows[to]?.id : undefined;
+    if (id !== undefined) {
+      try { panelTop(state).onCursor?.(id, to); } catch { /* observation only */ }
+    }
     return { state: { ...state, cursor: to, ...atOf(to) } };
   }
-  if (key.ctrl || key.meta) return { state };
+  if (key.ctrl || key.meta) {
+    // Every modifier key is the panel's own silence but the chords its keys spell
+    // (`ctrl+d`): a bare name never fires with a modifier held.
+    const chord = panelKeys(state).find((k) => k.key.includes('+') && isKey(canonicalBinding(k.key), key));
+    if (!chord) return { state };
+    // A group header is nobody's row: a key over it runs nothing at all, which is what
+    // the row's `kind` promises. The state is the panel's, unchanged.
+    if (rows[cursor]?.kind === 'group') return { state };
+    return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def: chord, id: rows[cursor]?.id ?? null } };
+  }
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
+  if (rows[cursor]?.kind === 'group') return { state };
   return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def, id: rows[cursor]?.id ?? null } };
+}
+
+// The panel went WITHOUT a decision: Esc on the last one, the chat closing, a session
+// change, another panel taking its place. It is `null` after, and the spec's `onDrop`
+// has put back whatever it previewed. A key's `run` that closes the panel is a decision
+// and closes it without passing here; Esc back to a panel underneath is not a drop.
+export function panelDrop(state: PanelState | null): null {
+  if (state) {
+    try { panelTop(state).onDrop?.(); } catch { /* observation only */ }
+  }
+  return null;
 }
 
 const isSpec = (v: unknown): v is PanelSpec => !!v && typeof v === 'object' && typeof (v as PanelSpec).rows === 'function' && typeof (v as PanelSpec).title === 'string';

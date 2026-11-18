@@ -512,6 +512,10 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   and below; any other key (`ai.*`, `shell.*`, another plugin's) is refused. For a
   command of yours that turns a setting of yours on or off; never for a key the person
   did not ask to change.
+- `host.services.setThemeMode(mode)` pins the app's appearance for this run — `system`
+  follows the terminal's light/dark scheme, `light` and `dark` hold one — and repaints
+  every window at once; it saves nothing (a choice the person keeps is
+  `config set ui.theme`, which only they may set).
 - The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
   secret — a token, a password, a header — says `history: false` and is never kept:
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of

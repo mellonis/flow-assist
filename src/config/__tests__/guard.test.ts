@@ -1,7 +1,7 @@
 // The config guard: in the running app a settings file changed by anyone but the host
 // is not applied — the last accepted config keeps being served until the person says
 // yes — while the host's own writes are accepted as they are made.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { acceptedConfigPath, applyConfigChange, checkConfigFiles, configStartupNotes, declineConfigChange, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, saveConfigSetting, setConfigValue, unguardConfigFiles } from '../load';
@@ -18,6 +18,11 @@ const external = (file: string, value: unknown) => {
 
 // Armed as the app arms it: after the start's own read of the files.
 const arm = () => { loadConfig(); guardConfigFiles(); };
+
+// The state dir is one per test process, and a suite that reads the config unarmed (any
+// e2e boot) leaves an accepted record in it. A start here has no record of its own: one
+// another suite left would be served instead of the file this test just wrote.
+beforeEach(() => { fs.rmSync(acceptedConfigPath(), { force: true }); });
 
 afterEach(() => {
   unguardConfigFiles();

@@ -275,3 +275,21 @@ test('a numeric answer with a space reaches the subagent whole, and Esc after ty
   expect(results(b!.requests[1])).toEqual([NO_ANSWER]);
   ui.app.unmount();
 });
+
+test('a child\'s question takes the field without lighting the session\'s own lead-in', async () => {
+  // The block in the field's place is the child's ask; the session's transcript has no
+  // question of its own, so its narration stays the folded chrome row it always was —
+  // the lead-in that lights belongs to the conversation the question is asked in.
+  const { children: [a], ui } = await boot(['QWIRE'], {
+    main: [[{ text: 'Looking at the helper.', tool: 'datetime', args: {} }], [{ text: 'Main done.' }]],
+  });
+  await ask(ui, 'what time is it');
+  await settleUntil(() => frameOf(ui).includes('Main done.'));
+  expect(frameOf(ui)).toContain('▸ Looking at the helper.');
+  await ask(ui, '/subagent QWIRE go');
+  await settleUntil(() => frameOf(ui).includes(title('qwire-go')));
+  expect(frameOf(ui)).toContain('Q-QWIRE?');
+  expect(frameOf(ui)).toContain('▸ Looking at the helper.');
+  expect(a!.requests.length).toBe(1);
+  ui.app.unmount();
+});

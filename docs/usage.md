@@ -406,6 +406,32 @@ a `y` counts; a question that arrives while the cursor is in the rows, or that e
 takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
 on screen a question takes keys at once.
 
+### The work picker: `J`, or `/work`
+
+Everything that runs beside this conversation — the live subagents and tasks, the
+background shells — in one list to jump between. `J` opens it wherever the chat does not
+have the keyboard (on the start screen, on a plugin's screen), `/work` from inside the
+chat; `config set keys.work <key>` moves the capital.
+
+One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
+it says `none`. A subagent's row is its label path with what it is doing
+(`main › review · running — reading src/`), and one that waits on you — its own question
+or y/n, or one parked in a conversation below it — is marked `? waiting for you`. A
+shell's row is its id and command
+(`sh-3 · bun run dev`) with its state and who owns it (`running — fix-tests`, or the
+chat's own as `this chat`); a shell you killed sinks below the running ones and reads
+`killed (person) — this chat`. The rows are read again at every draw, so a state is what
+is true now.
+
+↑ and ↓ move among the rows across the group names, which are no key's. ⏎ opens what is
+under the cursor: a subagent's conversation as the watch draws it (Esc comes back to the
+chat, never to the picker — the picker is one-shot, `J` opens it again), or a shell's kept
+output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
+closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
+`kill sh-3? y yes · n no` in that row's place; the question names its job, so `y` kills
+that job wherever the cursor has moved to since and `n` leaves it running. `ctrl+d` again
+drops the pending question and kills nothing, and Esc closes the picker, question and all.
+
 ## Agent files
 
 An agent file is a named subagent written down in a Markdown file: a prompt you reuse, with
@@ -706,6 +732,42 @@ out of rounds — Enter on the empty field sends "continue", and the assistant p
 work up where it stopped, or writes the answer again from the start when the loop began
 before any text was kept. `/export` says the turn was `stopped (the answer looped)`.
 
+## When the assistant asks you
+
+**A question stops the turn until you answer it.** The assistant asks when your answer
+changes what it does next, and the block takes the field's place while it waits; anything
+you had typed is kept, not lost. The block always offers `Other…` for your own words.
+On a question with one answer, a digit answers the option it numbers at once, and ↑/↓
+move the cursor with ⏎ picking the row under it (or opening `Other…`). On a question
+that allows several, a digit toggles the option it numbers, Space toggles the option row
+under the cursor, and ⏎ sends the picks. Typing anything else starts an answer in your
+own words: the field opens on what you typed, and ⏎ sends it. Esc leaves the answer field
+and goes back to the list; Esc on the list dismisses the question — the assistant is told
+you gave no answer and must not assume one (a question that is only a text field has no
+list, so its Esc dismisses at once).
+
+**A question waits out the sentence you are typing.** When it arrives while you are still
+typing, the block does not take the field from under your keys: they stay the field's and
+the strip above it says `? a question is waiting`, and the block comes up about half a
+second after you stop. A message you send in that time is sent as usual — it queues behind
+the turn, as any message does while an answer is coming. A `:` command line holds the
+question off while it is open: run the line or leave it, and the block follows. Nothing is
+answered for you either way; the question simply waits for you to finish.
+
+**Several questions come one page at a time, with a submit page last.** When the
+assistant asks more than one question in a call, the block becomes a small wizard: every
+question gets a page of its own, and a tab strip under the title names them (a tick on a
+tab means that page holds an answer). A page is answered the same way and commits what
+its draft holds to move you on: a digit or ⏎ on a single-select option; digits and Space
+to toggle option rows, then ⏎ to send the picks; or your own words, ⏎ to answer. ←/→
+walk the pages at any time (they are the caret's keys while you are typing), so you can
+go back, change a pick, edit your words or leave a question empty; nothing is sent until
+the end. The last page sums the call up: every question with the answer its ⏎ will
+send, or `(not answered)`. Its ⏎ sends the whole call once, and that is the only answer
+the assistant gets. Esc leaves the answer field first; Esc on the list (or on the submit
+page) dismisses the whole call, and the kept rows read `→ dismissed` for the questions
+you did not answer.
+
 ## Long answers
 
 **A long answer stays at its first line.** The conversation follows an answer while it
@@ -839,6 +901,31 @@ while its history is big may not fit the smaller window; the provider's error is
 see, and nothing is lost by it. Compacting before you switch down is the way through
 today — a compaction that folds a tail of the history instead of all of it is the change
 this needs.
+
+## The look: `/theme`
+
+`/theme` with no argument opens a menu over the conversation with the three modes:
+`system` (with `follows the terminal` beside it), `light` and `dark`. The row your
+config names is marked `current`, and the cursor opens on the first row.
+
+Moving the cursor with ↑/↓ applies the row under it at once — the whole screen repaints
+in the other palette while the menu is up, so the choice is made by looking at it. ⏎
+keeps the mode you are looking at, closes the menu and saves it to `ui.theme`; the chat
+says which one in one row (`theme: light`). Esc closes the menu and puts back the mode
+the config names then — what was on screen before the menu opened, unless the config
+changed under it; nothing is saved. `system` is honest about what it means: it follows the
+terminal's own light/dark scheme as the terminal is at that moment, so a terminal that
+switched while the menu was open is followed too.
+
+`/theme <mode>` skips the menu and applies and saves the mode in one line — the same
+thing ⏎ does. A word that is not a mode is refused with the three that are. The choice
+is the person's: it has no mark for the assistant, and it is read live, so
+`:config set ui.theme light` in the running app repaints at once (a value written into
+`config.local.json` from outside is read at the next start). `/theme` is not kept in the
+↑/↓ history: a look is one key away rather than a line worth recalling. The setting is
+`ui.theme` — see
+[config.md](config.md); a palette of your own is still `theme` (`config set theme …`),
+which lays its colours over either scheme.
 
 ## Images
 

@@ -5,6 +5,91 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The work picker: subagents and shells in one place.** `J` opens one panel listing
+  everything that runs beside the conversation — every live subagent and task (its label
+  path, `running — <what it is doing>`, `? waiting for you` when a question or a y/n
+  waits on you in it or one below it) under **Subagents**, every background shell (`sh-3 · bun run dev —
+  <who owns it>`, running or ended) under **Shells**; a group with nothing in it says
+  `none`, and the rows follow the live state while the panel is up. Enter opens what is
+  under the cursor: a subagent's conversation (the existing watch), or a shell's kept
+  output in the pager; on a subagent that waits on you Enter just closes the picker and
+  its request block takes the keyboard. `ctrl+d` on a shell asks `kill sh-3? y yes · n
+  no` in its row's place and y kills it — SIGTERM to the group, SIGKILL two seconds
+  later — as the tree's `x` does. `/work` opens the same panel from inside the chat;
+  Esc closes, and the picker does not come back from a watch — it is one-shot. The
+  capital acts wherever the chat does not have the keyboard, and `config set keys.work`
+  moves it; `:help` lists it.
+
+- **A question waits out the sentence you are typing.** A question that parks while you
+  are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
+  no longer takes the field from under your keys: the field keeps them, the strip above it
+  says `? a question is waiting`, and the block comes up once you have been quiet for
+  about half a second (`ASK_GRACE_MS`, read from `askClock`). While it waits the block is
+  not drawn in the field's place and nothing is answered for you; a message you send in
+  that time is sent as usual, queuing behind the turn. A `:` command line open when the
+  question arrives holds it off outright — a half-written command is a long thought — and
+  the block follows when the line is run or left. A one-shot timer re-runs the claim when
+  the typing stops, and a y/n keeps its existing 600 ms pause with no grace of its own.
+
+- **A kept question and its answer keep a ground of their own.** Once an `ask_user`
+  question is answered, the `?` row and the `→` row under it sit on one quiet tint, so
+  every pair reads as a single band while scanning the transcript. A dismissed answer —
+  the person said nothing — keeps the same ground and dims its ink. The two colours are
+  the chat palette's own, `askBg` and `askInk`, present in all three schemes and
+  overridable like every other chat colour; on an unknown scheme they leave the ground
+  and the ink to the terminal, as the chat's other grounds do. The pending question box
+  is unchanged.
+
+- **The narration above a waiting question reads in full.** While `ask_user` waits on an
+  answer — one question or a wizard — the run of steps that led into the call draws
+  unfolded and at full ink, so the question is read against what brought it on, however
+  much was drawn after it (a command's block, a note). Only the conversation whose
+  question it is lights its own narration: a subagent's question takes the field without
+  lighting the session's. The turn's older runs, its thoughts and its ✎ diffs keep the
+  look they had. The moment the question is answered everything folds again. It is a
+  display condition, not fold state: `^o` and a click still decide the folds as they did.
+
+- **Several questions are walked page by page and answered at a submit screen.** When
+  the assistant asks more than one question in a call, the block shows one page per
+  question and a `Submit` page last, with a one-row tab strip naming them (a tick marks
+  a page that holds an answer). On a single-select page a digit or ⏎ on an option answers
+  and moves on; in a multi-select a digit or Space toggles an option row and ⏎ commits
+  the picks and moves on; typing starts an answer. A page commits what
+  its draft holds and moves on, so an empty page leaves its question unanswered. ←/→
+  walk back and forth, and every page keeps its draft, so changing a pick or the words
+  costs nothing until the end. The submit page sums the call up: every question with the
+  answer ⏎ will send, or `(not answered)`, and that one ⏎ is the answer the model gets. A
+  single question keeps its own keys, with no pages and no submit page. Esc leaves the
+  answer field first; Esc on the list — on any page, the submit page included — dismisses
+  the whole call, and is reported as a dismissal, never as consent.
+
+- **`/theme` picks the look, and the menu previews it.** `ui.theme` is `system`
+  (the default, following the terminal's own light/dark scheme as it changes), `light`
+  or `dark`, over the host's palette and every plugin's `${token}`: a pinned mode keeps
+  its colours whatever the terminal says. `/theme` opens the three rows with the saved
+  mode marked `current`; ↑/↓ apply the row under the cursor at once, so the screen
+  repaints while the menu is up. ⏎ keeps it and saves it to `config.local.json`, Esc
+  puts back the mode the config names then — the one on screen before the menu opened,
+  unless the config changed under it; nothing is saved, and `/theme light|dark|system`
+  applies and saves in one line. The key is the person's — the assistant has no mark for
+  it — and is read live.
+
+- **The `:` line has a caret you can see and move.** A command is edited mid-line: the
+  caret is drawn where it stands in what you typed, ←/→ move it by a character (word
+  motion and Home/End too), and text, Backspace/Delete and a paste go in at the caret
+  rather than at the end. The completion offer follows the caret — it is made only at the
+  end of the line's last word, so a caret moved back into the typed text takes the list
+  away. The question's own free-text answer is the same flowtty editor, and its caret is
+  pinned by a test of its own: a letter typed after ← lands at the caret, under a block
+  whose inverse cell says where that is.
+
+- **Walking the history opens no list and no ghost, and the Tab hint stays.** A line
+  recalled with ↑/↓ — in the chat's field or on the `:` line — opens no completion list
+  and draws no inline rest, however completable its last word; the hint beside it still
+  names what Tab would take, so a Tab that rewrites the line is never silent. The next
+  character typed (or pasted) into it brings the list and the rest back; Esc and the
+  list's own keys work as on any line without a list.
+
 - **Every request says how long its answer may be.** A request now carries an answer ceiling
   as `max_tokens` on the OpenAI-compatible wire as well as the Anthropic one, and on the
   `/compact` request: `ai.maxTokens`, else the model's own `ai.models.<id>.maxTokens` (new),

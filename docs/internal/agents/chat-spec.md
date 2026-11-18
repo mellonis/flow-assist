@@ -51,6 +51,20 @@ there is no `/fullscreen`.
   question is usually about) and moves the layout by a few rows; the window is for the
   terminal where no growth can hold it (100×22: the default panel is 12 rows, the
   question 17). Collapsed, nothing is needed (the strip says it waits).
+- **A call with several questions is a wizard.** `ask_user`'s block (`renderAsk` and
+  `askBlockRows` in `src/views/modals.ts`; the machine is `src/assistant/ask.ts`) opens
+  on the first question. With more than one it carries ONE tab strip row under its
+  title: a tab per question (its header, else `question N`) and `Submit` last, a page
+  whose draft holds a pick or words ticked `✓`, the page on screen drawn inverse, and
+  every label cut by cells to the share of the row it has, so a wide label never wraps
+  the strip onto a second line. The page after the last is the submit page: it draws no
+  options and each question's title with the answer ⏎ will send under it — quiet and
+  `(not answered)` when the draft holds nothing. `askBlockRows` counts the strip and the
+  submit rows the render draws, so `pendingChatRows` and the window/panel arithmetic
+  agree with the screen. A single question draws no strip and no submit page: a
+  single-select row answers in one key, and a multi-select's digits and Space toggle its
+  option rows with ⏎ sending the picks. The hint names the keys of the page it is on
+  (`←→ questions · ⏎ submit · Esc dismiss` on the submit page).
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
@@ -87,7 +101,12 @@ there is no `/fullscreen`.
   right, or a closed window / full chat) or on a bottom panel's strip — and opening
   the chat shows the block again. Esc keeps its meaning: it declines or dismisses first,
   in the chat's handler, so Esc Esc never closes over one; `/exit` cannot be typed
-  while one is up. Ctrl+C with a turn running still declines and stops.
+  while one is up. Ctrl+C with a turn running still declines and stops. **A dismissal is
+  not consent**: the question's Esc on the list — the answer field's Esc leaves the
+  field first, and a free-text question has no list and dismisses at once — answers
+  nothing, on any page, the submit page included; the model is told the person dismissed
+  it and must not assume an answer, and every question whose draft holds nothing is kept
+  as `→ dismissed`.
 - **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
   the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.
   Both are the assistant's bindings (`keys`, so a person moves them — to a chord only:
@@ -303,9 +322,13 @@ there is no `/fullscreen`.
   `!command`/`!!command` and on none for a command the MODEL ran and they confirmed (a `view`
   message) — the same marker in the same colour, the ground saying whose it was. The
   host's own ask after a `!!command` is a `›` message drawn dim, marker and text: the
-  person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
-  `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
-  overridable via `config.plugins.assistant.colors`.
+  person's side of the conversation, not their words. A kept `ask_user` question and the
+  answer it got (`?` over `→`) share a ground of their own, `askBg` in `askInk`, so the
+  pair reads as one band in the transcript; a dismissed answer keeps the ground and dims
+  its ink. Colours come from `theme.modals.chat` (`accent`, `assistantAccent`, `userBg`,
+  `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`, `askBg`, `askInk`) and are overridable via
+  `config.plugins.chat.colors` — the resolver merges `config.plugins[<modal name>].colors`,
+  and this modal is named `chat`.
 - A marker is ONE narrow-width code point: flowtty's grid measures display width per
   grapheme cluster and reads an East-Asian-ambiguous glyph (`∮`, `≈`, most of
   Mathematical Operators) as one cell, so it shifts the row in a terminal that draws
@@ -497,7 +520,9 @@ there is no `/fullscreen`.
   STOPS it exactly as Esc does (a pending y/n declined and a question dismissed first,
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
   the editor's forward delete, consumed (never while the `:` line is open — it owns the
-  keyboard then; its own catch-all types no chord as a character). **The keys are
+  keyboard then; its own catch-all types no chord as a character); a chord a drawn
+  plugin's panel binds (its `ctrl+d` — the work picker's kill) is the panel's key and
+  goes on to the panel, never to the arm. **The keys are
   claimed only while there is something to stop** (a live abort controller not yet
   aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores
   its signal) no longer holds them, so the next Ctrl+C arms and the one after exits,
@@ -568,8 +593,10 @@ there is no `/fullscreen`.
     stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
     the start screen then names the key instead of `:q`. Plugins leave their screens
     on Esc (`keys.back`) only.
-- **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log; a plugin's main
-  screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
+- **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log, `J` the
+  work picker; a plugin's main screen should follow (`B` for a board). Lower case is for
+  what is INSIDE a screen. The work picker acts where the chat does not have the keyboard
+  (a capital would type into the field), and `/work` opens it from inside the chat.
   The session picker is the exception, `^s` (`sessions`): it must open from inside the
   chat, where a letter types.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
@@ -816,6 +843,21 @@ there is no `/fullscreen`.
     are measured the same way. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
     `n`), a step's own calls included, so an id means the same in both modes.
+  - **A waiting question lights the run that led into it.** While a conversation's OWN
+    question is pending (`conv.question` — one question or a wizard, whatever the block's
+    shape), the newest assistant message's LAST run, the narration the `ask_user` call
+    follows, draws unfolded and at full ink: its steps in full and no `quiet`, so the
+    question is read against what brought it on. The turn's older runs, its reasoning
+    blocks and its ✎ diffs keep the look they had. The flag is `RowOpts.askPending`, whose
+    source is `conv.question` and never the field place's block — a child's ask drawn
+    there is not this conversation's, and the child's narration lives in the child's own
+    rows (a watched child's rows carry their own flag, from the watched conversation) —
+    and it is dropped the moment the question is answered. It is DISPLAY only, not fold
+    state: `folds.ts` is untouched and the run keeps its `foldId`, so a click or `^o`
+    still decides the folds. Only the
+    newest assistant message may draw this way — a view's or a note's message drawn under
+    the turn is furniture, not the end of the turn — and the bit is in the `rowCache` key
+    for that message alone, so the rest of the conversation keeps its cached rows.
   - **`open` draws every step in full, in the normal colour** — steps do not fold, and
     each step's calls are a trail line under it. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
     a conversation starts, `/notes [step|open]` moves it, nothing is saved, and
@@ -1003,10 +1045,15 @@ there is no `/fullscreen`.
   `renderCommandPanel` in `src/views/modals.ts`) stands in the conversation's place
   under the picker's rules: it opens the chat and takes the keyboard, a pending y/n or
   question is drawn over it and answered first, it holds every key while drawn (↑/↓,
-  Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's), a mouse
+  Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's, and a key may
+  spell a chord like `ctrl+d`, which fires only with that modifier held), a mouse
   button and the wheel never reach the conversation it hides, and closing the chat,
-  `/clear`, `/new`, `/resume` and opening the picker drop it. `rows()` is read at every
-  draw and a 1 s tick redraws it while up. A key's `run(id)` may answer a line (the
+  `/clear`, `/new`, `/resume` and opening the picker drop it. A row's `kind: 'group'`
+  is a dim group header (`id: 'group:…'`): the cursor moves over it and no key runs on
+  it. `rows()` is read at every
+  draw and a 1 s tick redraws it while up. A spec's `onCursor(id, index)` observes a
+  cursor move and `onDrop()` a drop WITHOUT a decision (never a key's `run`), where a
+  preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
