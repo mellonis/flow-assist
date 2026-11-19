@@ -413,8 +413,8 @@ Everything that runs beside this conversation — the live subagents and tasks, 
 background shells — in one list to jump between. `J` opens it wherever the chat does not
 have the keyboard (on the start screen, on a plugin's screen), `/work` from inside the
 chat; `config set keys.work <key>` moves the capital. Inside the chat, `↓` on an empty line
-is the third door — no history entry shown and bang level 0 — and it opens the panel only
-when the session has something to show; with nothing running the key does nothing.
+is the third door — no history entry shown and bang level 0 — and it opens the panel when
+the session has work; with none the key does nothing.
 
 One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
 it says `none`. A subagent's row is its label path with what it is doing
@@ -427,10 +427,11 @@ chat's own as `this chat`); a shell you killed sinks below the running ones and 
 is true now.
 
 ↑ and ↓ move among the rows across the group names, which are no key's. ⏎ opens what is
-under the cursor: a subagent's conversation as the watch draws it (Esc comes back to the
-chat, never to the picker — the picker is one-shot, `J` opens it again — and, with the
-node's row still drawn and no request waiting in the tree, puts the cursor on that row), or
-a shell's kept output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
+under the cursor: a subagent's conversation as the watch draws it, or a shell's kept
+output in the pager, growing while the job prints. The watch's Esc comes back to the chat,
+never to the picker (the picker is one-shot, `J` opens it again), and with the node's row
+still drawn and no request waiting in the tree it puts the cursor on that row; a watch
+opened from `/agents` returns to the field instead. ⏎ on a subagent that waits on you just
 closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
 `kill sh-3? y yes · n no` in that row's place; the question names its job, so `y` kills
 that job wherever the cursor has moved to since and `n` leaves it running. `ctrl+d` again

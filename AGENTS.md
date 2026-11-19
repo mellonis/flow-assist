@@ -563,8 +563,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   in a row; a `/command` with `history: false` is never kept (its argument may
   carry a secret). ↑ on an empty field takes the last queued message back
   first. ↓ on an empty field with no history entry shown and bang level 0
-  opens the work panel when the session has work (the same list as `J`). The
-  wheel and PgUp/PgDn scroll.
+  opens the work panel when the session has work (the same list as `J`), never
+  while a question waits in the field's place. The wheel and PgUp/PgDn scroll.
 - **What is open and what is folded** (`folds.ts`): ONE global state (all
   folded / all open — where a conversation starts) plus the blocks a CLICK
   made an exception of; `details` (`^o`) is the master switch and clears the

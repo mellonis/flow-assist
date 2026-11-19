@@ -9,7 +9,7 @@
 // to fire.
 import { afterEach, expect, test } from 'bun:test';
 import { ASK_GRACE_MS, askClock } from '../assistant/child-ask-guard.ts';
-import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -25,6 +25,7 @@ const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 // there while the grace holds it back.
 const BLOCK = 'Strategy — Rebase or merge?';
 const HELD = '? a question is waiting';
+const PANEL = 'Flow Assist · Work';
 
 const askTurn = (): Turn => [{
   tool: 'ask_user',
@@ -151,6 +152,41 @@ test('a key the field takes without the editor still holds the question off', as
   expect(frameOf(ui)).toContain(HELD);
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(rowsOf(ui).some((r) => r.includes('› half'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a ↓ inside the grace opens nothing and leaves the question on its original schedule', async () => {
+  const { model, ui } = await booted();
+  // Work for the panel to show if the key were the door's: a subagent, held.
+  const kid = model.when((req) => firstUser(req).includes('GRKID'));
+  kid.script([{ hold: true }]);
+  await ui.type('/subagent GRKID go');
+  await ui.press('return');
+  await settleUntil(() => kid.held);
+  // The person is in the middle of a sentence when the question parks.
+  await ui.type('half');
+  model.release();
+  await settleUntil(() => parked() && frameOf(ui).includes(HELD));
+  expect(frameOf(ui)).toContain(HELD);
+  // The draft goes, through empty, to an empty field: the backspaces are the field's
+  // keys, so the grace runs from the last one.
+  for (let i = 0; i < 4; i++) await ui.press('backspace');
+  expect(rowsOf(ui).some((r) => r.includes('› half'))).toBe(false);
+
+  // A ↓ inside the grace is the field's, not the door's: it opens nothing — the field
+  // keeps the keys and the strip still says what waits.
+  clock.t += ASK_GRACE_MS - 100;
+  await ui.press('down');
+  await settle(4);
+  expect(frameOf(ui)).not.toContain(PANEL);
+  expect(frameOf(ui)).toContain(HELD);
+
+  // Nor is it the person typing: the question claims on the schedule its last real key
+  // set, not on the key that opened nothing.
+  clock.t += 200;
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(frameOf(ui)).not.toContain(HELD);
   ui.app.unmount();
 });
 

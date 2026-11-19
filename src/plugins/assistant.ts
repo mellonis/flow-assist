@@ -526,16 +526,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // whatever it previewed; a key's `run` that closes a panel is a decision and
           // calls `setPanel(null)` itself. See command-panel.ts, `panelDrop`.
           const dropPanel = () => setPanel(panelDrop(panelRef.current));
-          // The work panel's place in the list, put back once the panel is gone: the list
-          // mounts anew at its end, and what the person was reading is a row, not an
-          // offset (`rowAnchor`), so it survives whatever arrived meanwhile.
-          ui.useEffect(() => {
-            if (panel || !workPlaceBackRef.current) return;
-            workPlaceBackRef.current = false;
-            const place = workPlaceRef.current;
-            workPlaceRef.current = null;
-            if (place) askScroll(anchorRow(drawn(), rowOpts(foldsRef.current), place));
-          }, [panel]);
           const [, setPanelTick] = ui.useState(0);
           ui.useEffect(() => {
             if (!panel) return;
@@ -561,11 +551,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the conversation last said about where it is on the screen — the
           // view reports it, and a click is turned into a row with it.
           const viewportRef = ui.useRef<Viewport | null>(null);
-          // Where the person was reading when the work panel took the list away (a panel
-          // is a window of the conversation's place): the close puts it back, so a glance
-          // at what runs does not move the text.
-          const workPlaceRef = ui.useRef<{ at: number; within: number } | null>(null);
-          const workPlaceBackRef = ui.useRef(false);
           // A row the list should be put at the top of once the rows have changed, and
           // the nonce that makes a repeat of the same row ask again.
           const [scrollTo, setScrollTo] = ui.useState<{ row: number; n: number; pin?: boolean } | null>(null);
@@ -1954,14 +1939,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               rows,
               get keys() { return killPending() !== null ? answerKeys : [openKey, killKey]; },
             });
-            // The panel took the list away: remember where the person was reading, for
-            // the close to put back (`workPlaceBackRef`). A refused open (`openPanel`
-            // leaves a question's place alone) remembers nothing.
-            const v = viewportRef.current;
-            if (panelRef.current) {
-              workPlaceRef.current = v && !v.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), v.scrollTop) : null;
-              workPlaceBackRef.current = true;
-            }
             host.notify();
           };
           // A plugin's command run from the chat: what it says is a note (display only,
@@ -3225,8 +3202,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the session's subtree has work to show. A handoff to another holder, not
               // editing — the panel keeps the key and nothing here re-arms the grace. The
               // key still was the person's, so it disarms an Esc-Esc arm like every field
-              // key below.
-              if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
+              // key below. A question waiting owns the field's place: the key does nothing
+              // until it clears (it goes on to the walk, which opens nothing).
+              if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0 && !conv.question) {
                 if (workRowsOf(conv).length) { openWork(); disarmEsc(); return true; }
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows

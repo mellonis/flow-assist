@@ -242,6 +242,11 @@ test('the ↓ that ends a history walk, or follows a cleared history entry, does
   expect(rowsOf(ui)[fieldAt(ui)]).not.toContain('/subagent');
   await ui.press('down');
   expect(panelUp(ui)).toBe(false);
+  await ui.press('down');
+  await settleUntil(() => panelUp(ui));
+  expect(panelUp(ui)).toBe(true);
+  await ui.press('escape');
+  await settleUntil(() => !panelUp(ui));
   // A draft keeps ↓ for the caret.
   await ui.type('draft');
   await ui.press('down');
@@ -271,7 +276,7 @@ test('x then y stops the node as the person and journals it so; x then n does no
   await settleUntil(() => other!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ other-go'));
   await intoRows(ui);
-  expect(frameOf(ui)).toBeTruthy();
+  expect(inRows(ui)).toBe(true);
   await ui.press('x');
   // The question stands where the cursor's row was, and names what goes with it.
   expect(frameOf(ui)).toContain('stop outer-go and 1 below it? y yes · n no');
