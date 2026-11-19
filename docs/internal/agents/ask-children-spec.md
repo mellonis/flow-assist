@@ -152,8 +152,8 @@
   a watch's Esc-back: ⏎ on a subagent's row starts watching it, and Esc comes back onto that
   row when it is still drawn and no request waits anywhere in the session's tree. ↓ on an
   empty field belongs to the work panel (docs/usage.md): with no history entry shown before
-  the key, bang level 0, work in the session and no question waiting in the field's place,
-  it opens the panel, whose ⏎ on a subagent's
+  the key, bang level 0, work in the session and the session's own question not waiting in
+  the field's place, it opens the panel, whose ⏎ on a subagent's
   row is another way to the same watch. With the cursor in the rows the
   chat handler gives every key to one branch, after a question, `/context` and an own y/n and
   before everything else: ↑ / ↓ move, ↑ on the first row and Esc leave, `x` asks, `y` calls

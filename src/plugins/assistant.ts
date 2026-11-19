@@ -3202,8 +3202,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the session's subtree has work to show. A handoff to another holder, not
               // editing — the panel keeps the key and nothing here re-arms the grace. The
               // key still was the person's, so it disarms an Esc-Esc arm like every field
-              // key below. A question waiting owns the field's place: the key does nothing
-              // until it clears (it goes on to the walk, which opens nothing).
+              // key below. The session's own question owns the field's place: the key does
+              // nothing until it clears (it goes on to the walk, which opens nothing).
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0 && !conv.question) {
                 if (workRowsOf(conv).length) { openWork(); disarmEsc(); return true; }
               }
