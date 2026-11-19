@@ -1062,7 +1062,7 @@ there is no `/fullscreen`.
   message takes the hint row's place. `'window'` (the default) keeps the panel in the
   conversation's place. `tabs()` is read at every draw: ONE row under the top border, a
   label per tab cut by cells, the current one inverse, and the strip names the keys
-  that walk them (`←→ tabs`, `↑↓ pick`, Esc last). A key def marked `reset` hands its
+  that walk them (`←→ tabs`, `↑↓ pick`, the way out first). A key def marked `reset` hands its
   flag with its answer (`panelAnswer(state, answer, reset)`): once the key's `run` has
   answered without opening a panel, the cursor lands on the first row a key can run on
   — the row `panelStart` opens on.

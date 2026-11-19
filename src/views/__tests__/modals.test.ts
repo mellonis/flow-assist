@@ -925,8 +925,8 @@ test('the bottom look is a fixed 12-row strip at the chat\'s bottom', async () =
   // Eight rows of list between the strip and the hint, however many rows there are.
   const hint = bottom - 1;
   expect(hint - (top + 2)).toBe(8);
-  // The hint just over the bottom border: the tabs and the rows first, Esc last.
-  expect(lines[hint]).toContain([`${keyGlyph('left')}${keyGlyph('right')} tabs`, `${keyGlyph('up')}${keyGlyph('down')} pick`, `${keyGlyph('return')} open`, '^d stop/kill', `${keyGlyph('escape')} close`].join(' · '));
+  // The hint just over the bottom border: the way out first, then the tabs and the rows.
+  expect(lines[hint]).toContain([`${keyGlyph('escape')} close`, `${keyGlyph('left')}${keyGlyph('right')} tabs`, `${keyGlyph('up')}${keyGlyph('down')} pick`, `${keyGlyph('return')} open`, '^d stop/kill'].join(' · '));
   // The tab keys are the strip's own: they are never said twice.
   expect(lines[hint]).not.toContain(`${keyGlyph('left')} tabs`);
 

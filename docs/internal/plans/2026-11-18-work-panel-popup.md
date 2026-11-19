@@ -90,9 +90,10 @@ it is a narrower door to a subset of the same rows (see Approaches).
   bottom row. Scrolling: the existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
-- **Hint row**: `←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill · ⎋ close`, glyphs via the
-  helpers. A notice (the stop/kill question's context line, a panel `notice`) takes the
-  hint row's place while it is up.
+- **Hint row**: `⎋ close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
+  helpers. The way out comes first: the row is cut at the frame's width, and what falls
+  off a narrow strip must never be the way out. A notice (the stop/kill question's
+  context line, a panel `notice`) takes the hint row's place while it is up.
 - **Rows and actions** (unchanged apart from tabs): sub rows `path › …` + state,
   `? waiting for you` = `offeredWithin` (in it or below it); shell rows `id · cmd` —
   `<state> — <owner>`; ended rows sink per tab. `⏎` opens (watch / jump to the waiting
@@ -260,8 +261,8 @@ above).
   { label: 'Shells (1)', current: false }]`, at 100×40 and at 100×12: assert the drawn
   box is exactly 12 rows tall flush with the bottom (12 = the terminal's height on the
   short case takes the whole area), the tab strip row is just under the top border
-  with the current tab inverse, the hint row `←→ tabs · ↑↓ pick · ⏎ open · ^d
-  stop/kill · ⎋ close` is just above the bottom border, and a `notice` replaces the
+  with the current tab inverse, the hint row `⎋ close · ←→ tabs · ↑↓ pick · ⏎ open · ^d
+  stop/kill` is just above the bottom border, and a `notice` replaces the
   hint row. In `src/assistant/__tests__/command-panel.test.ts`, `a key marked reset
   lands the cursor on the first runnable row` — a panel whose rows begin with a group
   row; a `reset: true` key presses; the cursor is on the first non-group row; a key

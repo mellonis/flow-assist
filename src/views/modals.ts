@@ -2489,17 +2489,17 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   const offset = windowAround(lines, panel.cursor, listRows).start;
   const headRoom = Math.max(0, boxW - 4);
   const heading = `${ASSISTANT_MARK} Flow Assist · ${panel.title}`;
-  // Esc first in a window: the row is cut at the frame's width, and the way out must not
-  // be what falls off in a narrow panel. A strip is as wide as the chat, so its keys
-  // follow the reading order — tabs, rows, the panel's own, Esc last. Its arrows are the
+  // Esc first, as in a window: the row is cut at the frame's width, and the way out must
+  // not be what falls off in a narrow panel. A strip is as wide as the chat, so the rest
+  // follows the reading order — the tabs, the rows, the panel's own. Its arrows are the
   // strip's own (←→ the tabs, ↑↓ the rows), so a declared key drawn with one is not said
   // twice.
   const hint = strip
     ? [
+        `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
         ...(tabs.length ? [`${CAP.leftRight} tabs`] : []),
         ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
         ...panel.keys.filter((k) => k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right')).map((k) => `${k.cap} ${k.label}`),
-        `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
       ].join(' · ')
     : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
   // The strip's tabs, ONE row under the top border: the wizard's tab row — each label cut
