@@ -12,6 +12,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -63,13 +64,13 @@ async function startIdle(ui: UI, mark: string, label: string) {
 test('the session\'s own y/n over the tree cursor on an idle subagent is armed, then answered by y; the subagent is not touched', async () => {
   const { root, model, children: [a], ui } = await boot([{ mark: 'IDLE-OWN', turns: [[{ text: 'first' }]] }]);
   await startIdle(ui, 'IDLE-OWN', 'idle-own-go');
-  await ui.press('down'); // the cursor goes to the idle subagent's row
+  await intoRows(ui); // the cursor goes to the idle subagent's row
   model.script([{ hold: true }, ...touch(root, 'own.txt')], [{ text: 'parent done' }]);
-  // The cursor is in the rows: the field is not what takes the next text, so the turn is sent from there.
   await ui.press('escape');
   await ask(ui, 'hello');
   await settleUntil(() => model.held);
-  await ui.press('down');
+  // The own y/n lands while the cursor is on the subagent's row.
+  await intoRows(ui);
   model.release();
   await settleUntil(() => frameOf(ui).includes(OWN));
   // A key already on its way when the y/n appeared does not answer it.
@@ -115,7 +116,7 @@ test('the session\'s own question over the tree cursor on an idle subagent is ar
   model.script([{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]);
   await ask(ui, 'which?');
   await settleUntil(() => model.held);
-  await ui.press('down');
+  await intoRows(ui);
   model.release();
   await settleUntil(() => askUp(frameOf(ui)));
   await ui.press('x');
@@ -170,7 +171,7 @@ test('an n declines a later turn\'s write', async () => {
 test('the tree rows on an idle node: x then n leaves it, x then y ends it', async () => {
   const { children: [a], ui } = await boot([{ mark: 'ROWS-ONE', turns: [[{ text: 'first' }]] }]);
   await startIdle(ui, 'ROWS-ONE', 'rows-one-go');
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('x');
   await settleUntil(() => /stop|y\/n|yes/i.test(frameOf(ui).split('\n').find((r) => r.includes('rows-one-go') && r.includes('?')) ?? ''));
   await ui.press('n');

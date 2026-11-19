@@ -13,6 +13,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -79,18 +80,6 @@ const released = async (rig: Rig, i: number) => {
   rig.children[i]!.release();
   await settleUntil(() => rig.children[i]!.requests.length >= 1 && !rig.children[i]!.held);
   await settle(10);
-};
-
-// The tree rows' keys, and the surviving way to their cursor: the ↓ door opens the work
-// panel, ⏎ opens the first sub's watch, and Esc steps back onto its row.
-const ROWS = '↑↓ move · x stop · Esc back';
-const intoRows = async (ui: UI) => {
-  await ui.press('down');
-  await settleUntil(() => frameOf(ui).includes('Flow Assist · Work'));
-  await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · '));
-  await ui.press('escape');
-  await settleUntil(() => frameOf(ui).includes(ROWS));
 };
 
 // ─── the holders of the keys ─────────────────────────────────────────────────────────

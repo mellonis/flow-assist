@@ -11,6 +11,7 @@ import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSe
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -79,16 +80,6 @@ async function oneHeldTask(mark: string, opts: Parameters<typeof boot>[1] = {}, 
   return b;
 }
 const watchFromRows = async (ui: UI) => { await ui.press('down'); await ui.press('return'); await settle(4); };
-// The cursor in the tree rows, the surviving way in: the ↓ door opens the work panel,
-// ⏎ opens the first sub's watch, and Esc steps back onto its row.
-const intoRows = async (ui: UI) => {
-  await ui.press('down');
-  await settleUntil(() => frameOf(ui).includes('Flow Assist · Work'));
-  await ui.press('return');
-  await settleUntil(() => watching(ui));
-  await ui.press('escape');
-  await settleUntil(() => inRows(ui));
-};
 
 // The saved session that has an answer (the sessions directory holds one per conversation).
 function answeredSession(dir: string): { answeredAt?: string; seenAt?: string } | null {

@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -178,16 +179,6 @@ async function twoHeld() {
 }
 
 const panelUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
-// The cursor in the tree rows, the surviving way in: the ↓ door opens the work panel,
-// ⏎ opens the first sub's watch, and Esc steps back onto its row.
-const intoRows = async (ui: UI) => {
-  await ui.press('down');
-  await settleUntil(() => panelUp(ui));
-  await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · '));
-  await ui.press('escape');
-  await settleUntil(() => inRows(ui));
-};
 
 test('the tree rows are entered from a watch\'s Esc-back; ↑ on the first row and Esc go back, and the field then takes text', async () => {
   const { children: [a, b], ui } = await twoHeld();
