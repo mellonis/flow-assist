@@ -32,6 +32,10 @@ export type PanelKeyDef = {
   // Runs on the row under the cursor (null — the panel has no rows). May answer a line
   // for the notice, a panel to open over this one, or a promise of either.
   run: (id: string | null) => unknown;
+  // The key changes which rows there are (a tab switch): once its `run` has answered and
+  // no panel opened over this one, the cursor lands on the first row a key can run on —
+  // the row `panelStart` opens on. Without it the cursor stays where it was.
+  reset?: boolean;
 };
 
 export type PanelSpec = {
@@ -40,6 +44,13 @@ export type PanelSpec = {
   keys?: PanelKeyDef[];
   // What the panel says when it has no rows.
   empty?: string;
+  // Where the panel is drawn: a window in the conversation's place (the default), or a
+  // fixed strip over the chat's bottom that leaves the screen above it alone.
+  look?: 'window' | 'bottom';
+  // The strip's tabs, read at every draw like `rows`; drawn only when there are any.
+  // What a tab IS and which rows it serves is the plugin's: the machine only draws the
+  // labels and marks the current one.
+  tabs?: () => Array<{ label: string; current: boolean }>;
   // The cursor stays on the row it was moved to when the rows change under it (a row that
   // ends, one that appears above), by the row's `id`; when that row is gone it stays at
   // the place it was. Without it the cursor is an index into the rows.
@@ -62,15 +73,20 @@ export type PanelState = { stack: PanelSpec[]; cursor: number; notice: string; a
 // The keys the panel keeps for itself; a plugin's key of the same name is never run.
 export const PANEL_OWN_KEYS = ['up', 'down', 'escape'];
 
+// The first row a key can run on: a group header is nobody's row. 0 when there is no
+// such row (or the rows are unreadable), which is where the cursor then rests.
+const firstRunnable = (rows: readonly PanelRow[]): number => {
+  const at = rows.findIndex((r) => r && r.kind !== 'group');
+  return at >= 0 ? at : 0;
+};
+
 export const panelStart = (spec: PanelSpec): PanelState => {
   // The cursor starts on the first row a key can run on — a group header is nobody's
   // row. A `rows()` that throws is left at the first row and drawn as its error at
   // every draw, as it would be anyway.
   let cursor = 0;
   try {
-    const rows = spec.rows();
-    const at = rows.findIndex((r) => r && r.kind !== 'group');
-    cursor = at >= 0 ? at : 0;
+    cursor = firstRunnable(spec.rows());
   } catch { /* the error is rows()'s own; the cursor starts at the top */ }
   return { stack: [spec], cursor, notice: '' };
 };
@@ -158,11 +174,14 @@ export function panelDrop(state: PanelState | null): null {
 const isSpec = (v: unknown): v is PanelSpec => !!v && typeof v === 'object' && typeof (v as PanelSpec).rows === 'function' && typeof (v as PanelSpec).title === 'string';
 
 // What a key's `run` answered, laid on the panel it ran in: a panel opens over it, a line
-// is its notice, anything else leaves it as it is.
-export function panelAnswer(state: PanelState, answer: unknown): PanelState {
+// is its notice, anything else leaves it as it is. `reset` is the key's own flag
+// (`PanelKeyDef.reset`): its run has answered and no panel opened, so the cursor goes
+// back to the first row a key can run on — the row `panelStart` opens on.
+export function panelAnswer(state: PanelState, answer: unknown, reset = false): PanelState {
   if (isSpec(answer)) return { stack: [...state.stack, answer], cursor: 0, notice: '' };
-  if (typeof answer === 'string' && answer) return { ...state, notice: answer };
-  return state;
+  const answered = typeof answer === 'string' && answer ? { ...state, notice: answer } : state;
+  if (!reset) return answered;
+  return { ...answered, cursor: firstRunnable(panelRows(answered).rows), at: undefined };
 }
 
 export { isSpec as isPanelSpec };

@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderCommandPanel, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
@@ -867,7 +867,100 @@ test('the picker keeps the title, Esc and the y/n keys in a 42-column docked pan
   handle.unmount();
 });
 
+// ─── A command panel's bottom look ───────────────────────────────────────────
+// The work panel is a glance strip over the chat's bottom: exactly 12 rows — the frame,
+// one tab strip row, an 8-row list window and the hint — with no padding and no gaps.
+// Its bottom edge is the area's last row, and its message takes the hint's row.
+const stripView = (over: Partial<CommandPanelView> = {}): CommandPanelView => ({
+  title: 'Work',
+  rows: [
+    { id: 'sub:a', text: 'a › writing', detail: 'working', tone: 'ok' },
+    { id: 'sub:b', text: 'b › waiting', detail: 'waiting', tone: 'warn' },
+    { id: 'group:shells', text: 'Shells', kind: 'group' },
+    { id: 'shell:1', text: 'job 1 · sleep 30', detail: 'running' },
+  ],
+  cursor: 1,
+  notice: '',
+  empty: 'none',
+  keys: [
+    { cap: keyGlyph('left'), label: 'tabs' },
+    { cap: keyGlyph('right'), label: 'tabs' },
+    { cap: keyGlyph('return'), label: 'open' },
+    { cap: '^d', label: 'stop/kill' },
+  ],
+  look: 'bottom',
+  tabs: [{ label: 'Subagents (2)', current: true }, { label: 'Shells (1)', current: false }],
+  ...over,
+});
+
+const stripFrame = async (view: CommandPanelView, width = 100, height = 40) => {
+  const backend = new TestBackend(width, height);
+  const handle = await render(h(renderCommandPanel, { width, height, theme: undefined, panel: view }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: AskGrid }).lastBuffer;
+  const frame = backend.lastFrame ?? '';
+  handle.unmount();
+  return { lines, grid, frame };
+};
+
+test('the bottom look is a fixed 12-row strip at the chat\'s bottom', async () => {
+  const { lines, grid } = await stripFrame(stripView());
+  // The area is 40 rows: the strip takes its last 12, the box's borders included.
+  expect(lines).toHaveLength(40);
+  const top = lines.findIndex((l) => l.includes('╭'));
+  const bottom = lines.findIndex((l) => l.includes('╰'));
+  expect(top).toBe(28);
+  expect(bottom).toBe(39);
+  // As wide as the chat's own window, centred in the area.
+  expect(lines[top]!.indexOf('╭')).toBe(5);
+  expect(stringWidth(lines[top]!.trim())).toBe(90);
+  // The strip is the row under the top border; the current tab is inverse, the other
+  // tab is not.
+  const strip = top + 1;
+  expect(lines[strip]).toContain('Subagents (2)');
+  expect(lines[strip]).toContain('Shells (1)');
+  const inverseAt = (text: string, row: number) => grid.get(lines[row]!.indexOf(text), row).style.inverse === true;
+  expect(inverseAt('Subagents (2)', strip)).toBe(true);
+  expect(inverseAt('Shells (1)', strip)).toBe(false);
+  // Eight rows of list between the strip and the hint, however many rows there are.
+  const hint = bottom - 1;
+  expect(hint - (top + 2)).toBe(8);
+  // The hint just over the bottom border: the tabs and the rows first, Esc last.
+  expect(lines[hint]).toContain([`${keyGlyph('left')}${keyGlyph('right')} tabs`, `${keyGlyph('up')}${keyGlyph('down')} pick`, `${keyGlyph('return')} open`, '^d stop/kill', `${keyGlyph('escape')} close`].join(' · '));
+  // The tab keys are the strip's own: they are never said twice.
+  expect(lines[hint]).not.toContain(`${keyGlyph('left')} tabs`);
+
+  // A terminal exactly as tall as the strip: the box and the area are the same 12 rows.
+  const short = await stripFrame(stripView(), 100, 12);
+  expect(short.lines).toHaveLength(12);
+  expect(short.lines[0]).toContain('╭');
+  expect(short.lines[11]).toContain('╰');
+  expect(short.lines[1]).toContain('Shells (1)');
+  expect(short.lines[10]).toContain(`${keyGlyph('escape')} close`);
+
+  // Shorter than the strip: the list gives way, the hint keeps its row.
+  const tiny = await stripFrame(stripView(), 100, 6);
+  expect(tiny.lines).toHaveLength(6);
+  expect(tiny.lines[5]).toContain('╰');
+  expect(tiny.lines[4]).toContain(`${keyGlyph('escape')} close`);
+
+  // A notice takes the hint row's place, and the 12 rows stay as they are.
+  const told = await stripFrame(stripView({ notice: 'stop «a»? y stops it · n keeps it' }));
+  const toldTop = told.lines.findIndex((l) => l.includes('╭'));
+  const toldBottom = told.lines.findIndex((l) => l.includes('╰'));
+  expect(toldBottom - toldTop + 1).toBe(12);
+  expect(told.lines[toldBottom - 1]).toContain('stop «a»? y stops it · n keeps it');
+  expect(told.frame).not.toContain(`${keyGlyph('escape')} close`);
+
+  // The window follows the cursor through those 8 rows.
+  const many = stripView({ rows: Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, text: `row ${i}` })), cursor: 10 });
+  const moved = await stripFrame(many);
+  expect(moved.frame).toContain('row 4');
+  expect(moved.frame).not.toContain('row 3');
+});
+
 // ─── Cuts count cells per grapheme cluster ────────────────────────────────────
+
 // A ZWJ sequence is one cluster, two cells — what the grid draws. Summed per code
 // point it reads as six, and a cut lands early.
 const FAMILY = '\u{1F468}‍\u{1F469}‍\u{1F467}';

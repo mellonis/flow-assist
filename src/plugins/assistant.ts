@@ -1776,11 +1776,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!step.state) { dropPanel(); return; }
             setPanel(step.state);
             if (!step.run) return;
+            // The key's own cursor rule (`PanelKeyDef.reset`): the answer lands, and the
+            // cursor goes back to the first row a key can run on — never for a panel
+            // opened over this one, which starts on its own row.
+            const reset = step.run.def.reset;
             const at = panelTop(step.state);
             const apply = (answer: unknown) => {
               const cur = panelRef.current;
               if (!cur || panelTop(cur) !== at) return;
-              setPanel(panelAnswer(cur, answer));
+              setPanel(panelAnswer(cur, answer, reset));
             };
             const fail = (e: unknown) => apply(`⚠ ${(e as Error)?.message ?? String(e)}`);
             try {
@@ -3615,11 +3619,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             panel: panel ? (() => {
               const { rows, error: rowsError } = panelRows(panel);
               const top = panelTop(panel);
+              // The strip's tabs are read at every draw, like its rows; a `tabs()` that
+              // throws draws no strip rather than taking the chat down.
+              const tabs = (() => { try { return top.tabs?.() ?? []; } catch { return []; } })();
               // Everything the plugin put in it is redacted before it is drawn.
               return redactDeep({
                 title: top.title, rows: rows.map((r) => ({ ...r })), cursor: panelCursor(panel, rows),
                 notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
+                look: top.look ?? 'window', tabs,
               });
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,

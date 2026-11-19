@@ -2420,8 +2420,10 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
 // place — the same docked, as a window and full, as the session picker. One row per
 // item, each ONE terminal line: the cursor mark, the text, the detail dim (or in its
 // tone's colour) and cut first; a group header row is dim throughout and no key runs on
-// it. The notice under the list, then the keys: the panel's own and the plugin's. The
-// state and what a key does are src/assistant/command-panel.ts.
+// it. The notice under the list, then the keys: the panel's own and the plugin's. A spec
+// with `look: 'bottom'` is the same panel as a fixed strip over the chat's bottom instead
+// of a window in the conversation's place. The state and what a key does are
+// src/assistant/command-panel.ts.
 export type CommandPanelView = {
   title: string;
   rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error'; kind?: 'group' }>;
@@ -2431,7 +2433,17 @@ export type CommandPanelView = {
   keys: Array<{ cap: string; label: string }>;
   // A panel opened over another: Esc goes back rather than closing.
   nested?: boolean;
+  // Where it is drawn: the window in the conversation's place (the default), or a strip
+  // over the chat's bottom.
+  look?: 'window' | 'bottom';
+  // The strip's tabs, drawn under its top border when there are any.
+  tabs?: Array<{ label: string; current: boolean }>;
 };
+
+// A strip is exactly this tall: the frame's two rows, one for the tab strip, eight for the
+// list window and one for the hint — no padding and no gaps between them. On a terminal
+// shorter than this it is the whole area, its last row on the area's last row.
+const STRIP_ROWS = 12;
 
 export function renderCommandPanel({ width, height, theme, panel, error = null, fullscreen = false, docked = false, focused = true, hover = false, onPickRow }: {
   width: number;
@@ -2446,12 +2458,21 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // A click on a row: the cursor goes there.
   onPickRow?: (index: number) => void;
 }) {
+  const strip = panel.look === 'bottom';
   const boxW = chatBoxWidth(width, fullscreen);
-  const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
+  const boxH = strip ? Math.min(STRIP_ROWS, height) : fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const inner = Math.max(1, boxW - 4);
+  // A strip draws from border to border; a window keeps its padding.
+  const inner = Math.max(1, boxW - (strip ? 2 : 4));
   const message = error ? `⚠ ${error}` : panel.notice;
-  const listRows = Math.max(1, boxH - 4 - 2 - (message ? 1 + textRows(message, inner) : 0));
+  const tabs = panel.tabs ?? [];
+  // A strip's rows: the frame, the tab strip when there is one, the list's window and the
+  // hint's row — 8 list rows at the full 12. Its message takes the hint's row, never one
+  // of its own. What does not fit gives way to the hint: a short area keeps the way out.
+  const tabRows = strip && tabs.length && boxH - 2 >= 2 ? 1 : 0;
+  const listRows = strip
+    ? Math.max(0, boxH - 2 - tabRows - 1)
+    : Math.max(1, boxH - 4 - 2 - (message ? 1 + textRows(message, inner) : 0));
   const toneColor = (tone?: string) => (tone === 'ok' ? m.ok ?? 'green' : tone === 'warn' ? m.warn : tone === 'error' ? 'red' : undefined);
   // The texts form a column as wide as the widest, up to half the row, so the details
   // line up.
@@ -2468,10 +2489,39 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   const offset = windowAround(lines, panel.cursor, listRows).start;
   const headRoom = Math.max(0, boxW - 4);
   const heading = `${ASSISTANT_MARK} Flow Assist · ${panel.title}`;
-  // Esc first: the row is cut at the frame's width, and the way out must not be what
-  // falls off in a narrow panel.
-  const hint = [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
-  return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
+  // Esc first in a window: the row is cut at the frame's width, and the way out must not
+  // be what falls off in a narrow panel. A strip is as wide as the chat, so its keys
+  // follow the reading order — tabs, rows, the panel's own, Esc last. Its arrows are the
+  // strip's own (←→ the tabs, ↑↓ the rows), so a declared key drawn with one is not said
+  // twice.
+  const hint = strip
+    ? [
+        ...(tabs.length ? [`${CAP.leftRight} tabs`] : []),
+        ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
+        ...panel.keys.filter((k) => k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right')).map((k) => `${k.cap} ${k.label}`),
+        `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
+      ].join(' · ')
+    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
+  // The strip's tabs, ONE row under the top border: the wizard's tab row — each label cut
+  // by cells to its share of the row, the current one inverse, and the two-space gap
+  // between two tabs outside the inverse.
+  const tabStrip = tabRows
+    ? (() => {
+        const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
+        return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
+          ...tabs.flatMap((t, i) => [
+            i ? h(Text, { key: `gap${i}`, selectable: false }, '  ') : null,
+            h(Text, { key: `tab${i}`, inverse: t.current, wrap: 'truncate', selectable: false }, cutStep(t.label, room)),
+          ]));
+      })()
+    : null;
+  // A strip hangs on the area's last row; the window keeps its centred overlay.
+  const shell = strip
+    ? docked
+      ? { width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const }
+      : { position: 'absolute' as const, top: 0, left: 0, width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const, zIndex: 10 }
+    : docked ? { width, height, flexDirection: 'column' as const } : overlay(width, height);
+  return h(Box, shell,
     h(Box, {
       border: 'round',
       backgroundColor: m.bg,
@@ -2481,17 +2531,23 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
       borderTitle: cutStep(heading, headRoom),
       width: boxW,
       height: boxH,
-      padding: 1,
+      padding: strip ? 0 : 1,
       flexDirection: 'column',
-      gap: 1,
+      gap: strip ? 0 : 1,
       overflow: 'hidden',
       selectionScope: true,
     },
-      // Keys are the panel's (`isActive: false`): the offset follows the cursor.
-      h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
-        lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')),
-      message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
-      h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint)));
+      tabStrip,
+      // Keys are the panel's (`isActive: false`): the offset follows the cursor. A strip
+      // with no row for its list draws none, so the hint keeps its place.
+      listRows > 0 ? h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
+        lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')) : null,
+      strip
+        ? h(Text, message
+          ? { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'truncate', selectable: false }
+          : { dim: true, wrap: 'truncate', selectable: false }, message || hint)
+        : message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
+      strip ? null : h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint)));
 }
 
 // ─── The chat, collapsed ──────────────────────────────────────────────────────

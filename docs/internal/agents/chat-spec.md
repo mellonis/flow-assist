@@ -1056,6 +1056,16 @@ there is no `/fullscreen`.
   preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
+  A spec's `look: 'bottom'` draws a strip over the chat's bottom instead of the window:
+  exactly 12 rows (the frame, the tab strip, an 8-row list window and the hint), no
+  padding and no gaps, the chat's width, its last row on the area's last row, and its
+  message takes the hint row's place. `'window'` (the default) keeps the panel in the
+  conversation's place. `tabs()` is read at every draw: ONE row under the top border, a
+  label per tab cut by cells, the current one inverse, and the strip names the keys
+  that walk them (`←→ tabs`, `↑↓ pick`, Esc last). A key def marked `reset` hands its
+  flag with its answer (`panelAnswer(state, answer, reset)`): once the key's `run` has
+  answered without opening a panel, the cursor lands on the first row a key can run on
+  — the row `panelStart` opens on.
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
   publishes `note` on `store.chat`, and the App binds the service PER PLUGIN (an own
   prop of the plugin's services view) with `[<plugin>] ` in front, so no plugin's note
