@@ -987,6 +987,24 @@ test('the strip names the tabs only when both arrows are declared', async () => 
   expect(both.frame).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
 });
 
+test('a strip with no rows names only the keys that act', async () => {
+  // An empty tab: the picker withholds the rows' keys, so the hint says the way out and
+  // the way across, and nothing that would act on no row.
+  const { lines } = await stripFrame(stripView({
+    rows: [],
+    keys: [
+      { cap: keyGlyph('left'), label: 'tabs' },
+      { cap: keyGlyph('right'), label: 'tabs' },
+    ],
+  }));
+  const bottom = lines.findIndex((l) => l.includes('╰'));
+  const hint = lines[bottom - 1]!;
+  expect(hint).toContain([`${keyGlyph('escape')} close`, `${keyGlyph('left')}${keyGlyph('right')} tabs`].join(' · '));
+  expect(hint).not.toContain(`${keyGlyph('return')} open`);
+  expect(hint).not.toContain('stop/kill');
+  expect(hint).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+});
+
 test('a short chat box drops the tab row before squeezing the list below two rows', async () => {
   // A 9-row area gives a 5-row chat box (rows 2-6) and the strip is all of it. With the
   // frame and the hint taking three rows, a tab row would leave ONE list row, so it is
@@ -1058,6 +1076,34 @@ test('a tall window anchors the strip to the chat box and covers the field', asy
   // nothing of the chat drawn below it.
   expect(lines[72]).toContain('╰');
   expect(lines.slice(73).every((l) => !l.includes('╰'))).toBe(true);
+  handle.unmount();
+});
+
+test('a docked chat draws the strip on its own bottom row', async () => {
+  // A docked pane is the chat's whole area: the strip takes its last twelve rows, the
+  // transcript stays above it, the field under it is covered, and the way out sits on
+  // the row over the pane's bottom border.
+  const backend = new TestBackend(60, 30);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat,
+    width: 60,
+    height: 30,
+    docked: true,
+    fullscreen: true,
+    focused: false,
+    theme: stripTheme(),
+    messages: [{ role: 'user', content: 'dock words' }],
+    input: 'draft words',
+    cursor: 11,
+    panel: stripView(),
+  }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const stripTab = lines.findIndex((l) => l.includes('Subagents (2)'));
+  expect(stripTab - 1).toBe(18);
+  expect(lines.findIndex((l) => l.includes('› dock words'))).toBeLessThan(18);
+  expect(lines[28]).toContain(`${keyGlyph('escape')} close`);
+  expect(lines[29]).toContain('╰');
+  expect(backend.lastFrame).not.toContain('draft words');
   handle.unmount();
 });
 

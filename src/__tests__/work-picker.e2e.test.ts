@@ -123,6 +123,8 @@ function stripText(ui: UI) {
   const end = rows.findIndex((r, i) => i > heading && r.trimStart().startsWith('╰'));
   return rows.slice(heading + 1, end > heading ? end : rows.length).join('\n');
 }
+// The strip's hint row: the last row inside its frame, over the bottom border.
+const hintOf = (ui: UI) => stripText(ui).split('\n').at(-1) ?? '';
 // The row the cursor is on is the one with the panel's mark in front — a frame alone says
 // it, as a person sees it. Read through `stripText`: the chat above the strip says the
 // same names, and its `› ` field row would otherwise satisfy the mark.
@@ -304,6 +306,33 @@ test('the tabs split the work; ←→ switch and the counts follow', async () =>
   expect(marked(only.ui, 'hyn-go')).toBe(false);
   only.ui.app.unmount();
 }, 30_000);
+
+test('an empty tab offers no open or stop, and its hint names only the keys that act', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  // The tab the picker opens on has a row: the row keys are named.
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('return')} open`);
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('ctrl+d')} stop/kill`);
+  await rig.ui.press('right');
+  await settle();
+  expect(stripText(rig.ui)).toContain('Shells (0)');
+  // No row to open and none to stop: the two tokens go, and the hint says the way out
+  // and the way across, which both act.
+  const empty = hintOf(rig.ui);
+  expect(empty).toContain(`${keyGlyph('escape')} close`);
+  expect(empty).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+  expect(empty).not.toContain(`${keyGlyph('return')} open`);
+  expect(empty).not.toContain(`${keyGlyph('ctrl+d')} stop/kill`);
+  // Back on the tab with a row, both are named again.
+  await rig.ui.press('left');
+  await settle();
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('return')} open`);
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('ctrl+d')} stop/kill`);
+  rig.ui.app.unmount();
+}, 20_000);
 
 test('the panel is the bottom strip: the tabs under its top border and the hint at its own', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }, { mark: 'ALK', kind: 'run' }]);

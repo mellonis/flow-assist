@@ -2506,19 +2506,21 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // not be what falls off in a narrow panel. A strip is as wide as the chat, so the rest
   // follows the reading order — the tabs, the rows, the panel's own. `←→ tabs` is said
   // only when BOTH arrow keys are declared (the caps the hint strips): a panel that
-  // withholds them — the stop question's own keys — leaves the token out too, and the
-  // arrows it does declare are said as its own. With the tabs' arrows declared, a
-  // declared arrow is not said twice. Without tabs a declared arrow key is the panel's
-  // and is said.
-  const tabArrows = tabs.length > 0 && panel.keys.some((k) => k.cap === keyGlyph('left')) && panel.keys.some((k) => k.cap === keyGlyph('right'));
+  // withholds them — the stop question's own keys, an empty tab's rows' keys — leaves the
+  // token out too, and the arrows it does declare are said as its own. With the tabs'
+  // arrows declared, a declared arrow is not said twice. Without tabs a declared arrow key
+  // is the panel's and is said. The gate reads the CAPS, not the labels: an arrow
+  // declared under another label still walks the tabs.
+  const keys = panel.keys;
+  const tabArrows = tabs.length > 0 && keys.some((k) => k.cap === keyGlyph('left')) && keys.some((k) => k.cap === keyGlyph('right'));
   const hint = strip
     ? [
         `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
         ...(tabArrows ? [`${CAP.leftRight} tabs`] : []),
         ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
-        ...panel.keys.filter((k) => !tabArrows || (k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right'))).map((k) => `${k.cap} ${k.label}`),
+        ...keys.filter((k) => !tabArrows || (k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right'))).map((k) => `${k.cap} ${k.label}`),
       ].join(' · ')
-    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
+    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
   // The strip's tabs, ONE row under the top border: the wizard's own tab row, so the two
   // strips look the same.
   const tabStrip = tabRows ? tabRow(tabs, inner, 'strip') : null;

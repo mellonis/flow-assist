@@ -1995,7 +1995,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               empty: 'none',
               rows,
               tabs,
-              get keys() { return pending !== null ? answerKeys : [openKey, stopKey, ...tabKeys]; },
+              get keys() {
+                if (pending !== null) return answerKeys;
+                // A tab with no row has nothing to open and nothing to stop, so the two
+                // keys are withheld and the hint names only what acts. The question's
+                // row counts as the tab's own: it is drawn there, and its answer is
+                // the keys above.
+                return rows().length ? [openKey, stopKey, ...tabKeys] : [...tabKeys];
+              },
             });
             host.notify();
           };

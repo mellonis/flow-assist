@@ -352,7 +352,8 @@ question up, the first Esc only drops it. ⏎ on a row shows that node's convers
 below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there; every other key
 is swallowed: nothing is typed and nothing is sent. The cursor follows its node when the
 rows change; when its node ends it moves to the nearest row, and with no row left the line
-has the keys again.
+has the keys again. A node that ends while its stop question is up takes the question with
+it; the work picker's own stands beside a row that has ended (see The work picker below).
 
 A subagent's y/n cannot be answered from the rows. While the cursor is in them, a waiting
 subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer` (with a stop
@@ -425,7 +426,8 @@ the list shrinks first, and the tab row goes before the list could fall below tw
 `Subagents (2)`, `Shells (1)` — and the open one is inverse. `←` and `→` switch (either
 steps to the other tab), and the cursor lands on the new tab's first row. The panel opens
 on Subagents, or on Shells when the session has no subagent and does have shells; a tab
-with nothing in it says `none`, and `←`/`→` still switch out of it.
+with nothing in it says `none`, `←`/`→` still switch out of it, and the keys it names are
+the ones that act — no `⏎ open` and no `ctrl+d` while the open tab has no row.
 
 A subagent's row is its label path with what it is doing
 (`main › review · running — reading src/`), and one that waits on you — its own question

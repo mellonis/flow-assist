@@ -90,16 +90,17 @@ it is a narrower door to a subset of the same rows (see Approaches).
   gives the strip its whole height and the list window shrinks). Width =
   `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat box's bottom border
   row (the area's bottom row in full mode, where the box is the area). Scrolling: the
-  existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
+  list scrolls within the cursor's window (`isActive: false` — the cursor moves it, never
+  the keys); the wheel and PgUp/PgDn stay the covered conversation's.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
 - **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
   helpers. The way out comes first: the row is cut at the frame's width, and what falls
   off a narrow strip must never be the way out. `←→ tabs` is synthesized only when BOTH
-  arrow keys are declared, so a panel that withholds them (the stop question's keys)
-  never names an arrow that does nothing; `↑↓ pick` stays, since it still moves. A
-  notice (the stop/kill question's context line, a panel `notice`) takes the hint row's
-  place while it is up.
+  arrow keys are declared, so a panel that withholds them (the stop question's keys, an
+  empty tab's row keys) never names an arrow that does nothing; `↑↓ pick` stays, since it
+  still moves. A notice (the stop/kill question's context line, a panel `notice`) takes
+  the hint row's place while it is up.
 - **Rows and actions** (unchanged apart from tabs): sub rows `path › …` + state,
   `? waiting for you` = `offeredWithin` (in it or below it); shell rows `id · cmd` —
   `<state> — <owner>`; ended rows sink per tab. `⏎` opens (watch / jump to the waiting
@@ -343,16 +344,16 @@ above).
   opens on Subagents, or Shells when there are no sub rows and there is work);
   `rows()` filters `workRows(...)` by `r.group === tab` and emits NO group rows — an
   empty tab emits NO rows at all and the spec's `empty: 'none'` draws the dim message;
-  the
-  `look: 'bottom'` and `tabs: () => …` fill (labels `Subagents (N)`/`Shells (N)` from
+  the `look: 'bottom'` and `tabs: () => …` fill (labels `Subagents (N)`/`Shells (N)` from
   the same filter's lengths); two key defs `{ key: 'left' | 'right', label: 'tabs',
   reset: true, run: () => { tab = …; return undefined; } }`; `ctrl+d` on a `sub:` row
   goes through `stopQuestion` naming that sub and the node's stop — the same route the
   tree rows' `x` takes — with the question's existence checked at every draw like
   `killPending` (a node gone under the question: the question stands, `y` is a no-op).
-  Every declared key runs on an empty tab too, on no row (`id: null`), the tab keys
-  included. The hint is Task 2's pinned row; the per-row question text keeps the
-  tree's own words.
+  On an empty tab the tab keys still run, on no row (`id: null`); `⏎ open` and
+  `ctrl+d stop/kill` are withheld while the open tab has no row, and the hint drops
+  their tokens with them. The hint is Task 2's pinned row; the per-row question text
+  keeps the tree's own words.
 - [ ] **Step 4: Run the tests to verify they pass**
   Run: `bun test src/__tests__/work-picker.e2e.test.ts src/assistant/__tests__/work-panel.test.ts src/assistant/__tests__/command-panel.test.ts`
   Expected: PASS. Then `bun run typecheck` and the focused fan-out:
