@@ -1,15 +1,17 @@
-// The work picker (`/work`, and its `work` key): the session's live subagents and
-// background shells in one list (docs/usage.md). Enter opens what is under the cursor —
-// a subagent's watch, a shell's output in the pager — and ctrl+d kills a shell after the
-// picker's own y/n. The picker is one-shot: Esc closes it back to the chat. The real app
-// on the scripted model; the pause before a parked request takes the keyboard is read
-// from `askClock`, which the tests move.
+// The work picker (`/work`, its `work` key and `↓` on an empty field): the session's live
+// subagents and background shells as a bottom strip, one tab each (docs/usage.md). Enter
+// opens what is under the cursor — a subagent's watch, a shell's output in the pager —
+// and ctrl+d stops a subagent or kills a shell after the picker's own y/n. The picker is
+// one-shot: Esc closes it back to the chat. The real app on the scripted model; the pause
+// before a parked request takes the keyboard is read from `askClock`, which the tests
+// move.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { hostStateDir } from '../config/load.ts';
+import { keyGlyph } from '../playback/keys.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -38,14 +40,18 @@ const results = (req: { messages: { role: string; content?: unknown }[] } | unde
 
 // A subagent the person starts: held at its first step, then its request of the kind.
 // `outer` starts a task of its own (`beta one`) whose first command asks the person y/n —
-// a request parked BELOW the subagent.
+// a request parked BELOW the subagent; `quiet` starts one that just answers (`gamma one`),
+// so it ends by itself while anything is looking at it.
 const labelOf = (mark: string) => `${mark.toLowerCase()}-go`;
-interface Kid { mark: string; kind: 'run' | 'ask' | 'outer' }
+const QUIET_TASK = 'gamma one';
+interface Kid { mark: string; kind: 'run' | 'ask' | 'outer' | 'quiet' }
 const requestOf = (kid: Kid, root: string) => (kid.kind === 'ask'
   ? { tool: 'ask_parent', args: { question: `Q-${kid.mark}?` } }
   : kid.kind === 'outer'
     ? { tool: 'subagent', args: { task: 'beta one' } }
-    : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
+    : kid.kind === 'quiet'
+      ? { tool: 'subagent', args: { task: QUIET_TASK } }
+      : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
 const scriptOf = (kid: Kid, root: string): Turn[] => [[{ hold: true as const }, requestOf(kid, root)], [{ text: `${kid.mark} settled` }]];
 // The task `outer`'s subagent tool starts: matched by the task text in its prompt. Its
 // first step asks the person to approve a command.
@@ -65,6 +71,11 @@ async function boot(kids: Kid[] = []): Promise<Rig> {
   if (kids.some((k) => k.kind === 'outer')) {
     const task = model.when((req) => firstUser(req).includes('beta one'));
     task.script(...TASK_TURN(root));
+    children.push(task);
+  }
+  if (kids.some((k) => k.kind === 'quiet')) {
+    const task = model.when((req) => firstUser(req).includes(QUIET_TASK));
+    task.script([{ hold: true as const }, { text: 'QUIET settled' }]);
     children.push(task);
   }
   const ui = await bootApp(model, 130, 34, undefined, {
@@ -103,6 +114,27 @@ const openByCommand = async (ui: UI) => {
 // The panel is up; `panelUp` reads the frame, never a state the key set.
 const panelUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
 const fieldRow = (ui: UI) => rowsOf(ui).findLastIndex((r) => r.includes('› '));
+// The strip's own rows: inside its frame, from the tab row down to the frame's bottom
+// border — the chat above it says the same names (`subagent «hyn-go» started`), so a test
+// that asks what the PICKER says reads only this.
+function stripText(ui: UI) {
+  const rows = rowsOf(ui);
+  const heading = rows.findIndex((r) => r.includes('Flow Assist · Work'));
+  const end = rows.findIndex((r, i) => i > heading && r.trimStart().startsWith('╰'));
+  return rows.slice(heading + 1, end > heading ? end : rows.length).join('\n');
+}
+// The row the cursor is on is the one with the panel's mark in front — a frame alone says
+// it, as a person sees it.
+const marked = (ui: UI, text: string) => rowsOf(ui).some((r) => r.includes(`› ${text}`));
+// The style of the cell where `text` starts: the current tab is drawn inverse, so only a
+// frame's cells can tell which one it is.
+function styleAt(ui: UI, text: string) {
+  const rows = rowsOf(ui);
+  const y = rows.findIndex((r) => r.includes(text));
+  if (y < 0) throw new Error(`"${text}" is not on screen:\n${frameOf(ui)}`);
+  const buffer = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean } } } | null }).lastBuffer;
+  return buffer!.get(rows[y]!.indexOf(text), y).style;
+}
 
 test('a down-arrow on an empty field opens the work panel', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
@@ -172,29 +204,117 @@ test('a bang step or a recall keeps the down-arrow away from the panel', async (
   rig.ui.app.unmount();
 }, 20_000);
 
-test('the picker opens on its key and shows both groups', async () => {
+test('the picker opens on its key with both tabs and their rows', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
   await rig.ui.press('F');
   await spawn(rig, 0);
   await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
   await openByKey(rig.ui);
   const frame = frameOf(rig.ui);
-  // The two group headers, one row each.
-  expect(frame).toContain('Subagents');
-  expect(frame).toContain('Shells');
-  expect(frame).toContain('hyn-go');
-  expect(frame).toContain('sh-1 · echo up; sleep 60');
-  expect(frame).toContain('running — this chat');
+  // The two tabs and their counts, the subagent's row on the one that is open.
+  expect(frame).toContain('Subagents (1)');
+  expect(frame).toContain('Shells (1)');
+  expect(stripText(rig.ui)).toContain('hyn-go');
+  expect(stripText(rig.ui)).not.toContain('sh-1 · echo up');
   // The key-caps hint at the bottom names the keys as glyphs.
-  expect(frame).toContain('⏎ open');
-  expect(frame).toContain('^d kill');
-  // Esc closes it; /work opens the same panel again.
+  expect(frame).toContain(`${keyGlyph('return')} open`);
+  expect(frame).toContain(`${keyGlyph('ctrl+d')} stop/kill`);
+  // → is the Shells tab: the shell's row, its owner the chat's.
+  await rig.ui.press('right');
+  await settle();
+  expect(stripText(rig.ui)).toContain('sh-1 · echo up; sleep 60');
+  expect(stripText(rig.ui)).toContain('running — this chat');
+  // Esc closes it; /work opens the same panel again, on Subagents.
   await rig.ui.press('escape');
   await settleUntil(() => !frameOf(rig.ui).includes('Flow Assist · Work'));
   expect(frameOf(rig.ui)).not.toContain('Subagents');
   await openByCommand(rig.ui);
-  expect(frameOf(rig.ui)).toContain('Subagents');
-  expect(frameOf(rig.ui)).toContain('hyn-go');
+  expect(stripText(rig.ui)).toContain('Subagents (1)');
+  expect(stripText(rig.ui)).toContain('hyn-go');
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('the tabs split the work; ←→ switch and the counts follow', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }, { mark: 'ALK', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await spawn(rig, 1);
+  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  // Each tab counts its own rows, and the list is the open tab's alone: no group header
+  // stands over these rows.
+  let frame = frameOf(rig.ui);
+  expect(frame).toContain('Subagents (2)');
+  expect(frame).toContain('Shells (1)');
+  expect(stripText(rig.ui)).toContain('hyn-go');
+  expect(stripText(rig.ui)).toContain('alk-go');
+  expect(stripText(rig.ui)).not.toContain('sh-1 · echo up');
+  expect(marked(rig.ui, 'hyn-go')).toBe(true);
+  // → : the Shells tab is the inverse one, the list is the shell's, its cursor on its
+  // first row.
+  await rig.ui.press('right');
+  await settle();
+  expect(styleAt(rig.ui, 'Shells (1)').inverse).toBe(true);
+  expect(styleAt(rig.ui, 'Subagents (2)').inverse).toBeFalsy();
+  expect(stripText(rig.ui)).toContain('sh-1 · echo up');
+  expect(stripText(rig.ui)).not.toContain('hyn-go');
+  expect(marked(rig.ui, 'sh-1 ·')).toBe(true);
+  // ← back: the Subagents tab again, and its cursor on the tab's FIRST row whatever row
+  // it was left on — the same for the shell tab on the way back.
+  await rig.ui.press('left');
+  await settle();
+  await rig.ui.press('down');
+  await settle();
+  expect(marked(rig.ui, 'alk-go')).toBe(true);
+  await rig.ui.press('right');
+  await settle();
+  await rig.ui.press('left');
+  await settle();
+  expect(marked(rig.ui, 'hyn-go')).toBe(true);
+  expect(marked(rig.ui, 'alk-go')).toBe(false);
+  expect(styleAt(rig.ui, 'Subagents (2)').inverse).toBe(true);
+  rig.ui.app.unmount();
+  // A tab with nothing draws `none`, and its count says it too.
+  const only = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await only.ui.press('F');
+  await spawn(only, 0);
+  await only.ui.press('down');
+  await settleUntil(() => panelUp(only.ui));
+  await only.ui.press('right');
+  await settle();
+  expect(stripText(only.ui)).toContain('Shells (0)');
+  expect(stripText(only.ui)).toContain('none');
+  expect(stripText(only.ui)).not.toContain('hyn-go');
+  only.ui.app.unmount();
+}, 30_000);
+
+test('the panel is the bottom strip: the tabs under its top border and the hint at its own', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }, { mark: 'ALK', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await spawn(rig, 1);
+  await shell(rig.ui, 'sleep 60 &', '○ sh-1');
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  const rows = rowsOf(rig.ui);
+  const heading = rows.findIndex((r) => r.includes('Flow Assist · Work'));
+  // ONE tab row, right under the frame's top border.
+  expect(rows[heading + 1]).toContain('Subagents (2)');
+  expect(rows[heading + 1]).toContain('Shells (1)');
+  // The hint is the strip's last row inside the frame, the way out first.
+  const hint = rows.findIndex((r) => r.includes(`${keyGlyph('up')}${keyGlyph('down')} pick`));
+  expect(hint).toBeGreaterThan(heading + 1);
+  expect(rows[hint]).toContain([
+    `${keyGlyph('escape')} close`,
+    `${keyGlyph('left')}${keyGlyph('right')} tabs`,
+    `${keyGlyph('up')}${keyGlyph('down')} pick`,
+    `${keyGlyph('return')} open`,
+    `${keyGlyph('ctrl+d')} stop/kill`,
+  ].join(' · '));
+  // The hint sits on the frame's last row: nothing of the strip is under it.
+  expect(rows[hint + 1]).toContain('╰');
+  expect(rows[hint + 1]).toContain('╯');
   rig.ui.app.unmount();
 }, 20_000);
 
@@ -216,7 +336,7 @@ test('enter opens what is under the cursor', async () => {
   await settle(4);
   // The shell row: its output pager is up over the kept tail.
   await openByCommand(rig.ui);
-  await rig.ui.press('down', 'down');
+  await rig.ui.press('right');
   await rig.ui.press('return');
   await settleUntil(() => frameOf(rig.ui).includes('│ up'));
   expect(frameOf(rig.ui)).toContain('│ up');
@@ -263,6 +383,82 @@ test('ctrl+d kills a shell after its own y/n', async () => {
   rig.ui.app.unmount();
 }, 20_000);
 
+test('ctrl+d stops a subagent after its question, and y names it', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await openByKey(rig.ui);
+  // The cursor starts on the tab's first row; ctrl+d asks in that row's place, naming it.
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settle();
+  expect(frameOf(rig.ui)).toContain('stop hyn-go? y yes · n no');
+  expect(stripText(rig.ui)).not.toContain('running —');
+  // `n` cancels: the subagent is still at work and the row is back to its state.
+  await rig.ui.press('n');
+  await settleUntil(() => !frameOf(rig.ui).includes('stop hyn-go'));
+  expect(frameOf(rig.ui)).toContain('hyn-go');
+  expect(rig.children[0]!.held).toBe(true);
+  // ctrl+d again asks, and the ctrl+d that asked drops the question: the chord stays the
+  // panel's through the whole exchange, and nothing arms the exit.
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => frameOf(rig.ui).includes('stop hyn-go'));
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => !frameOf(rig.ui).includes('stop hyn-go'));
+  expect(frameOf(rig.ui)).toContain('hyn-go');
+  expect(frameOf(rig.ui)).not.toContain('^d again');
+  // ctrl+d, then `y`: the node is stopped with what it started, and its row leaves the
+  // live tab — the panel stays up and follows the work.
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => frameOf(rig.ui).includes('stop hyn-go'));
+  await rig.ui.press('y');
+  await settleUntil(() => frameOf(rig.ui).includes('Subagents (0)'));
+  expect(frameOf(rig.ui)).toContain('◆ hyn-go stopped:');
+  expect(stripText(rig.ui)).toContain('none');
+  expect(stripText(rig.ui)).not.toContain('hyn-go');
+  expect(rig.ui.exits()).toBe(0);
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('a subagent that ended under the question is not stopped twice', async () => {
+  const rig = await boot([{ mark: 'QUIET', kind: 'quiet' }, { mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await spawn(rig, 1);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  // `quiet-go` starts a task of its own; its row sits under its parent's, and the task
+  // is held at its first step.
+  await released(rig, 0);
+  const task = rig.children[2]!;
+  await settleUntil(() => task.held);
+  await settleUntil(() => frameOf(rig.ui).includes('gamma one'));
+  await rig.ui.press('down');
+  await settle();
+  expect(marked(rig.ui, 'quiet-go › gamma one')).toBe(true);
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settle();
+  expect(frameOf(rig.ui)).toContain('stop gamma one? y yes · n no');
+  // The task answers and ends while its question is up: the tab counts what is live, and
+  // the question stands for the row it names.
+  task.release();
+  await settleUntil(() => frameOf(rig.ui).includes('Subagents (2)'));
+  expect(stripText(rig.ui)).toContain('stop gamma one? y yes · n no');
+  expect(stripText(rig.ui)).not.toContain('gamma one ·');
+  // `y` answers the row the question NAMES: the task is gone, and the live subagent the
+  // cursor is on is not the one stopped.
+  await rig.ui.press('up');
+  await settle();
+  expect(marked(rig.ui, 'hyn-go')).toBe(true);
+  await rig.ui.press('y');
+  await settle();
+  expect(frameOf(rig.ui)).toContain('gamma one has ended — nothing to stop');
+  expect(frameOf(rig.ui)).not.toContain('stop gamma one');
+  expect(frameOf(rig.ui)).toContain('hyn-go');
+  expect(rig.children[1]!.held).toBe(true);
+  expect(rig.ui.exits()).toBe(0);
+  rig.ui.app.unmount();
+}, 20_000);
+
 test('enter on a waiting subagent lands on its request', async () => {
   const rig = await boot([{ mark: 'ASK', kind: 'ask' }]);
   await rig.ui.press('F');
@@ -298,9 +494,10 @@ test('a sub whose grandchild waits on you is marked too, and Enter lands on that
   await released(rig, 0);
   await settleUntil(() => rig.children[1]!.held);
   await released(rig, 1);
-  await settleUntil(() => rowsOf(rig.ui).some((r) => r.includes('beta one') && r.includes('waiting for you')));
-  const taskRow = rowsOf(rig.ui).find((r) => r.includes('beta one')) ?? '';
-  const subRow = rowsOf(rig.ui).find((r) => r.includes('alpha-go') && !r.includes('beta one')) ?? '';
+  await settleUntil(() => stripText(rig.ui).includes('beta one') && stripText(rig.ui).includes('waiting for you'));
+  const strip = stripText(rig.ui).split('\n');
+  const taskRow = strip.find((r) => r.includes('beta one')) ?? '';
+  const subRow = strip.find((r) => r.includes('alpha-go') && !r.includes('beta one')) ?? '';
   expect(taskRow).toContain('? waiting for you');
   expect(subRow).toContain('? waiting for you');
   // Enter lands on that request: the picker closes with no watch, and the request block —

@@ -407,17 +407,27 @@ a `y` counts; a question that arrives while the cursor is in the rows, or that e
 takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
 on screen a question takes keys at once.
 
-### The work picker: `J`, or `/work`
+### The work picker: `J`, `/work`, or `↓` on an empty line
 
 Everything that runs beside this conversation — the live subagents and tasks, the
-background shells — in one list to jump between. `J` opens it wherever the chat does not
+background shells — in one strip to jump between. `J` opens it wherever the chat does not
 have the keyboard (on the start screen, on a plugin's screen), `/work` from inside the
 chat; `config set keys.work <key>` moves the capital. Inside the chat, `↓` on an empty line
 is the third door — no history entry shown and bang level 0 — and it opens the panel when
 the session has work; with none the key does nothing.
 
-One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
-it says `none`. A subagent's row is its label path with what it is doing
+The panel is a strip pinned to the chat's bottom: a fixed twelve rows — its frame, the tab
+row, eight rows of work and one for the keys — so the conversation above it stays on
+screen while it is up. A terminal too short for that gives the strip what the chat box has:
+the list shrinks first, and the tab row goes before the list could fall below two rows.
+
+**Subagents** and **Shells** are its two tabs, each with what it holds now —
+`Subagents (2)`, `Shells (1)` — and the open one is inverse. `←` and `→` switch (either
+steps to the other tab), and the cursor lands on the new tab's first row. The panel opens
+on Subagents, or on Shells when the session has no subagent and does have shells; a tab
+with nothing in it says `none`.
+
+A subagent's row is its label path with what it is doing
 (`main › review · running — reading src/`), and one that waits on you — its own question
 or y/n, or one parked in a conversation below it — is marked `? waiting for you`. A
 shell's row is its id and command
@@ -426,16 +436,21 @@ chat's own as `this chat`); a shell you killed sinks below the running ones and 
 `killed (person) — this chat`. The rows are read again at every draw, so a state is what
 is true now.
 
-↑ and ↓ move among the rows across the group names, which are no key's. ⏎ opens what is
-under the cursor: a subagent's conversation as the watch draws it, or a shell's kept
-output in the pager, growing while the job prints. The watch's Esc comes back to the chat,
-never to the picker (the picker is one-shot, `J` opens it again), and with the node's row
-still drawn and no request waiting in the tree it puts the cursor on that row; a watch
-opened from `/agents` returns to the field instead. ⏎ on a subagent that waits on you just
-closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
-`kill sh-3? y yes · n no` in that row's place; the question names its job, so `y` kills
-that job wherever the cursor has moved to since and `n` leaves it running. `ctrl+d` again
-drops the pending question and kills nothing, and Esc closes the picker, question and all.
+↑ and ↓ move among the rows. ⏎ opens what is under the cursor: a subagent's conversation
+as the watch draws it, or a shell's kept output in the pager, growing while the job
+prints. The watch's Esc comes back to the chat, never to the picker (the picker is
+one-shot, `J` opens it again), and with the node's row still drawn and no request waiting
+in the tree it puts the cursor on that row; a watch opened from `/agents` returns to the
+field instead. ⏎ on a subagent that waits on you just closes the picker: its request block
+takes the keyboard at once.
+
+`ctrl+d` stops a subagent or kills a shell, after the question that names its row —
+`stop review and 2 below it? y yes · n no`, `kill sh-3? y yes · n no` — the same words and
+the same stop the rows under the field ask with `x`: a subagent goes with everything it
+started. `y` answers the row the question names, wherever the cursor has moved to since,
+and nothing else; `n` leaves it as it was. The question stays on screen even when its work
+ends while it is up, and a `y` then stops nothing and says so. `ctrl+d` again drops the
+pending question and stops nothing, and Esc closes the picker, question and all.
 
 ## Agent files
 

@@ -521,7 +521,7 @@ there is no `/fullscreen`.
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
   the editor's forward delete, consumed (never while the `:` line is open — it owns the
   keyboard then; its own catch-all types no chord as a character); a chord a drawn
-  plugin's panel binds (its `ctrl+d` — the work picker's kill) is the panel's key and
+  plugin's panel binds (its `ctrl+d` — the work picker's stop/kill) is the panel's key and
   goes on to the panel, never to the arm. **The keys are
   claimed only while there is something to stop** (a live abort controller not yet
   aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores

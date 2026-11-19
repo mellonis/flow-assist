@@ -1794,14 +1794,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             } catch (e) { fail(e); }
           };
           // The work picker (`/work`, its `work` key and `↓` on an empty field): the
-          // session's live subagents and background shells in one list under two group
-          // headers (docs/usage.md). The rows are read at every draw — a group that is
-          // empty says `none`, a row's state is what is true now. The picker is
-          // ONE-SHOT: a key closes it and opens what is under the cursor — Enter watches
-          // a subagent (a waiting one just closes: its request block takes the keyboard),
-          // Enter opens a shell's output in the pager, and `ctrl+d` kills a shell after
-          // the question that stands in its row's place (`stopQuestion`, the tree's own
-          // words).
+          // session's live subagents and background shells as ONE bottom strip, one tab
+          // each (docs/usage.md). The rows are read at every draw — a tab that is empty
+          // says `none`, a row's state is what is true now, and the tab labels count what
+          // each holds. The picker is ONE-SHOT: a key closes it and opens what is under
+          // the cursor — Enter watches a subagent (a waiting one just closes: its request
+          // block takes the keyboard), Enter opens a shell's output in the pager, and
+          // `ctrl+d` kills a shell or stops a subagent after the question that stands in
+          // its row's place (`stopQuestion`, the tree's own words and its own stop route).
           // Every shell of a conversation's subtree the registry still holds: the running
           // ones and the ended records each conversation keeps (`shell_list`'s view of
           // them), with the conversation that owns each.
@@ -1860,29 +1860,45 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const openWork = () => {
             const asked = conv;
-            let askedKill: string | null = null; // the job whose kill question is up
+            // The tab the strip shows: Subagents, or Shells for a session with no
+            // subagent and shells to show. `←`/`→` switch between the two, and the cursor
+            // lands on the new tab's first row (`PanelKeyDef.reset`).
+            type WorkTab = 'subagents' | 'shells';
+            const first = workRowsOf(asked);
+            let tab: WorkTab = first.some((r) => r.group === 'subagents') || !first.length ? 'subagents' : 'shells';
+            // The stop question up, naming the row it stands for: a background shell to
+            // kill, or a subagent to stop with what it started. `label`/`below` are the
+            // tree's own words, kept for a row that ends while its question is up.
+            type Pending = { kind: 'shell'; id: string } | { kind: 'sub'; key: string; label: string; below: number };
+            let pending: Pending | null = null;
             const shells = () => workShells(asked);
-            // The kill question's job, while the registry still holds it. Pure — read at
-            // every draw, never written from a read.
-            const killPending = (): string | null => (askedKill !== null && shells().has(askedKill) ? askedKill : null);
+            const rowId = (p: Pending): string => (p.kind === 'shell' ? `shell:${p.id}` : `sub:${p.key}`);
+            const question = (p: Pending): string => (p.kind === 'shell'
+              ? stopQuestion({ label: p.id, below: 0, kind: 'shell' })
+              : stopQuestion({ label: p.label, below: p.below }));
+            // The open tab's rows, read at every draw. The question stands in place of the
+            // row it is about; a row that has gone since (a node ended by its own answer, a
+            // job the registry dropped) leaves its question standing on its own, so `y` is
+            // still answered — and finds nothing to stop.
             const rows = (): PanelRow[] => {
-              const all = workRowsOf(asked);
-              const up = killPending();
-              const out: PanelRow[] = [];
-              for (const group of ['subagents', 'shells'] as const) {
-                out.push({ id: `group:${group}`, kind: 'group', text: group === 'subagents' ? 'Subagents' : 'Shells' });
-                const here = all.filter((r) => r.group === group);
-                if (!here.length) { out.push({ id: `group:${group}:none`, kind: 'group', text: 'none' }); continue; }
-                for (const r of here) {
-                  out.push(up !== null && r.id === `shell:${up}`
-                    // The question stands in place of the row it is about.
-                    ? { id: r.id, text: stopQuestion({ label: up, below: 0, kind: 'shell' }), tone: 'warn' }
-                    : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) });
-                }
-              }
-              return out;
+              const p = pending;
+              const out: PanelRow[] = workRowsOf(asked).filter((r) => r.group === tab).map((r) => (p && rowId(p) === r.id
+                ? { id: r.id, text: question(p), tone: 'warn' as const }
+                : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) }));
+              if (p && !out.some((r) => r.id === rowId(p))) out.push({ id: rowId(p), text: question(p), tone: 'warn' });
+              // An empty tab is one dim row a key never runs on.
+              return out.length ? out : [{ id: 'group:none', kind: 'group', text: 'none' }];
             };
-            // Enter opens what is under the cursor — a group header is nothing to open.
+            // The tab strip: each tab with what it holds now, the open one current.
+            const tabs = () => {
+              const all = workRowsOf(asked);
+              const count = (g: WorkTab) => all.filter((r) => r.group === g).length;
+              return [
+                { label: `Subagents (${count('subagents')})`, current: tab === 'subagents' },
+                { label: `Shells (${count('shells')})`, current: tab === 'shells' },
+              ];
+            };
+            // Enter opens what is under the cursor — a `none` row is nothing to open.
             const openKey: PanelKeyDef = {
               key: 'return', label: 'open',
               run: (id) => {
@@ -1906,42 +1922,70 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return undefined;
               },
             };
-            const killKey: PanelKeyDef = {
-              key: 'ctrl+d', label: 'kill',
+            // `ctrl+d`: a shell is killed, a subagent is stopped with what it started —
+            // the tree rows' own `x stop` route, its words in the row's place — and both
+            // after the question naming the row.
+            const stopKey: PanelKeyDef = {
+              key: 'ctrl+d', label: 'stop/kill',
               run: (id) => {
                 const row = id ?? '';
                 if (!row || row.startsWith('group:')) return undefined;
-                if (!row.startsWith('shell:')) return 'only a background shell can be killed';
-                const found = shells().get(row.slice('shell:'.length));
-                if (!found) return 'it is gone — nothing to kill';
-                if (!found.job.running) return 'it has ended — nothing to kill';
-                askedKill = found.job.id;
+                if (row.startsWith('shell:')) {
+                  const found = shells().get(row.slice('shell:'.length));
+                  if (!found) return 'it is gone — nothing to kill';
+                  if (!found.job.running) return 'it has ended — nothing to kill';
+                  pending = { kind: 'shell', id: found.job.id };
+                  return undefined;
+                }
+                if (!row.startsWith('sub:')) return undefined;
+                const key = row.slice('sub:'.length);
+                const node = asked.tree().find((n) => n.key === key);
+                if (!node || !asked.nodeByKey(key)) return 'it has ended — nothing to stop';
+                pending = { kind: 'sub', key, label: node.label, below: node.below };
                 return undefined;
               },
             };
-            // The question's keys. A `y` answers the question on screen — it names its
-            // job — wherever the cursor is; `n` or the `ctrl+d` that asked drops it, and
-            // that chord stays the panel's through the whole exchange.
+            // The two tabs, both keys stepping to the other one.
+            const tabKeys: PanelKeyDef[] = (['left', 'right'] as const).map((key) => ({
+              key, label: 'tabs', reset: true,
+              run: () => { tab = tab === 'subagents' ? 'shells' : 'subagents'; return undefined; },
+            }));
+            // The question's keys. A `y` answers the question on screen — it names its row
+            // — wherever the cursor is; `n` or the `ctrl+d` that asked drops it, and that
+            // chord stays the panel's through the whole exchange. A row gone since leaves
+            // `y` nothing to stop, which it says.
             const answerKeys: PanelKeyDef[] = [
               {
                 key: 'y', label: 'yes',
                 run: () => {
-                  const job = killPending();
-                  askedKill = null;
-                  const found = job !== null ? shells().get(job) : undefined;
-                  if (found) found.owner.killJob(found.job, 'person');
+                  const p = pending;
+                  pending = null;
+                  if (!p) return undefined;
+                  if (p.kind === 'shell') {
+                    const found = shells().get(p.id);
+                    if (!found) return 'it is gone — nothing was killed';
+                    if (!found.job.running) return 'it has ended — nothing to kill';
+                    found.owner.killJob(found.job, 'person');
+                    host.notify();
+                    return undefined;
+                  }
+                  const node = asked.nodeByKey(p.key);
+                  if (!node) return `${p.label} has ended — nothing to stop`;
+                  node.stopSubtree('x');
                   host.notify();
                   return undefined;
                 },
               },
-              { key: 'n', label: 'no', run: () => { askedKill = null; return undefined; } },
-              { key: 'ctrl+d', label: 'cancel', run: () => { askedKill = null; return undefined; } },
+              { key: 'n', label: 'no', run: () => { pending = null; return undefined; } },
+              { key: 'ctrl+d', label: 'cancel', run: () => { pending = null; return undefined; } },
             ];
             openPanel({
               title: 'Work',
+              look: 'bottom',
               follow: true,
               rows,
-              get keys() { return killPending() !== null ? answerKeys : [openKey, killKey]; },
+              tabs,
+              get keys() { return pending !== null ? answerKeys : [openKey, stopKey, ...tabKeys]; },
             });
             host.notify();
           };
