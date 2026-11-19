@@ -1057,13 +1057,15 @@ there is no `/fullscreen`.
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
   A spec's `look: 'bottom'` COMPOSES over the chat: the transcript, the queue and the plan
-  keep drawing as always, and the strip is laid over the chat's last 12 rows — the field
-  among them, covered until the strip drops. It is exactly 12 rows (the frame, the tab
-  strip, an 8-row list window and the hint), no padding and no gaps, the chat's width, its
-  last row on the area's last row, and its message takes the hint row's place. A short
-  area keeps the way out: the list gives way first and the tab row is dropped once fewer
-  than two list rows would remain. With no `tabs()` (or an empty one) there is no tab row
-  and the list window takes it — 9 rows at the full 12. `'window'` (the default) keeps the
+  keep drawing as always, and the strip is the chat box's bottom sheet — the field and the
+  tail of the transcript underneath it, covered until the strip drops. It is 12 rows capped
+  to the chat box's height (a shorter box gives the strip its whole height and the list
+  window shrinks), no padding and no gaps, the chat's width; its bottom border sits on the
+  chat box's bottom border row (the area's bottom in full mode). Its rows are the frame,
+  the tab strip, the list window and the hint: `boxH - 4` list rows with tabs, `boxH - 3`
+  without. The tab row is dropped once it would leave fewer than two list rows. With no
+  `tabs()` (or an empty one) there is no tab row and the list window takes it — 9 rows at
+  the full 12. `'window'` (the default) keeps the
   panel in the conversation's place. `tabs()` is read at every draw: ONE row under the top
   border, a label per tab cut by cells, the current one inverse, and the strip names the
   keys that walk them (`←→ tabs`, `↑↓ pick`, the way out first); without tabs a declared

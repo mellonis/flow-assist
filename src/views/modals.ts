@@ -2450,8 +2450,8 @@ export type CommandPanelView = {
 };
 
 // A strip is exactly this tall: the frame's two rows, one for the tab strip, eight for the
-// list window and one for the hint — no padding and no gaps between them. On a terminal
-// shorter than this it is the whole area, its last row on the area's last row.
+// list window and one for the hint — no padding and no gaps between them. A chat box
+// shorter than this gives the strip its whole height, with the list window shrunk.
 const STRIP_ROWS = 12;
 
 export function renderCommandPanel({ width, height, theme, panel, error = null, fullscreen = false, docked = false, focused = true, hover = false, onPickRow }: {
@@ -2469,16 +2469,20 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
 }) {
   const strip = panel.look === 'bottom';
   const boxW = chatBoxWidth(width, fullscreen);
-  const boxH = strip ? Math.min(STRIP_ROWS, height) : fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
+  // The chat's own box: a strip is its bottom sheet, so the strip's height is capped to
+  // the box's (a window is 82% of the area; full and docked are the area itself).
+  const chatH = chatBoxHeight(height, fullscreen);
+  const boxH = strip ? Math.min(STRIP_ROWS, chatH) : chatH;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   // A strip draws from border to border; a window keeps its padding.
   const inner = Math.max(1, boxW - (strip ? 2 : 4));
   const message = error ? `⚠ ${error}` : panel.notice;
   const tabs = panel.tabs ?? [];
-  // A strip's rows: the frame, the tab strip when there is one, the list's window and the
-  // hint's row — 8 list rows at the full 12. Its message takes the hint's row, never one
-  // of its own. What does not fit gives way to the hint: a short area keeps the way out.
-  const tabRows = strip && tabs.length && boxH - 2 >= 2 ? 1 : 0;
+  // A strip's rows: the frame, the tab strip, the list's window and the hint's row — 8
+  // list rows at the full 12 (`boxH - 4` with tabs, `boxH - 3` without). Its message takes
+  // the hint's row, never one of its own. The tab strip is dropped before it squeezes the
+  // list below two rows; a short box keeps the way out.
+  const tabRows = strip && tabs.length && boxH - 4 >= 2 ? 1 : 0;
   const listRows = strip
     ? Math.max(0, boxH - 2 - tabRows - 1)
     : Math.max(1, boxH - 4 - 2 - (message ? 1 + textRows(message, inner) : 0));
@@ -2514,38 +2518,45 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // The strip's tabs, ONE row under the top border: the wizard's own tab row, so the two
   // strips look the same.
   const tabStrip = tabRows ? tabRow(tabs, inner, 'strip') : null;
-  // A strip hangs on the area's last row, over the chat it belongs to; the window keeps
-  // its centred overlay.
-  const shell = strip
-    ? { position: 'absolute' as const, top: 0, left: 0, width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const, zIndex: 11 }
-    : docked ? { width, height, flexDirection: 'column' as const } : overlay(width, height);
-  return h(Box, shell,
-    h(Box, {
-      border: 'round',
-      backgroundColor: m.bg,
-      color: m.text,
-      borderBackgroundColor: m.borderBg,
-      borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
-      borderTitle: cutStep(heading, headRoom),
-      width: boxW,
-      height: boxH,
-      padding: strip ? 0 : 1,
-      flexDirection: 'column',
-      gap: strip ? 0 : 1,
-      overflow: 'hidden',
-      selectionScope: true,
+  // The chat box's frame: the strip's sheet, or the window's own panel.
+  const framed = h(Box, {
+    border: 'round',
+    backgroundColor: m.bg,
+    color: m.text,
+    borderBackgroundColor: m.borderBg,
+    borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
+    borderTitle: cutStep(heading, headRoom),
+    width: boxW,
+    height: boxH,
+    padding: strip ? 0 : 1,
+    flexDirection: 'column',
+    gap: strip ? 0 : 1,
+    overflow: 'hidden',
+    selectionScope: true,
+  },
+    tabStrip,
+    // Keys are the panel's (`isActive: false`): the offset follows the cursor. A strip
+    // with no row for its list draws none, so the hint keeps its place.
+    listRows > 0 ? h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
+      lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')) : null,
+    strip
+      ? h(Text, message
+        ? { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'truncate', selectable: false }
+        : { dim: true, wrap: 'truncate', selectable: false }, message || hint)
+      : message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
+    strip ? null : h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint));
+  // A strip is the chat BOX's bottom sheet: its bottom border sits on the box's bottom
+  // border row, however the box is centred in the area, so what it covers — the field and
+  // the tail of the transcript — is the chat's own. In full and docked modes the box IS
+  // the area, and the strip's bottom is the area's bottom.
+  if (strip) {
+    return h(Box, {
+      position: 'absolute' as const, top: 0, left: 0, width, height,
+      flexDirection: 'column' as const, justifyContent: 'center' as const, alignItems: 'center' as const, zIndex: 11,
     },
-      tabStrip,
-      // Keys are the panel's (`isActive: false`): the offset follows the cursor. A strip
-      // with no row for its list draws none, so the hint keeps its place.
-      listRows > 0 ? h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
-        lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')) : null,
-      strip
-        ? h(Text, message
-          ? { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'truncate', selectable: false }
-          : { dim: true, wrap: 'truncate', selectable: false }, message || hint)
-        : message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
-      strip ? null : h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint)));
+      h(Box, { width: boxW, height: chatH, flexDirection: 'column' as const, justifyContent: 'flex-end' as const }, framed));
+  }
+  return h(Box, docked ? { width, height, flexDirection: 'column' as const } : overlay(width, height), framed);
 }
 
 // ─── The chat, collapsed ──────────────────────────────────────────────────────

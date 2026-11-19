@@ -85,9 +85,11 @@ it is a narrower door to a subset of the same rows (see Approaches).
   history walk is untouched; an accepted edge: ↑↑ then ↓↓ back to the empty line, one
   more `↓` opens the panel.
 - **Geometry**: box height exactly 12 rows — border 2 + tab strip 1 + 8-row list
-  window + hint 1, no padding, no gaps (capped to the area height on short terminals).
-  Width = `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat area's
-  bottom row. Scrolling: the existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
+  window + hint 1, no padding, no gaps — capped to the chat box's height (a shorter box
+  gives the strip its whole height and the list window shrinks). Width =
+  `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat box's bottom border
+  row (the area's bottom row in full mode, where the box is the area). Scrolling: the
+  existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
 - **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
