@@ -1873,9 +1873,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             let pending: Pending | null = null;
             const shells = () => workShells(asked);
             const rowId = (p: Pending): string => (p.kind === 'shell' ? `shell:${p.id}` : `sub:${p.key}`);
-            const question = (p: Pending): string => (p.kind === 'shell'
-              ? stopQuestion({ label: p.id, below: 0, kind: 'shell' })
-              : stopQuestion({ label: p.label, below: p.below }));
+            // What the question says about the row below it: the tree's count as it is NOW,
+            // read off the live node — a child that ended under the question is no longer
+            // something `y` would stop. A node gone since keeps the count frozen when the
+            // question was asked.
+            const belowNow = (p: Pending): number => (p.kind === 'sub'
+              ? asked.tree().find((n) => n.key === p.key)?.below ?? p.below
+              : 0);
+            const question = (p: Pending): string => stopQuestion(p.kind === 'shell'
+              ? { label: p.id, below: 0, kind: 'shell' }
+              : { label: p.label, below: belowNow(p) });
             // The open tab's rows, read at every draw. The question stands in place of the
             // row it is about; a row that has gone since (a node ended by its own answer, a
             // job the registry dropped) leaves its question standing on its own, so `y` is
@@ -1886,8 +1893,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 ? { id: r.id, text: question(p), tone: 'warn' as const }
                 : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) }));
               if (p && !out.some((r) => r.id === rowId(p))) out.push({ id: rowId(p), text: question(p), tone: 'warn' });
-              // An empty tab is one dim row a key never runs on.
-              return out.length ? out : [{ id: 'group:none', kind: 'group', text: 'none' }];
+              // An empty tab has no rows at all: the strip draws the panel's dim `none`
+              // message in their place, and every key (the tabs' included) still runs, on
+              // no row.
+              return out;
             };
             // The tab strip: each tab with what it holds now, the open one current.
             const tabs = () => {
@@ -1898,11 +1907,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 { label: `Shells (${count('shells')})`, current: tab === 'shells' },
               ];
             };
-            // Enter opens what is under the cursor — a `none` row is nothing to open.
+            // Enter opens what is under the cursor — an empty tab has no row to open.
             const openKey: PanelKeyDef = {
               key: 'return', label: 'open',
               run: (id) => {
-                if (!id || id.startsWith('group:')) return undefined;
+                if (!id) return undefined;
                 if (id.startsWith('sub:')) {
                   const node = asked.nodeByKey(id.slice('sub:'.length));
                   if (!node) return 'it has ended — nothing to open';
@@ -1929,7 +1938,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               key: 'ctrl+d', label: 'stop/kill',
               run: (id) => {
                 const row = id ?? '';
-                if (!row || row.startsWith('group:')) return undefined;
+                if (!row) return undefined;
                 if (row.startsWith('shell:')) {
                   const found = shells().get(row.slice('shell:'.length));
                   if (!found) return 'it is gone — nothing to kill';
@@ -1983,6 +1992,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               title: 'Work',
               look: 'bottom',
               follow: true,
+              empty: 'none',
               rows,
               tabs,
               get keys() { return pending !== null ? answerKeys : [openKey, stopKey, ...tabKeys]; },

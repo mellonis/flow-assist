@@ -425,7 +425,7 @@ the list shrinks first, and the tab row goes before the list could fall below tw
 `Subagents (2)`, `Shells (1)` — and the open one is inverse. `←` and `→` switch (either
 steps to the other tab), and the cursor lands on the new tab's first row. The panel opens
 on Subagents, or on Shells when the session has no subagent and does have shells; a tab
-with nothing in it says `none`.
+with nothing in it says `none`, and `←`/`→` still switch out of it.
 
 A subagent's row is its label path with what it is doing
 (`main › review · running — reading src/`), and one that waits on you — its own question
@@ -448,8 +448,11 @@ takes the keyboard at once.
 `stop review and 2 below it? y yes · n no`, `kill sh-3? y yes · n no` — the same words and
 the same stop the rows under the field ask with `x`: a subagent goes with everything it
 started. `y` answers the row the question names, wherever the cursor has moved to since,
-and nothing else; `n` leaves it as it was. The question stays on screen even when its work
-ends while it is up, and a `y` then stops nothing and says so. `ctrl+d` again drops the
+and nothing else; `n` leaves it as it was. While the question stands the keys are `y`, `n`
+and `^d cancel` — the tabs' arrows are not offered then — and `↑`/`↓` still move. The
+question stays on screen even when its work ends while it is up, and a `y` then stops
+nothing and says so. The counts beside the tabs are live work: `Subagents (0)` can sit
+beside a question still standing for a row that has ended. `ctrl+d` again drops the
 pending question and stops nothing, and Esc closes the picker, question and all.
 
 ## Agent files

@@ -968,6 +968,25 @@ test('the bottom look is a fixed 12-row strip at the chat box\'s bottom', async 
   expect(noTabs.lines[noTabsBottom - 1]).toContain(`${keyGlyph('left')} tabs · ${keyGlyph('right')} tabs`);
 });
 
+test('the strip names the tabs only when both arrows are declared', async () => {
+  // A panel that offers tabs but withholds the arrows — the stop question's own keys —
+  // must not be told its arrows switch tabs: the token goes, and `↑↓` still moves.
+  const held = await stripFrame(stripView({
+    keys: [
+      { cap: keyGlyph('return'), label: 'open' },
+      { cap: '^d', label: 'stop/kill' },
+    ],
+  }));
+  const bottom = held.lines.findIndex((l) => l.includes('╰'));
+  const hint = held.lines[bottom - 1]!;
+  expect(hint).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  expect(hint).not.toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+  // With both arrows declared the strip says the token once (the first test pins the
+  // exact hint, arrows never said twice).
+  const both = await stripFrame(stripView());
+  expect(both.frame).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+});
+
 test('a short chat box drops the tab row before squeezing the list below two rows', async () => {
   // A 9-row area gives a 5-row chat box (rows 2-6) and the strip is all of it. With the
   // frame and the hint taking three rows, a tab row would leave ONE list row, so it is

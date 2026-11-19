@@ -26,7 +26,8 @@ it is a narrower door to a subset of the same rows (see Approaches).
   transcript; the draft is untouched underneath. Nothing else on screen moves.
 - **Subagents and Shells are tabs**, `← →` switch, each tab showing its count
   (`Subagents (3)`, `Shells (2)`). The cursor starts on the tab's first row after a
-  switch. An empty tab draws one dim `none` row.
+  switch. An empty tab draws the strip's dim `none` message — no row at all — and
+  `←`/`→` still switch out of it.
 - **`ctrl+d` stops a subagent** after the same named-row y/n the shell kill uses — the
   question stands in place of the row it is about, `y` answers the row it names.
 - All three doors stay one panel: `↓`, `J`, `/work`.
@@ -94,8 +95,11 @@ it is a narrower door to a subset of the same rows (see Approaches).
   inverse, the gap outside the inverse). Counts in the labels.
 - **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
   helpers. The way out comes first: the row is cut at the frame's width, and what falls
-  off a narrow strip must never be the way out. A notice (the stop/kill question's
-  context line, a panel `notice`) takes the hint row's place while it is up.
+  off a narrow strip must never be the way out. `←→ tabs` is synthesized only when BOTH
+  arrow keys are declared, so a panel that withholds them (the stop question's keys)
+  never names an arrow that does nothing; `↑↓ pick` stays, since it still moves. A
+  notice (the stop/kill question's context line, a panel `notice`) takes the hint row's
+  place while it is up.
 - **Rows and actions** (unchanged apart from tabs): sub rows `path › …` + state,
   `? waiting for you` = `offeredWithin` (in it or below it); shell rows `id · cmd` —
   `<state> — <owner>`; ended rows sink per tab. `⏎` opens (watch / jump to the waiting
@@ -318,7 +322,8 @@ above).
     subagents and one shell; open with `down`; the strip reads `Subagents (2)`,
     `Shells (1)`; the list shows only sub rows; `right` moves to `Shells (1)` (inverse
     follows) and the list shows the shell row; `left` is back; the cursor is each
-    tab's first row after a switch; a tab with nothing draws `none`.
+    tab's first row after a switch; a tab with nothing draws the dim `none` message,
+    and the arrows still switch out of it.
   - `ctrl+d stops a subagent after its question, and y names it` — `ctrl+d` on a sub
     row: the question replaces that row's text and names the sub; `y` stops the node
     (the row goes to its ended state / the node is stopped in the rig) and the panel
@@ -337,15 +342,16 @@ above).
 - [ ] **Step 3: Implement in `openWork`.** A `tab` closure (`'subagents' | 'shells'`;
   opens on Subagents, or Shells when there are no sub rows and there is work);
   `rows()` filters `workRows(...)` by `r.group === tab` and emits NO group rows — an
-  empty tab emits one dim `{ id: 'tab:none', kind: 'group', text: 'none' }`; the
+  empty tab emits NO rows at all and the spec's `empty: 'none'` draws the dim message;
+  the
   `look: 'bottom'` and `tabs: () => …` fill (labels `Subagents (N)`/`Shells (N)` from
   the same filter's lengths); two key defs `{ key: 'left' | 'right', label: 'tabs',
   reset: true, run: () => { tab = …; return undefined; } }`; `ctrl+d` on a `sub:` row
   goes through `stopQuestion` naming that sub and the node's stop — the same route the
   tree rows' `x` takes — with the question's existence checked at every draw like
   `killPending` (a node gone under the question: the question stands, `y` is a no-op).
-  Every guard that today skips `group:` rows keeps working (`tab:none` starts with
-  `group:`). The hint is Task 2's pinned row; the per-row question text keeps the
+  Every declared key runs on an empty tab too, on no row (`id: null`), the tab keys
+  included. The hint is Task 2's pinned row; the per-row question text keeps the
   tree's own words.
 - [ ] **Step 4: Run the tests to verify they pass**
   Run: `bun test src/__tests__/work-picker.e2e.test.ts src/assistant/__tests__/work-panel.test.ts src/assistant/__tests__/command-panel.test.ts`

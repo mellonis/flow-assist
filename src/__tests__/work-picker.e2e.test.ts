@@ -124,15 +124,16 @@ function stripText(ui: UI) {
   return rows.slice(heading + 1, end > heading ? end : rows.length).join('\n');
 }
 // The row the cursor is on is the one with the panel's mark in front — a frame alone says
-// it, as a person sees it.
-const marked = (ui: UI, text: string) => rowsOf(ui).some((r) => r.includes(`› ${text}`));
+// it, as a person sees it. Read through `stripText`: the chat above the strip says the
+// same names, and its `› ` field row would otherwise satisfy the mark.
+const marked = (ui: UI, text: string) => stripText(ui).split('\n').some((r) => r.includes(`› ${text}`));
 // The style of the cell where `text` starts: the current tab is drawn inverse, so only a
 // frame's cells can tell which one it is.
 function styleAt(ui: UI, text: string) {
   const rows = rowsOf(ui);
   const y = rows.findIndex((r) => r.includes(text));
   if (y < 0) throw new Error(`"${text}" is not on screen:\n${frameOf(ui)}`);
-  const buffer = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean } } } | null }).lastBuffer;
+  const buffer = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean; dim?: boolean } } } | null }).lastBuffer;
   return buffer!.get(rows[y]!.indexOf(text), y).style;
 }
 
@@ -275,7 +276,9 @@ test('the tabs split the work; ←→ switch and the counts follow', async () =>
   expect(marked(rig.ui, 'alk-go')).toBe(false);
   expect(styleAt(rig.ui, 'Subagents (2)').inverse).toBe(true);
   rig.ui.app.unmount();
-  // A tab with nothing draws `none`, and its count says it too.
+  // A tab with nothing in it draws the strip's dim `none` message — no row at all — and
+  // both arrows still switch AWAY from it: the way out of an empty tab is the same key
+  // that led in.
   const only = await boot([{ mark: 'HYN', kind: 'run' }]);
   await only.ui.press('F');
   await spawn(only, 0);
@@ -285,7 +288,20 @@ test('the tabs split the work; ←→ switch and the counts follow', async () =>
   await settle();
   expect(stripText(only.ui)).toContain('Shells (0)');
   expect(stripText(only.ui)).toContain('none');
+  expect(styleAt(only.ui, 'none').dim).toBe(true);
+  expect(styleAt(only.ui, 'Shells (0)').inverse).toBe(true);
   expect(stripText(only.ui)).not.toContain('hyn-go');
+  // ← out of the empty tab: the Subagents tab again, its row drawn and its cursor on it.
+  await only.ui.press('left');
+  await settle();
+  expect(stripText(only.ui)).toContain('Subagents (1)');
+  expect(stripText(only.ui)).not.toContain('none');
+  expect(marked(only.ui, 'hyn-go')).toBe(true);
+  // → leads into it once more, from a tab that has rows.
+  await only.ui.press('right');
+  await settle();
+  expect(stripText(only.ui)).toContain('Shells (0)');
+  expect(marked(only.ui, 'hyn-go')).toBe(false);
   only.ui.app.unmount();
 }, 30_000);
 
@@ -383,6 +399,30 @@ test('ctrl+d kills a shell after its own y/n', async () => {
   rig.ui.app.unmount();
 }, 20_000);
 
+test('a shell that ended under the question is not killed twice', async () => {
+  const rig = await boot();
+  await rig.ui.press('F');
+  await shell(rig.ui, 'sleep 2 &', '○ sh-1');
+  await openByKey(rig.ui);
+  // ctrl+d asks for the running job, in its row's place.
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => frameOf(rig.ui).includes('kill sh-1? y yes · n no'));
+  // The job ends by itself while its question is up; the end is told (the toast), and the
+  // question still stands for the row it names.
+  await settleUntil(() => frameOf(rig.ui).includes('sh-1 exited 0'), 900);
+  expect(stripText(rig.ui)).toContain('kill sh-1? y yes · n no');
+  // `y` answers the question, finds the job ended, and says so: nothing is killed and
+  // the row keeps the state it ended in.
+  await rig.ui.press('y');
+  await settle();
+  expect(frameOf(rig.ui)).toContain('it has ended — nothing to kill');
+  expect(frameOf(rig.ui)).not.toContain('kill sh-1?');
+  expect(stripText(rig.ui)).toContain('sh-1 · sleep 2');
+  expect(stripText(rig.ui)).toContain('exited 0');
+  expect(rig.ui.exits()).toBe(0);
+  rig.ui.app.unmount();
+}, 20_000);
+
 test('ctrl+d stops a subagent after its question, and y names it', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
   await rig.ui.press('F');
@@ -444,6 +484,13 @@ test('a subagent that ended under the question is not stopped twice', async () =
   await settleUntil(() => frameOf(rig.ui).includes('Subagents (2)'));
   expect(stripText(rig.ui)).toContain('stop gamma one? y yes · n no');
   expect(stripText(rig.ui)).not.toContain('gamma one ·');
+  // The counts are live work: the ended task has left them while its question stands
+  // beside what is left. While the question stands the tabs' arrows are not offered —
+  // the hint says the question's keys and the rows' move, never `←→ tabs`, which would
+  // do nothing.
+  expect(stripText(rig.ui)).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  expect(stripText(rig.ui)).toContain(`${keyGlyph('ctrl+d')} cancel`);
+  expect(stripText(rig.ui)).not.toContain('tabs');
   // `y` answers the row the question NAMES: the task is gone, and the live subagent the
   // cursor is on is not the one stopped.
   await rig.ui.press('up');
