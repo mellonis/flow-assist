@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderCommandPanel, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
@@ -867,7 +867,248 @@ test('the picker keeps the title, Esc and the y/n keys in a 42-column docked pan
   handle.unmount();
 });
 
+// ─── A command panel's bottom look ───────────────────────────────────────────
+// The work panel is a glance strip over the chat's bottom: exactly 12 rows — the frame,
+// one tab strip row, an 8-row list window and the hint — with no padding and no gaps.
+// Its bottom edge is the area's last row, and its message takes the hint's row.
+const stripView = (over: Partial<CommandPanelView> = {}): CommandPanelView => ({
+  title: 'Work',
+  rows: [
+    { id: 'sub:a', text: 'a › writing', detail: 'working', tone: 'ok' },
+    { id: 'sub:b', text: 'b › waiting', detail: 'waiting', tone: 'warn' },
+    { id: 'group:shells', text: 'Shells', kind: 'group' },
+    { id: 'shell:1', text: 'job 1 · sleep 30', detail: 'running' },
+  ],
+  cursor: 1,
+  notice: '',
+  empty: 'none',
+  keys: [
+    { cap: keyGlyph('left'), label: 'tabs' },
+    { cap: keyGlyph('right'), label: 'tabs' },
+    { cap: keyGlyph('return'), label: 'open' },
+    { cap: '^d', label: 'stop/kill' },
+  ],
+  look: 'bottom',
+  tabs: [{ label: 'Subagents (2)', current: true }, { label: 'Shells (1)', current: false }],
+  ...over,
+});
+
+const stripFrame = async (view: CommandPanelView, width = 100, height = 40) => {
+  const backend = new TestBackend(width, height);
+  const handle = await render(h(renderCommandPanel, { width, height, theme: undefined, panel: view }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: AskGrid }).lastBuffer;
+  const frame = backend.lastFrame ?? '';
+  handle.unmount();
+  return { lines, grid, frame };
+};
+
+// The palette a real app resolves for the chat: the modal base laid under the chat's
+// own colours, so the strip paints a ground and what it covers is hidden.
+const stripTheme = () => ({ modals: { chat: { ...MODAL_COLOR_DEFAULTS.chat, bg: 'black', text: 'white' } } });
+
+test('the bottom look is a fixed 12-row strip at the chat box\'s bottom', async () => {
+  const { lines, grid } = await stripFrame(stripView());
+  // The area is 40 rows and the chat box is 32 (82%), centred on rows 4-35: the strip is
+  // the box's last 12 rows, its bottom border on the box's bottom border.
+  const top = lines.findIndex((l) => l.includes('╭'));
+  const bottom = lines.findIndex((l) => l.includes('╰'));
+  expect(top).toBe(24);
+  expect(bottom).toBe(35);
+  // As wide as the chat's own window, centred in the area.
+  expect(lines[top]!.indexOf('╭')).toBe(5);
+  expect(stringWidth(lines[top]!.trim())).toBe(90);
+  // The strip is the row under the top border; the current tab is inverse, the other
+  // tab is not.
+  const strip = top + 1;
+  expect(lines[strip]).toContain('Subagents (2)');
+  expect(lines[strip]).toContain('Shells (1)');
+  const inverseAt = (text: string, row: number) => grid.get(lines[row]!.indexOf(text), row).style.inverse === true;
+  expect(inverseAt('Subagents (2)', strip)).toBe(true);
+  expect(inverseAt('Shells (1)', strip)).toBe(false);
+  // Eight rows of list between the strip and the hint, however many rows there are.
+  const hint = bottom - 1;
+  expect(hint - (top + 2)).toBe(8);
+  // The hint just over the bottom border: the way out first, then the tabs and the rows.
+  expect(lines[hint]).toContain([`${keyGlyph('escape')} close`, `${keyGlyph('left')}${keyGlyph('right')} tabs`, `${keyGlyph('up')}${keyGlyph('down')} pick`, `${keyGlyph('return')} open`, '^d stop/kill'].join(' · '));
+  // The tab keys are the strip's own: they are never said twice.
+  expect(lines[hint]).not.toContain(`${keyGlyph('left')} tabs`);
+
+  // A 12-row area: the chat box is 8 rows (82% keeps a margin), centred on rows 2-9, and
+  // the strip is the box's whole height, flush with its bottom border.
+  const short = await stripFrame(stripView(), 100, 12);
+  expect(short.lines[2]).toContain('╭');
+  expect(short.lines[9]).toContain('╰');
+  expect(short.lines[3]).toContain('Shells (1)');
+  expect(short.lines[8]).toContain(`${keyGlyph('escape')} close`);
+  expect(short.lines[1]).not.toContain('╭');
+
+  // A notice takes the hint row's place, and the 12 rows stay as they are.
+  const told = await stripFrame(stripView({ notice: 'stop «a»? y stops it · n keeps it' }));
+  const toldTop = told.lines.findIndex((l) => l.includes('╭'));
+  const toldBottom = told.lines.findIndex((l) => l.includes('╰'));
+  expect(toldBottom - toldTop + 1).toBe(12);
+  expect(told.lines[toldBottom - 1]).toContain('stop «a»? y stops it · n keeps it');
+  expect(told.frame).not.toContain(`${keyGlyph('escape')} close`);
+
+  // The window follows the cursor through those 8 rows.
+  const many = stripView({ rows: Array.from({ length: 12 }, (_, i) => ({ id: `r${i}`, text: `row ${i}` })), cursor: 10 });
+  const moved = await stripFrame(many);
+  expect(moved.frame).toContain('row 4');
+  expect(moved.frame).not.toContain('row 3');
+
+  // Without tabs there is no tab row: the list gains it (nine rows), and the arrows the
+  // panel declares are its own again, so they are said.
+  const noTabs = await stripFrame(stripView({ cursor: 0, tabs: [] }));
+  const noTabsTop = noTabs.lines.findIndex((l) => l.includes('╭'));
+  const noTabsBottom = noTabs.lines.findIndex((l) => l.includes('╰'));
+  expect(noTabs.lines[noTabsTop + 1]).toContain('a › writing');
+  expect(noTabs.frame).not.toContain('Subagents (2)');
+  expect(noTabsBottom - 1 - (noTabsTop + 1)).toBe(9);
+  expect(noTabs.lines[noTabsBottom - 1]).toContain(`${keyGlyph('left')} tabs · ${keyGlyph('right')} tabs`);
+});
+
+test('the strip names the tabs only when both arrows are declared', async () => {
+  // A panel that offers tabs but withholds the arrows — the stop question's own keys —
+  // must not be told its arrows switch tabs: the token goes, and `↑↓` still moves.
+  const held = await stripFrame(stripView({
+    keys: [
+      { cap: keyGlyph('return'), label: 'open' },
+      { cap: '^d', label: 'stop/kill' },
+    ],
+  }));
+  const bottom = held.lines.findIndex((l) => l.includes('╰'));
+  const hint = held.lines[bottom - 1]!;
+  expect(hint).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  expect(hint).not.toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+  // With both arrows declared the strip says the token once (the first test pins the
+  // exact hint, arrows never said twice).
+  const both = await stripFrame(stripView());
+  expect(both.frame).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+});
+
+test('a strip with no rows names only the keys that act', async () => {
+  // An empty tab: the picker withholds the rows' keys, so the hint says the way out and
+  // the way across, and nothing that would act on no row.
+  const { lines } = await stripFrame(stripView({
+    rows: [],
+    keys: [
+      { cap: keyGlyph('left'), label: 'tabs' },
+      { cap: keyGlyph('right'), label: 'tabs' },
+    ],
+  }));
+  const bottom = lines.findIndex((l) => l.includes('╰'));
+  const hint = lines[bottom - 1]!;
+  expect(hint).toContain([`${keyGlyph('escape')} close`, `${keyGlyph('left')}${keyGlyph('right')} tabs`].join(' · '));
+  expect(hint).not.toContain(`${keyGlyph('return')} open`);
+  expect(hint).not.toContain('stop/kill');
+  expect(hint).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+});
+
+test('a short chat box drops the tab row before squeezing the list below two rows', async () => {
+  // A 9-row area gives a 5-row chat box (rows 2-6) and the strip is all of it. With the
+  // frame and the hint taking three rows, a tab row would leave ONE list row, so it is
+  // dropped and the list keeps its two. The tabs still exist, so the arrows still walk
+  // them and the hint still says so.
+  const { lines } = await stripFrame(stripView(), 100, 9);
+  const top = lines.findIndex((l) => l.includes('╭'));
+  const bottom = lines.findIndex((l) => l.includes('╰'));
+  expect(top).toBe(2);
+  expect(bottom).toBe(6);
+  expect(lines.join('\n')).not.toContain('Subagents (2)');
+  expect(bottom - 1 - (top + 1)).toBe(2);
+  expect(lines[bottom - 1]).toContain(`${keyGlyph('escape')} close`);
+  expect(lines[bottom - 1]).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
+  expect(lines[bottom - 1]).not.toContain(`${keyGlyph('left')} tabs`);
+});
+
+test('the bottom look is composed over the chat, not drawn in its place', async () => {
+  const backend = new TestBackend(100, 40);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat,
+    width: 100,
+    height: 40,
+    theme: stripTheme(),
+    messages: [{ role: 'user', content: 'transcript words' }],
+    input: 'draft words',
+    cursor: 11,
+    panel: stripView(),
+  }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  // The transcript still draws above the strip...
+  const said = lines.findIndex((l) => l.includes('› transcript words'));
+  const stripTab = lines.findIndex((l) => l.includes('Subagents (2)'));
+  const stripTop = stripTab - 1;
+  expect(said).toBeGreaterThanOrEqual(0);
+  expect(said).toBeLessThan(stripTop);
+  // ...the strip takes the same 12 rows at the chat box's bottom (box rows 4-35)...
+  expect(stripTop).toBe(24);
+  // ...the way out and the transcript share ONE frame...
+  expect(lines[stripTop + 10]).toContain(`${keyGlyph('escape')} close`);
+  // ...and the field underneath it is covered while the panel is up.
+  expect(backend.lastFrame).not.toContain('draft words');
+  handle.unmount();
+});
+
+test('a tall window anchors the strip to the chat box and covers the field', async () => {
+  // 100x80: the chat box is 65 rows (82%), centred on rows 8-72; the strip is its last 12
+  // rows (61-72). The field sits at the box's bottom, so a three-line draft is entirely
+  // under the strip — no draft row shows below the strip's top row.
+  const backend = new TestBackend(100, 80);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat,
+    width: 100,
+    height: 80,
+    theme: stripTheme(),
+    messages: [{ role: 'user', content: 'tail of the transcript' }],
+    input: 'first draft line\nsecond draft line\nthird draft line',
+    cursor: 51,
+    panel: stripView(),
+  }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const stripTab = lines.findIndex((l) => l.includes('Subagents (2)'));
+  const stripTop = stripTab - 1;
+  expect(stripTop).toBe(61);
+  expect(lines.findIndex((l) => l.includes('› tail of the transcript'))).toBeLessThan(stripTop);
+  expect(backend.lastFrame).not.toContain('first draft line');
+  expect(backend.lastFrame).not.toContain('third draft line');
+  // The strip's bottom border is the chat box's own bottom border row (8 + 65 - 1), with
+  // nothing of the chat drawn below it.
+  expect(lines[72]).toContain('╰');
+  expect(lines.slice(73).every((l) => !l.includes('╰'))).toBe(true);
+  handle.unmount();
+});
+
+test('a docked chat draws the strip on its own bottom row', async () => {
+  // A docked pane is the chat's whole area: the strip takes its last twelve rows, the
+  // transcript stays above it, the field under it is covered, and the way out sits on
+  // the row over the pane's bottom border.
+  const backend = new TestBackend(60, 30);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat,
+    width: 60,
+    height: 30,
+    docked: true,
+    fullscreen: true,
+    focused: false,
+    theme: stripTheme(),
+    messages: [{ role: 'user', content: 'dock words' }],
+    input: 'draft words',
+    cursor: 11,
+    panel: stripView(),
+  }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const stripTab = lines.findIndex((l) => l.includes('Subagents (2)'));
+  expect(stripTab - 1).toBe(18);
+  expect(lines.findIndex((l) => l.includes('› dock words'))).toBeLessThan(18);
+  expect(lines[28]).toContain(`${keyGlyph('escape')} close`);
+  expect(lines[29]).toContain('╰');
+  expect(backend.lastFrame).not.toContain('draft words');
+  handle.unmount();
+});
+
 // ─── Cuts count cells per grapheme cluster ────────────────────────────────────
+
 // A ZWJ sequence is one cluster, two cells — what the grid draws. Summed per code
 // point it reads as six, and a cut lands early.
 const FAMILY = '\u{1F468}‍\u{1F469}‍\u{1F467}';

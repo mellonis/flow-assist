@@ -13,6 +13,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -88,7 +89,7 @@ interface Holder { name: string; open: (rig: Rig) => Promise<void>; close: (rig:
 const escapes = (n: number) => async (rig: Rig) => { for (let i = 0; i < n; i++) await rig.ui.press('escape'); };
 const SEQ = [[{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Counted.' }]];
 const holders: Holder[] = [
-  { name: 'the tree cursor on a row', kids: (k) => [k], open: async (rig) => { await rig.ui.press('down'); }, close: escapes(1) },
+  { name: 'the tree cursor on a row', kids: (k) => [k], open: async (rig) => { await intoRows(rig.ui); }, close: escapes(1) },
   { name: 'the watch of another subagent', kids: (k) => [k, { mark: 'BYST', kind: 'idle' }], open: async (rig) => { await rig.ui.press('down', 'down', 'return'); await settleUntil(() => frameOf(rig.ui).includes('Esc')); }, close: escapes(2) },
   { name: 'the /context panel', kids: (k) => [k], open: async (rig) => { await ask(rig.ui, '/context'); await settleUntil(() => frameOf(rig.ui).includes('on screen')); }, close: escapes(1) },
   { name: 'the session picker', kids: (k) => [k], open: async (rig) => { rig.ui.backend.press({ name: 's', ctrl: true }); await settle(4); }, close: escapes(2) /* the first clears the filter the letters made */ },
@@ -466,6 +467,9 @@ test('Ctrl+C over a subagent\'s question arms the exit and leaves the question u
   expect(still()).toBe(true);
   expect(settled()).toBe(false);
   expect(ui.exits()).toBe(0);
+  // Past the guard's pause, ↓ is the question's own (a caret move) — and the exit arm
+  // goes with it, as any key after Ctrl+C does.
+  pause();
   await ui.press('down');
   expect(frameOf(ui)).not.toContain('^c again to exit');
   expect(still()).toBe(true);
@@ -572,7 +576,7 @@ for (const [older, newer] of [['yn', 'ask'], ['ask', 'yn']] as const) {
 const holdersOfOwn = [
   { name: 'the session picker', armed: false, open: async (rig: Rig) => { rig.ui.backend.press({ name: 's', ctrl: true }); await settle(4); } },
   { name: 'the /context panel', armed: false, open: async (rig: Rig) => { await ask(rig.ui, '/context'); await settle(4); } },
-  { name: 'the tree cursor', armed: true, open: async (rig: Rig) => { await rig.ui.press('down'); } },
+  { name: 'the tree cursor', armed: true, open: async (rig: Rig) => { await intoRows(rig.ui); } },
 ];
 for (const holder of holdersOfOwn) {
   for (const kind of ['yn', 'ask'] as const) {

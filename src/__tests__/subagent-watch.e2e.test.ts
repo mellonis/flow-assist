@@ -11,6 +11,7 @@ import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSe
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -787,7 +788,7 @@ for (const where of ['watching', 'the cursor in the rows'] as const) {
     await settleUntil(() => model.held);
     await settleUntil(() => frameOf(ui).includes('⚙ wqa-do'));
     if (where === 'watching') await watchFromRows(ui);
-    else await ui.press('down');
+    else await intoRows(ui);
     expect(where === 'watching' ? watching(ui) : inRows(ui)).toBe(true);
     model.release();
     await settleUntil(() => askUp(frameOf(ui)));

@@ -301,7 +301,11 @@ past incident may motivate a rule; keep the rule, drop the incident.
   follows the terminal's scheme (`themeFor(scheme)`, `modalColorDefaults`);
   a new colour goes into all three palettes and a ground a plugin paints is a
   `${token}`, never a literal. A modal is as tall as what it holds; what does
-  not fit scrolls (`<ScrollBox scrollbar>`). The log stamps each entry with
+  not fit scrolls (`<ScrollBox scrollbar>`). The one fixed height is a command
+  panel's bottom strip (`look: 'bottom'`): twelve rows over the chat box's
+  bottom — the frame, a tab row, eight list rows, one hint row — capped to the
+  box, the list shrinking first and the tab row going before it could fall
+  below two rows. The log stamps each entry with
   its time and its loudness is its kind; the help answers which keys, which
   commands, and lists only keys that act here.
 - **What a drag copies is decided by two props**: `selectionScope` on every
@@ -562,7 +566,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
 - **↑/↓** walk the prompt history — every submitted line, with no line twice
   in a row; a `/command` with `history: false` is never kept (its argument may
   carry a secret). ↑ on an empty field takes the last queued message back
-  first. The wheel and PgUp/PgDn scroll.
+  first. ↓ on an empty field with no history entry shown and bang level 0
+  opens the work panel when the session has work (the same panel as `J`), never
+  while the session's own question waits in the field's place. The wheel and
+  PgUp/PgDn scroll.
 - **What is open and what is folded** (`folds.ts`): ONE global state (all
   folded / all open — where a conversation starts) plus the blocks a CLICK
   made an exception of; `details` (`^o`) is the master switch and clears the

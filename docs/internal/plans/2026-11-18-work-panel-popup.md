@@ -26,7 +26,8 @@ it is a narrower door to a subset of the same rows (see Approaches).
   transcript; the draft is untouched underneath. Nothing else on screen moves.
 - **Subagents and Shells are tabs**, `← →` switch, each tab showing its count
   (`Subagents (3)`, `Shells (2)`). The cursor starts on the tab's first row after a
-  switch. An empty tab draws one dim `none` row.
+  switch. An empty tab draws the strip's dim `none` message — no row at all — and
+  `←`/`→` still switch out of it.
 - **`ctrl+d` stops a subagent** after the same named-row y/n the shell kill uses — the
   question stands in place of the row it is about, `y` answers the row it names.
 - All three doors stay one panel: `↓`, `J`, `/work`.
@@ -85,14 +86,23 @@ it is a narrower door to a subset of the same rows (see Approaches).
   history walk is untouched; an accepted edge: ↑↑ then ↓↓ back to the empty line, one
   more `↓` opens the panel.
 - **Geometry**: box height exactly 12 rows — border 2 + tab strip 1 + 8-row list
-  window + hint 1, no padding, no gaps (capped to the area height on short terminals).
-  Width = `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat area's
-  bottom row. Scrolling: the existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
+  window + hint 1, no padding, no gaps — capped to the chat box's height (a shorter box
+  gives the strip its whole height and the list window shrinks). Width =
+  `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat box's bottom border
+  row (the area's bottom row in full mode, where the box is the area). Scrolling: the
+  list scrolls within the cursor's window (`isActive: false` — the cursor moves it, never
+  the keys); the wheel and PgUp/PgDn reach no one while the strip is up, so the covered
+  conversation stays where it was left.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
-- **Hint row**: `←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill · ⎋ close`, glyphs via the
-  helpers. A notice (the stop/kill question's context line, a panel `notice`) takes the
-  hint row's place while it is up.
+- **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
+  helpers. The way out comes first: the row is cut at the frame's width, and what falls
+  off a narrow strip must never be the way out. `←→ tabs` is synthesized only when BOTH
+  arrow keys are declared, so the stop question's keys — which declare no arrow — never
+  name one that does nothing; an empty tab still declares both, and they switch out of
+  it, while `⏎ open` and `^d stop/kill` are withheld there. `↑↓ pick` stays, since it
+  still moves. A notice (the stop/kill question's context line, a panel `notice`) takes
+  the hint row's place while it is up.
 - **Rows and actions** (unchanged apart from tabs): sub rows `path › …` + state,
   `? waiting for you` = `offeredWithin` (in it or below it); shell rows `id · cmd` —
   `<state> — <owner>`; ended rows sink per tab. `⏎` opens (watch / jump to the waiting
@@ -260,8 +270,8 @@ above).
   { label: 'Shells (1)', current: false }]`, at 100×40 and at 100×12: assert the drawn
   box is exactly 12 rows tall flush with the bottom (12 = the terminal's height on the
   short case takes the whole area), the tab strip row is just under the top border
-  with the current tab inverse, the hint row `←→ tabs · ↑↓ pick · ⏎ open · ^d
-  stop/kill · ⎋ close` is just above the bottom border, and a `notice` replaces the
+  with the current tab inverse, the hint row `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d
+  stop/kill` is just above the bottom border, and a `notice` replaces the
   hint row. In `src/assistant/__tests__/command-panel.test.ts`, `a key marked reset
   lands the cursor on the first runnable row` — a panel whose rows begin with a group
   row; a `reset: true` key presses; the cursor is on the first non-group row; a key
@@ -315,7 +325,8 @@ above).
     subagents and one shell; open with `down`; the strip reads `Subagents (2)`,
     `Shells (1)`; the list shows only sub rows; `right` moves to `Shells (1)` (inverse
     follows) and the list shows the shell row; `left` is back; the cursor is each
-    tab's first row after a switch; a tab with nothing draws `none`.
+    tab's first row after a switch; a tab with nothing draws the dim `none` message,
+    and the arrows still switch out of it.
   - `ctrl+d stops a subagent after its question, and y names it` — `ctrl+d` on a sub
     row: the question replaces that row's text and names the sub; `y` stops the node
     (the row goes to its ended state / the node is stopped in the rig) and the panel
@@ -334,16 +345,17 @@ above).
 - [ ] **Step 3: Implement in `openWork`.** A `tab` closure (`'subagents' | 'shells'`;
   opens on Subagents, or Shells when there are no sub rows and there is work);
   `rows()` filters `workRows(...)` by `r.group === tab` and emits NO group rows — an
-  empty tab emits one dim `{ id: 'tab:none', kind: 'group', text: 'none' }`; the
-  `look: 'bottom'` and `tabs: () => …` fill (labels `Subagents (N)`/`Shells (N)` from
+  empty tab emits NO rows at all and the spec's `empty: 'none'` draws the dim message;
+  the `look: 'bottom'` and `tabs: () => …` fill (labels `Subagents (N)`/`Shells (N)` from
   the same filter's lengths); two key defs `{ key: 'left' | 'right', label: 'tabs',
   reset: true, run: () => { tab = …; return undefined; } }`; `ctrl+d` on a `sub:` row
   goes through `stopQuestion` naming that sub and the node's stop — the same route the
   tree rows' `x` takes — with the question's existence checked at every draw like
   `killPending` (a node gone under the question: the question stands, `y` is a no-op).
-  Every guard that today skips `group:` rows keeps working (`tab:none` starts with
-  `group:`). The hint is Task 2's pinned row; the per-row question text keeps the
-  tree's own words.
+  On an empty tab the tab keys still run, on no row (`id: null`); `⏎ open` and
+  `ctrl+d stop/kill` are withheld while the open tab has no row, and the hint drops
+  their tokens with them. The hint is Task 2's pinned row; the per-row question text
+  keeps the tree's own words.
 - [ ] **Step 4: Run the tests to verify they pass**
   Run: `bun test src/__tests__/work-picker.e2e.test.ts src/assistant/__tests__/work-panel.test.ts src/assistant/__tests__/command-panel.test.ts`
   Expected: PASS. Then `bun run typecheck` and the focused fan-out:

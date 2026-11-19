@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -177,26 +178,28 @@ async function twoHeld() {
   return b;
 }
 
-test('↓ on an empty field steps into the rows; ↑ on the first row and Esc go back, and the field then takes text', async () => {
+const panelUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
+
+test('the tree rows are entered from a watch\'s Esc-back; ↑ on the first row and Esc go back, and the field then takes text', async () => {
   const { children: [a, b], ui } = await twoHeld();
   expect(inRows(ui)).toBe(false);
-  await ui.press('down');
+  await intoRows(ui);
   expect(inRows(ui)).toBe(true);
   expect(frameOf(ui)).not.toContain('↑↓ history');
   await ui.press('up');
   expect(inRows(ui)).toBe(false);
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('down');
   expect(inRows(ui)).toBe(true);
   await ui.press('up');
   expect(inRows(ui)).toBe(true);
   await ui.press('up');
   expect(inRows(ui)).toBe(false);
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('escape');
   expect(inRows(ui)).toBe(false);
   // ↓ on the last node stays there.
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('down');
   await ui.press('down');
   await ui.press('x');
@@ -211,38 +214,41 @@ test('↓ on an empty field steps into the rows; ↑ on the first row and Esc go
   ui.app.unmount();
 });
 
-test('the ↓ that ends a history walk, or follows a cleared history entry, does not also enter; a draft and shell mode keep ↓', async () => {
+test('the ↓ that ends a history walk, or follows a cleared history entry, does not also open the panel; a draft and shell mode keep ↓', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  // Two entries in the history: ↑ ↑ then ↓ ↓ ends on the empty field, and only the next ↓ enters.
+  // Two entries in the history: ↑ ↑ then ↓ ↓ ends on the empty field, and only the next ↓ opens.
   await ui.press('up'); await ui.press('up');
   expect(rowsOf(ui)[fieldAt(ui)]).toContain('/subagent AAA go');
   await ui.press('down'); await ui.press('down');
   expect(rowsOf(ui)[fieldAt(ui)]).not.toContain('/subagent');
-  expect(inRows(ui)).toBe(false);
+  expect(panelUp(ui)).toBe(false);
   await ui.press('down');
-  expect(inRows(ui)).toBe(true);
+  await settleUntil(() => panelUp(ui));
+  expect(panelUp(ui)).toBe(true);
   await ui.press('escape');
+  await settleUntil(() => !panelUp(ui));
   // An entry shown, then cleared by Esc: the history is still where it was, so ↓ is its.
   await ui.press('up');
   await ui.press('escape');
   expect(rowsOf(ui)[fieldAt(ui)]).not.toContain('/subagent');
   await ui.press('down');
-  expect(inRows(ui)).toBe(false);
+  expect(panelUp(ui)).toBe(false);
   await ui.press('down');
-  await ui.press('down');
-  await ui.press('down');
+  await settleUntil(() => panelUp(ui));
+  expect(panelUp(ui)).toBe(true);
   await ui.press('escape');
+  await settleUntil(() => !panelUp(ui));
   // A draft keeps ↓ for the caret.
   await ui.type('draft');
   await ui.press('down');
-  expect(inRows(ui)).toBe(false);
+  expect(panelUp(ui)).toBe(false);
   await ui.type('Z');
   expect(rowsOf(ui)[fieldAt(ui)]).toContain('draftZ');
   await ui.press('escape');
   // Shell mode (bang level 1) keeps ↓ too.
   await ui.press('!');
   await ui.press('down');
-  expect(inRows(ui)).toBe(false);
+  expect(panelUp(ui)).toBe(false);
   a!.release(); b!.release();
   ui.app.unmount();
 });
@@ -260,8 +266,8 @@ test('x then y stops the node as the person and journals it so; x then n does no
   await ask(ui, '/subagent OTHER go');
   await settleUntil(() => other!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ other-go'));
-  await ui.press('down');
-  expect(frameOf(ui)).toBeTruthy();
+  await intoRows(ui);
+  expect(inRows(ui)).toBe(true);
   await ui.press('x');
   // The question stands where the cursor's row was, and names what goes with it.
   expect(frameOf(ui)).toContain('stop outer-go and 1 below it? y yes · n no');
@@ -294,7 +300,7 @@ test('a key typed in the rows reaches neither the field nor the model, and Esc t
   await settleUntil(() => model.requests.some((r) => firstUser(r).includes('main go')));
   await settleUntil(() => frameOf(ui).includes('⚙ bbb-go'));
   const before = model.requests.length;
-  await ui.press('down');
+  await intoRows(ui);
   expect(inRows(ui)).toBe(true);
   // ⏎ on a row is the watch's (subagent-watch.e2e.test.ts), not a key to swallow here.
   for (const k of ['q', 'w', 'tab', 'pageup']) await ui.press(k);
@@ -317,7 +323,7 @@ test('a key typed in the rows reaches neither the field nor the model, and Esc t
 
 test('the cursor stays on its node when another above goes idle, moves to the nearest when its own is stopped, and the field has the keys when none is left', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('down');
   a!.release();
   await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
@@ -348,7 +354,7 @@ test('the cursor stays on its node when another above goes idle, moves to the ne
 
 test('the cursor moves to the nearest row when the node under it is stopped and others are left', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  await ui.press('down');
+  await intoRows(ui);
   b!.release();
   await ui.press('down');
   await settleUntil(() => frameOf(ui).includes('◆ bbb-go finished:'));
@@ -367,7 +373,7 @@ test('the cursor moves to the nearest row when the node under it is stopped and 
 
 test('a stop question stays up when its node goes idle, and y ends the idle node', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
   a!.release();
@@ -388,7 +394,7 @@ test('a stop question is dropped when the task it was for has ended', async () =
   await ask(ui, 'run it');
   await settleUntil(() => t!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ tska-go'));
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop tska-go');
   t!.release();
@@ -405,7 +411,7 @@ test('the `+K more` row is never a stop of the cursor', async () => {
   await ask(ui, '/subagent CCC go');
   await settleUntil(() => a!.held && b!.held && c!.held);
   await settleUntil(() => frameOf(ui).includes('+2 more — /agents'));
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('down');
   await ui.press('down');
   expect(inRows(ui)).toBe(true);
@@ -424,7 +430,7 @@ test('with the cursor in the rows a child\'s y/n is not answerable: the notice l
   await ask(ui, '/subagent ASKW go');
   await settleUntil(() => stay!.held && w!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ askw-go'));
-  await ui.press('down');
+  await intoRows(ui);
   w!.release();
   await settleUntil(() => frameOf(ui).includes('⏸ askw-go · waiting for a y/n'));
   expect(frameOf(ui)).toContain('⏸ askw-go waits for a y/n — Esc to answer');
@@ -458,7 +464,7 @@ test('x then y with a child\'s request waiting stops the node and approves nothi
   await ask(ui, '/subagent ASKW go');
   await settleUntil(() => stay!.held && w!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ askw-go'));
-  await ui.press('down');
+  await intoRows(ui);
   w!.release();
   await settleUntil(() => frameOf(ui).includes('⏸ askw-go · waiting for a y/n'));
   // The cursor stayed on the first node it entered; the waiting one is the second row.
@@ -484,7 +490,7 @@ test('an own y/n that arrives while the cursor is in the rows takes the keys, an
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
   await settleUntil(() => frameOf(ui).includes('⚙ bbb-go'));
-  await ui.press('down');
+  await intoRows(ui);
   expect(inRows(ui)).toBe(true);
   model.release();
   await settleUntil(() => frameOf(ui).includes('Confirm write: run_command') || frameOf(ui).includes('run_command'));
@@ -516,7 +522,7 @@ async function ownRequestOver(open: 'rows' | 'agents') {
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
   await settleUntil(() => frameOf(ui).includes('⚙ bbb-go'));
-  if (open === 'rows') await ui.press('down'); else { await ask(ui, '/agents'); await settleUntil(() => panelOpen(ui)); }
+  if (open === 'rows') await intoRows(ui); else { await ask(ui, '/agents'); await settleUntil(() => panelOpen(ui)); }
   await ui.press('x');
   expect(frameOf(ui)).toContain('y yes · n no');
   model.release();
@@ -553,7 +559,7 @@ test('the chat collapsed and opened again has the cursor in the field', async ()
   await ask(ui, '/subagent AAA go');
   await settleUntil(() => a!.held);
   await settleUntil(() => frameOf(ui).includes('⚙ aaa-go'));
-  await ui.press('down');
+  await intoRows(ui);
   expect(inRows(ui)).toBe(true);
   ui.backend.press(COLLAPSE);
   await settle();
@@ -738,7 +744,7 @@ test('in /agents the question about a task that has ended is dropped: the hint a
 
 test('the sessions key works from the rows: it clears the cursor and the stop question and opens the picker', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
   ui.backend.press({ name: 's', ctrl: true });
@@ -755,7 +761,7 @@ test('the sessions key works from the rows: it clears the cursor and the stop qu
 
 test('a y in the rows with no question stops nothing, and Ctrl+Y with a question up stops nothing', async () => {
   const { children: [a, b], ui } = await twoHeld();
-  await ui.press('down');
+  await intoRows(ui);
   await ui.press('y');
   await settle(4);
   expect(frameOf(ui)).not.toMatch(/(aaa|bbb)-go stopped/);

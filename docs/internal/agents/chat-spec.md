@@ -521,7 +521,7 @@ there is no `/fullscreen`.
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
   the editor's forward delete, consumed (never while the `:` line is open — it owns the
   keyboard then; its own catch-all types no chord as a character); a chord a drawn
-  plugin's panel binds (its `ctrl+d` — the work picker's kill) is the panel's key and
+  plugin's panel binds (its `ctrl+d` — the work picker's stop/kill) is the panel's key and
   goes on to the panel, never to the arm. **The keys are
   claimed only while there is something to stop** (a live abort controller not yet
   aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores
@@ -1056,6 +1056,23 @@ there is no `/fullscreen`.
   preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
+  A spec's `look: 'bottom'` COMPOSES over the chat: the transcript, the queue and the plan
+  keep drawing as always, and the strip is the chat box's bottom sheet — the field and the
+  tail of the transcript underneath it, covered until the strip drops. It is 12 rows capped
+  to the chat box's height (a shorter box gives the strip its whole height and the list
+  window shrinks), no padding and no gaps, the chat's width; its bottom border sits on the
+  chat box's bottom border row (the area's bottom in full mode). Its rows are the frame,
+  the tab strip, the list window and the hint: `boxH - 4` list rows with tabs, `boxH - 3`
+  without. The tab row is dropped once it would leave fewer than two list rows. With no
+  `tabs()` (or an empty one) there is no tab row and the list window takes it — 9 rows at
+  the full 12. `'window'` (the default) keeps the
+  panel in the conversation's place. `tabs()` is read at every draw: ONE row under the top
+  border, a label per tab cut by cells, the current one inverse, and the strip names the
+  keys that walk them (`←→ tabs`, `↑↓ pick`, the way out first); without tabs a declared
+  arrow key is the panel's own and is said. A key def marked `reset` hands its
+  flag with its answer (`panelAnswer(state, answer, reset)`): once the key's `run` has
+  answered without opening a panel, the cursor lands on the first row a key can run on
+  — the row `panelStart` opens on.
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
   publishes `note` on `store.chat`, and the App binds the service PER PLUGIN (an own
   prop of the plugin's services view) with `[<plugin>] ` in front, so no plugin's note

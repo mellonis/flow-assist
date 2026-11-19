@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
 import { lockPath } from '../assistant/sessions.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { isSessionFile } from './helpers/session-files';
+import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -37,9 +38,20 @@ async function boot(extraShell: Record<string, unknown> = {}) {
   const sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-person-sh-s-'));
   const model = new ScriptedModel();
   model.script([{ text: 'A answer.' }], [{ text: 'B answer.' }]);
+  const key = model.when((req) => firstUser(req).includes('ROWKEY'));
+  key.script([{ text: 'ready' }]);
   const ui = await bootApp(model, 130, 34, undefined, { sessions: { dir: sessions }, shell: { roots: [root], ...extraShell }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
   await ui.press('F');
   return { ui, root, model, sessions };
+}
+
+// The tree rows under the field hold the subagents and the shells alike, and a subagent's
+// watch is the door into them: an idle one stands above the shell rows a test acts on, so
+// that a row's own keys (`x` and `⏎`) are reached the way the app reaches them.
+async function rowsKey(ui: UI) {
+  await ask(ui, '/subagent ROWKEY go');
+  await settleUntil(() => frameOf(ui).includes('◆ rowkey-go finished:'));
+  await settleUntil(() => frameOf(ui).includes('◦ rowkey-go · idle'));
 }
 
 test('`!sleep 60 &` runs in the background: no block, the field is free, a tree row and the footer count appear', async () => {
@@ -77,7 +89,7 @@ test('&&, an escaped & and a quoted & stay a plain !command: it is waited for an
   ui.app.unmount();
 });
 
-test('↓ steps onto the row, ⏎ opens its output in the pager as a growing console block, Esc closes it', async () => {
+test('↓ opens the strip on Shells and ⏎ opens the row\'s output in the pager as a growing console block, Esc closes it', async () => {
   const { ui } = await boot();
   await ui.type('!');
   await ui.type('echo first; sleep 0.6; echo second; sleep 60 &');
@@ -102,7 +114,9 @@ test('x on the row asks, y kills it (the end is a toast), n and Esc keep it', as
   await ui.type('sleep 60 &');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto the shell's row
   expect(frameOf(ui)).toContain('x stop');
   await ui.press('x');
   expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
@@ -147,13 +161,17 @@ test('x on an ended row dismisses it with no question; the job stays in /agents'
   await ui.type('echo bye; sleep 0.3; exit 5 &');
   await ui.press('return');
   await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 5'));
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto the shell's row
   await settleUntil(() => frameOf(ui).includes('x dismiss'));
   expect(frameOf(ui)).toContain('x dismiss');
   await ui.press('x');
   await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
   expect(frameOf(ui)).not.toContain('kill sh-1?');
   expect(rowWith(ui, '○ sh-1 ·')).toBe('');
+  // The cursor is back on the subagent's row now that the shell's row is gone.
+  await ui.press('escape');
   await ask(ui, '/agents');
   await settleUntil(() => frameOf(ui).includes('Agents'));
   expect(frameOf(ui)).toContain('exited 5');
@@ -166,7 +184,9 @@ test('x on a running row asks to kill and leaves the row; it does not dismiss', 
   await ui.type('sleep 60 &');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto the shell's row
   await ui.press('x');
   await settleUntil(() => frameOf(ui).includes('kill sh-1? y yes · n no'));
   expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
@@ -306,8 +326,14 @@ test('x on an ended shell asks nothing: there is nothing to kill', async () => {
   await ui.type('echo hi &');
   await ui.press('return');
   await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 0'));
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto the shell's row
+  // The rows hold the keys: `x` is the tree row's own, and an ended row says `dismiss`.
+  expect(frameOf(ui)).toContain('↑↓ move · x dismiss · Esc back');
   await ui.press('x');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
+  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
   expect(frameOf(ui)).not.toContain('kill sh-1?');
   ui.app.unmount();
 });
@@ -456,7 +482,9 @@ test('/agents keeps the shells that ended: one the person killed and one already
   await ui.press('return');
   await settleUntil(() => rowWith(ui, '○ sh-2 ·').includes('exited 0'));
   // The person kills sh-1 (never unread), and opens sh-2 once (read).
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto sh-1's row
   await ui.press('x');
   await ui.press('y');
   await settleUntil(() => !rowWith(ui, '○ sh-1 ·'));
@@ -468,7 +496,8 @@ test('/agents keeps the shells that ended: one the person killed and one already
   await settleUntil(() => frameOf(ui).includes('Agents'));
   expect(rowWith(ui, '○ sh-1 · echo killed-out')).toContain('killed');
   expect(rowWith(ui, '○ sh-2 · echo opened-out')).toContain('exited 0');
-  await ui.press('down');
+  // The live subagent leads the listing, then the ended shells; sh-1 is the last of them.
+  await ui.press('down', 'down');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ killed-out'));
   expect(frameOf(ui)).toContain('│ killed-out');

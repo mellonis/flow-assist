@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { panelAnswer, panelCursor, panelDrop, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec } from '../command-panel';
+import { panelAnswer, panelCursor, panelDrop, panelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelRow, type PanelSpec, type PanelState } from '../command-panel';
 
 const spec = (rows: string[], ran: string[] = []): PanelSpec => ({
   title: 'Servers',
@@ -193,3 +193,46 @@ test('a panel pushed over a following one starts without the parent\'s row id', 
   expect(s.at).toBeUndefined();
   expect(panelCursor(s, panelRows(s).rows)).toBe(0);
 });
+
+// A key that changes what the rows are (a tab switch) marks itself `reset`: once its
+// run has answered and no panel opened over it, the cursor is back on the first row a
+// key can run on — the rule the panel opens on.
+test('a key marked reset lands the cursor on the first runnable row', () => {
+  const rows: PanelRow[] = [
+    { id: 'group:agents', text: 'Agents', kind: 'group' },
+    { id: 'a', text: 'agent a' },
+    { id: 'group:shells', text: 'Shells', kind: 'group' },
+    { id: 's', text: 'shell s' },
+  ];
+  const keys: PanelKeyDef[] = [
+    { key: 'right', label: 'tabs', reset: true, run: () => undefined },
+    { key: 'ctrl+d', label: 'kill', reset: true, run: () => undefined },
+    { key: 'x', label: 'stop', run: () => undefined },
+  ];
+  const panel: PanelSpec = { title: 'Work', rows: () => rows, keys };
+  // What the chat does with a key: press it, run it, lay the answer on the panel.
+  const press = (state: PanelState, key: { name?: string; ctrl?: boolean; meta?: boolean }): PanelState => {
+    const step = panelKey(state, key);
+    const run = step.run!;
+    return panelAnswer(step.state!, run.def.run(run.id), run.def.reset);
+  };
+  // The cursor walks off the panel's opening row, onto the shell's group header then its
+  // row.
+  let s = panelStart(panel);
+  expect(s.cursor).toBe(1);
+  s = panelKey(s, { name: 'down' }).state!;
+  s = panelKey(s, { name: 'down' }).state!;
+  expect(s.cursor).toBe(3);
+  // The key marked reset answers without opening a panel: the cursor lands on the first
+  // row a key can run on — the group header skipped.
+  expect(press(s, { name: 'right' }).cursor).toBe(1);
+  // A chord honours the flag the same way.
+  expect(press(s, { name: 'd', ctrl: true }).cursor).toBe(1);
+  // A key without the flag leaves the cursor where it was.
+  expect(press(s, { name: 'x' }).cursor).toBe(3);
+  // A run that opens a panel is not a reset: the panel over it starts on its own row.
+  const inner = panelAnswer(s, { title: 'Tools', rows: () => [{ id: 't', text: 'tool t' }] } satisfies PanelSpec, true);
+  expect(panelTop(inner).title).toBe('Tools');
+  expect(inner.cursor).toBe(0);
+});
+

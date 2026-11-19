@@ -5,20 +5,26 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **The work picker: subagents and shells in one place.** `J` opens one panel listing
-  everything that runs beside the conversation — every live subagent and task (its label
-  path, `running — <what it is doing>`, `? waiting for you` when a question or a y/n
-  waits on you in it or one below it) under **Subagents**, every background shell (`sh-3 · bun run dev —
-  <who owns it>`, running or ended) under **Shells**; a group with nothing in it says
-  `none`, and the rows follow the live state while the panel is up. Enter opens what is
-  under the cursor: a subagent's conversation (the existing watch), or a shell's kept
-  output in the pager; on a subagent that waits on you Enter just closes the picker and
-  its request block takes the keyboard. `ctrl+d` on a shell asks `kill sh-3? y yes · n
-  no` in its row's place and y kills it — SIGTERM to the group, SIGKILL two seconds
-  later — as the tree's `x` does. `/work` opens the same panel from inside the chat;
-  Esc closes, and the picker does not come back from a watch — it is one-shot. The
-  capital acts wherever the chat does not have the keyboard, and `config set keys.work`
-  moves it; `:help` lists it.
+- **The work picker: subagents and shells on two tabs of a bottom strip.** `J` opens one
+  panel listing everything that runs beside the conversation — every live subagent and
+  task (its label path, `running — <what it is doing>`, `? waiting for you` when a question
+  or a y/n waits on you in it or one below it) on **Subagents**, every background shell
+  (`sh-3 · bun run dev — <who owns it>`, running or ended) on **Shells**; each tab counts
+  what it holds (`Subagents (2)`, `Shells (1)`), a tab with nothing in it says `none`, and
+  the rows follow the live state while the panel is up. The panel is a twelve-row strip
+  over the bottom of the chat, so the conversation stays on screen above it; ← and →
+  switch the tabs, and the cursor lands on the new tab's first row. `↓` on an empty line
+  is the door beside `J` and `/work`: no history entry shown, bang level 0, and the
+  session has work. Enter opens what is under the cursor: a subagent's conversation (the
+  existing watch), or a shell's kept output in the pager; on a subagent that waits on you
+  Enter just closes the picker and its request block takes the keyboard. `ctrl+d` stops a
+  subagent with everything it started, or kills a shell — SIGTERM to the group, SIGKILL
+  two seconds later — after the question that names its row (`stop review? y yes · n no`,
+  `kill sh-3? y yes · n no`), asked as the tree's `x` asks it; `y` answers that row
+  wherever the cursor has moved since, and a question whose work ends while it is up
+  stops nothing and says so. Esc closes, and the picker does not come back from a watch —
+  it is one-shot. The capital acts wherever the chat does not have the keyboard, and
+  `config set keys.work` moves it; `:help` lists it.
 
 - **A question waits out the sentence you are typing.** A question that parks while you
   are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
