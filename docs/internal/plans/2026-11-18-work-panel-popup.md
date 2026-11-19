@@ -90,7 +90,7 @@ it is a narrower door to a subset of the same rows (see Approaches).
   bottom row. Scrolling: the existing `ScrollBox` cursor window; wheel/PgUp/PgDn.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
-- **Hint row**: `⎋ close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
+- **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
   helpers. The way out comes first: the row is cut at the frame's width, and what falls
   off a narrow strip must never be the way out. A notice (the stop/kill question's
   context line, a panel `notice`) takes the hint row's place while it is up.
@@ -261,7 +261,7 @@ above).
   { label: 'Shells (1)', current: false }]`, at 100×40 and at 100×12: assert the drawn
   box is exactly 12 rows tall flush with the bottom (12 = the terminal's height on the
   short case takes the whole area), the tab strip row is just under the top border
-  with the current tab inverse, the hint row `⎋ close · ←→ tabs · ↑↓ pick · ⏎ open · ^d
+  with the current tab inverse, the hint row `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d
   stop/kill` is just above the bottom border, and a `notice` replaces the
   hint row. In `src/assistant/__tests__/command-panel.test.ts`, `a key marked reset
   lands the cursor on the first runnable row` — a panel whose rows begin with a group

@@ -957,6 +957,43 @@ test('the bottom look is a fixed 12-row strip at the chat\'s bottom', async () =
   const moved = await stripFrame(many);
   expect(moved.frame).toContain('row 4');
   expect(moved.frame).not.toContain('row 3');
+
+  // Without tabs there is no tab row: the list gains it (nine rows), and the arrows the
+  // panel declares are its own again, so they are said.
+  const noTabs = await stripFrame(stripView({ cursor: 0, tabs: [] }));
+  const noTabsTop = noTabs.lines.findIndex((l) => l.includes('╭'));
+  const noTabsBottom = noTabs.lines.findIndex((l) => l.includes('╰'));
+  expect(noTabs.lines[noTabsTop + 1]).toContain('a › writing');
+  expect(noTabs.frame).not.toContain('Subagents (2)');
+  expect(noTabsBottom - 1 - (noTabsTop + 1)).toBe(9);
+  expect(noTabs.lines[noTabsBottom - 1]).toContain(`${keyGlyph('left')} tabs · ${keyGlyph('right')} tabs`);
+});
+
+test('the bottom look is composed over the chat, not drawn in its place', async () => {
+  const backend = new TestBackend(100, 40);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat,
+    width: 100,
+    height: 40,
+    messages: [{ role: 'user', content: 'transcript words' }],
+    input: 'draft words',
+    cursor: 11,
+    panel: stripView(),
+  }), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  // The transcript still draws above the strip...
+  const said = lines.findIndex((l) => l.includes('› transcript words'));
+  const stripTab = lines.findIndex((l) => l.includes('Subagents (2)'));
+  const stripTop = stripTab - 1;
+  expect(said).toBeGreaterThanOrEqual(0);
+  expect(said).toBeLessThan(stripTop);
+  // ...the strip takes the same last 12 rows as it does alone...
+  expect(stripTop).toBe(28);
+  // ...the way out and the transcript share ONE frame...
+  expect(lines[stripTop + 10]).toContain(`${keyGlyph('escape')} close`);
+  // ...and the field underneath it is covered while the panel is up.
+  expect(backend.lastFrame).not.toContain('draft words');
+  handle.unmount();
 });
 
 // ─── Cuts count cells per grapheme cluster ────────────────────────────────────

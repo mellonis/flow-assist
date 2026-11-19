@@ -47,9 +47,9 @@ export type PanelSpec = {
   // Where the panel is drawn: a window in the conversation's place (the default), or a
   // fixed strip over the chat's bottom that leaves the screen above it alone.
   look?: 'window' | 'bottom';
-  // The strip's tabs, read at every draw like `rows`; drawn only when there are any.
-  // What a tab IS and which rows it serves is the plugin's: the machine only draws the
-  // labels and marks the current one.
+  // The strip's tabs, read at every draw like `rows`; drawn in the `bottom` look when there
+  // are any. What a tab IS and which rows it serves is the plugin's: the machine only draws
+  // the labels and marks the current one.
   tabs?: () => Array<{ label: string; current: boolean }>;
   // The cursor stays on the row it was moved to when the rows change under it (a row that
   // ends, one that appears above), by the row's `id`; when that row is gone it stays at

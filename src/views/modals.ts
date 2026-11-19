@@ -1931,7 +1931,9 @@ export function renderChatModal({
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
   // it, and the picker comes back once it is answered. So for a plugin's panel.
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
-  if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
+  // A panel in the window look takes the conversation's place. A bottom strip does not: it
+  // is composed over the chat at the end of this render, so everything above keeps drawing.
+  if (panel && panel.look !== 'bottom' && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
   const props = { width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion, diffPanel };
   const base = chatRoom(props);
@@ -2037,7 +2039,7 @@ export function renderChatModal({
   // leaves, and never a height of its own.
   const chatRow = h(Box, { key: 'chat-row', flexDirection: 'row', gap: 1, flexGrow: 1, flexShrink: 1, width: '100%' }, chatColumn, split?.mode === 'side' ? panelBox : null);
 
-  return h(
+  const chat = h(
     Box,
     docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
     h(
@@ -2274,6 +2276,13 @@ export function renderChatModal({
       split?.mode === 'stacked' ? panelBox : null,
     ),
   );
+  // The bottom look is COMPOSED, not a thing in the chat's place: the transcript, the
+  // queue and the plan draw as always, and the strip covers the chat's last rows — the
+  // field among them — until it drops. A question or a y/n keeps its field place instead,
+  // exactly as it does under a window panel.
+  return panel?.look === 'bottom' && !pendingQuestion && !pendingConfirm
+    ? h(Fragment, null, chat, renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow }))
+    : chat;
 }
 
 // ─── The session picker (pure render) ─────────────────────────────────────────
@@ -2416,13 +2425,13 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
 }
 
 // ─── A plugin command's panel (pure render) ────────────────────────────────────
-// `/mcp` and the like: a plugin's list in the chat's own frame, in the conversation's
-// place — the same docked, as a window and full, as the session picker. One row per
-// item, each ONE terminal line: the cursor mark, the text, the detail dim (or in its
-// tone's colour) and cut first; a group header row is dim throughout and no key runs on
-// it. The notice under the list, then the keys: the panel's own and the plugin's. A spec
-// with `look: 'bottom'` is the same panel as a fixed strip over the chat's bottom instead
-// of a window in the conversation's place. The state and what a key does are
+// `/mcp` and the like: a plugin's list in the chat's own frame — the same docked, as a
+// window and full, as the session picker. One row per item, each ONE terminal line: the
+// cursor mark, the text, the detail dim (or in its tone's colour) and cut first; a group
+// header row is dim throughout and no key runs on it. The notice under the list, then the
+// keys: the panel's own and the plugin's. The window look stands in the conversation's
+// place; a spec with `look: 'bottom'` is the same panel drawn as a fixed strip over the
+// chat's bottom, the chat itself still drawn above it. The state and what a key does are
 // src/assistant/command-panel.ts.
 export type CommandPanelView = {
   title: string;
@@ -2491,35 +2500,24 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   const heading = `${ASSISTANT_MARK} Flow Assist · ${panel.title}`;
   // Esc first, as in a window: the row is cut at the frame's width, and the way out must
   // not be what falls off in a narrow panel. A strip is as wide as the chat, so the rest
-  // follows the reading order — the tabs, the rows, the panel's own. Its arrows are the
-  // strip's own (←→ the tabs, ↑↓ the rows), so a declared key drawn with one is not said
-  // twice.
+  // follows the reading order — the tabs, the rows, the panel's own. With tabs, the
+  // strip's arrows are its own (←→ the tabs, ↑↓ the rows), so a declared key drawn with
+  // one is not said twice; without tabs a declared arrow key is the panel's and is said.
   const hint = strip
     ? [
         `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
         ...(tabs.length ? [`${CAP.leftRight} tabs`] : []),
         ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
-        ...panel.keys.filter((k) => k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right')).map((k) => `${k.cap} ${k.label}`),
+        ...panel.keys.filter((k) => !tabs.length || (k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right'))).map((k) => `${k.cap} ${k.label}`),
       ].join(' · ')
     : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
-  // The strip's tabs, ONE row under the top border: the wizard's tab row — each label cut
-  // by cells to its share of the row, the current one inverse, and the two-space gap
-  // between two tabs outside the inverse.
-  const tabStrip = tabRows
-    ? (() => {
-        const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
-        return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
-          ...tabs.flatMap((t, i) => [
-            i ? h(Text, { key: `gap${i}`, selectable: false }, '  ') : null,
-            h(Text, { key: `tab${i}`, inverse: t.current, wrap: 'truncate', selectable: false }, cutStep(t.label, room)),
-          ]));
-      })()
-    : null;
-  // A strip hangs on the area's last row; the window keeps its centred overlay.
+  // The strip's tabs, ONE row under the top border: the wizard's own tab row, so the two
+  // strips look the same.
+  const tabStrip = tabRows ? tabRow(tabs, inner, 'strip') : null;
+  // A strip hangs on the area's last row, over the chat it belongs to; the window keeps
+  // its centred overlay.
   const shell = strip
-    ? docked
-      ? { width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const }
-      : { position: 'absolute' as const, top: 0, left: 0, width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const, zIndex: 10 }
+    ? { position: 'absolute' as const, top: 0, left: 0, width, height, flexDirection: 'column' as const, justifyContent: 'flex-end' as const, alignItems: 'center' as const, zIndex: 11 }
     : docked ? { width, height, flexDirection: 'column' as const } : overlay(width, height);
   return h(Box, shell,
     h(Box, {
@@ -2904,15 +2902,21 @@ function askView(state: AskState, wrap: number) {
 }
 
 // The wizard's page strip: ONE row, a tab per page (`✓` once its draft holds an
-// answer), the page on screen in inverse. Each tab is cut by cells to the share of the
-// row it has, so a wide label never pushes the strip onto a second line. The gap
-// between two tabs belongs to neither, so it is never part of the inverse.
+// answer), the page on screen in inverse. The command panel's strip draws the same row
+// (`tabRow`), so the two look alike.
 function askTabRow(tabs: AskTab[], inner: number) {
+  return tabRow(tabs, inner, 'tab');
+}
+
+// ONE row of tabs: each label cut by cells to the share of the row it has, so a wide
+// label never pushes the strip onto a second line, the current one inverse. The gap
+// between two tabs belongs to neither, so it is never part of the inverse.
+function tabRow(tabs: Array<{ label: string; current: boolean; answered?: boolean }>, inner: number, key: string) {
   const room = Math.max(1, Math.floor((inner - 2 * (tabs.length - 1)) / tabs.length));
-  return h(Box, { key: 'tabs', flexDirection: 'row', width: '100%', overflow: 'hidden' },
+  return h(Box, { key: `${key}s`, flexDirection: 'row', width: '100%', overflow: 'hidden' },
     ...tabs.flatMap((t, i) => [
-      i ? h(Text, { key: `gap${i}`, selectable: false }, '  ') : null,
-      h(Text, { key: i, inverse: t.current, wrap: 'truncate', selectable: false },
+      i ? h(Text, { key: `${key}gap${i}`, selectable: false }, '  ') : null,
+      h(Text, { key: `${key}${i}`, inverse: t.current, wrap: 'truncate', selectable: false },
         cutStep(`${t.answered ? '✓ ' : ''}${t.label}`, room)),
     ]));
 }

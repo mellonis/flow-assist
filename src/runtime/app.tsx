@@ -835,10 +835,11 @@ export async function renderApp(
       setHostPanel(step.state);
       if (!step.run || !step.state) return;
       const at = panelTop(step.state);
+      const reset = step.run.def.reset;
       const apply = (answer: unknown) => {
         const cur = hostPanel.current;
         if (!cur || panelTop(cur) !== at) return;
-        setHostPanel(panelAnswer(cur, answer));
+        setHostPanel(panelAnswer(cur, answer, reset));
       };
       const fail = (e: unknown) => apply(`⚠ ${(e as Error)?.message ?? String(e)}`);
       try {
@@ -1357,10 +1358,14 @@ export async function renderApp(
       const state = hostPanel.current!;
       const { rows, error } = panelRows(state);
       const top = panelTop(state);
+      // The strip's tabs are read at every draw, like its rows; a `tabs()` that throws draws
+      // no strip rather than taking the screen down.
+      const tabs = (() => { try { return top.tabs?.() ?? []; } catch { return []; } })();
       return redactDeep({
         title: top.title, rows: rows.map((r) => ({ ...r })), cursor: Math.min(state.cursor, Math.max(0, rows.length - 1)),
         notice: error ? `⚠ ${error}` : state.notice, empty: top.empty ?? '',
         keys: panelKeys(state).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: state.stack.length > 1,
+        look: top.look ?? 'window', tabs,
       });
     })() : null;
 
