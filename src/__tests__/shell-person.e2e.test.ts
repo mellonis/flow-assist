@@ -89,7 +89,7 @@ test('&&, an escaped & and a quoted & stay a plain !command: it is waited for an
   ui.app.unmount();
 });
 
-test('↓ steps onto the row, ⏎ opens its output in the pager as a growing console block, Esc closes it', async () => {
+test('↓ opens the strip on Shells and ⏎ opens the row\'s output in the pager as a growing console block, Esc closes it', async () => {
   const { ui } = await boot();
   await ui.type('!');
   await ui.type('echo first; sleep 0.6; echo second; sleep 60 &');
@@ -326,8 +326,14 @@ test('x on an ended shell asks nothing: there is nothing to kill', async () => {
   await ui.type('echo hi &');
   await ui.press('return');
   await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 0'));
-  await ui.press('down');
+  await rowsKey(ui);
+  await intoRows(ui);
+  await ui.press('down'); // onto the shell's row
+  // The rows hold the keys: `x` is the tree row's own, and an ended row says `dismiss`.
+  expect(frameOf(ui)).toContain('↑↓ move · x dismiss · Esc back');
   await ui.press('x');
+  await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
+  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
   expect(frameOf(ui)).not.toContain('kill sh-1?');
   ui.app.unmount();
 });
