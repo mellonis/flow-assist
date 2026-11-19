@@ -100,6 +100,77 @@ const openByCommand = async (ui: UI) => {
   await ask(ui, '/work');
   await settleUntil(() => frameOf(ui).includes('Flow Assist · Work'));
 };
+// The panel is up; `panelUp` reads the frame, never a state the key set.
+const panelUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
+const fieldRow = (ui: UI) => rowsOf(ui).findLastIndex((r) => r.includes('› '));
+
+test('a down-arrow on an empty field opens the work panel', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  expect(panelUp(rig.ui)).toBe(false);
+  // Nothing typed: ↓ is the door.
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  expect(panelUp(rig.ui)).toBe(true);
+  expect(frameOf(rig.ui)).toContain('⏎ open');
+  await rig.ui.press('escape');
+  await settleUntil(() => !panelUp(rig.ui));
+  expect(panelUp(rig.ui)).toBe(false);
+  // The accepted edge: a walk through the history and back to the empty line leaves ↓
+  // the door's — one more opens the panel.
+  await rig.ui.press('up', 'up');
+  await settle(2);
+  await rig.ui.press('down', 'down');
+  await settle(2);
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).not.toContain('/subagent');
+  expect(panelUp(rig.ui)).toBe(false);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  expect(panelUp(rig.ui)).toBe(true);
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('no work — the down-arrow stays silent', async () => {
+  const rig = await boot();
+  await rig.ui.press('F');
+  await rig.ui.press('down');
+  await settle(4);
+  expect(panelUp(rig.ui)).toBe(false);
+  // The field is still empty: the key typed nothing either — the hint is the empty
+  // field's own.
+  expect(frameOf(rig.ui)).toContain('↑↓ history');
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('a bang step or a recall keeps the down-arrow away from the panel', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  // A bang level up: the field is a command's, not the door's.
+  await rig.ui.press('!');
+  await rig.ui.press('down');
+  await settle(4);
+  expect(panelUp(rig.ui)).toBe(false);
+  // Stepped back down, the door works.
+  await rig.ui.press('backspace');
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  expect(panelUp(rig.ui)).toBe(true);
+  await rig.ui.press('escape');
+  await settleUntil(() => !panelUp(rig.ui));
+  // A recalled line keeps ↓ for the walk: ↑ shows it, ↓ walks off it, and the panel
+  // stays away.
+  await rig.ui.press('up');
+  await settle(2);
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).toContain('/subagent HYN go');
+  await rig.ui.press('down');
+  await settle(2);
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).not.toContain('/subagent');
+  expect(panelUp(rig.ui)).toBe(false);
+  rig.ui.app.unmount();
+}, 20_000);
 
 test('the picker opens on its key and shows both groups', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
@@ -134,12 +205,15 @@ test('enter opens what is under the cursor', async () => {
   await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
   await openByKey(rig.ui);
   // The subagent row (the cursor starts on the first row a key runs): the picker closes
-  // and its watch is on, Esc back to the chat.
+  // and its watch is on, Esc back to the tree rows under the field and Esc again to the
+  // field, where a command is typed.
   await rig.ui.press('return');
   await settleUntil(() => !frameOf(rig.ui).includes('Flow Assist · Work'));
   expect(frameOf(rig.ui)).toMatch(/Flow Assist \(scripted\) · hyn-go/);
   await rig.ui.press('escape');
   await settleUntil(() => frameOf(rig.ui).includes('○ sh-1'));
+  await rig.ui.press('escape');
+  await settle(4);
   // The shell row: its output pager is up over the kept tail.
   await openByCommand(rig.ui);
   await rig.ui.press('down', 'down');

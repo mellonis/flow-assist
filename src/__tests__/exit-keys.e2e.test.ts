@@ -274,7 +274,7 @@ for (const stop of ['escape', 'ctrl+c'] as const) {
   });
 }
 
-test('Esc Esc armed, then ↓ steps into the tree rows: the handoff disarms, and the hint is the rows\' keys', async () => {
+test('Esc Esc armed, then ↓ opens the work panel: the door disarms, and one Esc closes the panel', async () => {
   const model = new ScriptedModel();
   const child = model.when((req) => firstUser(req).includes('DISARM'));
   child.script([{ hold: true as const }, { text: 'working.' }]);
@@ -288,12 +288,16 @@ test('Esc Esc armed, then ↓ steps into the tree rows: the handoff disarms, and
   await settle(2);
   expect(ui.backend.lastFrame).toContain('again to exit');
 
-  // ↓ hands the keys to the tree rows (the field empty, nothing shown in history): the key
-  // was the person's, so the Esc-Esc arm goes with it — and the hint is the rows' own
-  // keys, where Esc means back rather than exit.
+  // ↓ hands the keys to the work panel (the field empty, nothing shown in history): the
+  // key was the person's, so the Esc-Esc arm goes with it — and the hint is the panel's
+  // own keys, where one Esc closes the panel rather than exiting.
   await ui.press('down');
-  await settle(2);
+  await settleUntil(() => ui.backend.lastFrame.includes('Flow Assist · Work'));
   expect(ui.backend.lastFrame).not.toContain('again to exit');
-  expect(ui.backend.lastFrame).toContain('Esc back');
+  expect(ui.backend.lastFrame).toContain('Esc close');
+  await ui.press('escape');
+  await settleUntil(() => !ui.backend.lastFrame.includes('Flow Assist · Work'));
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist · Work');
+  expect(ui.exits()).toBe(0);
   ui.app.unmount();
 });

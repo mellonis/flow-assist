@@ -172,8 +172,8 @@ type and it narrows, so the line does not move. It closes when one candidate or 
 is left. When the selected candidate is what the line already holds, ⏎ closes the
 list and the next ⏎ sends or runs the line. While an answer or a `!command` runs, Esc
 stops it on the first press and closes the list too. With the list closed, ↑ and ↓ do what they do
-otherwise: in the `:` line the history, in the field the earlier messages and the rows
-under it.
+otherwise: in the `:` line the history, in the field the earlier messages — and ↓ on an
+empty field opens the work panel.
 
 ## Typing while it answers: the queue
 
@@ -341,17 +341,18 @@ down to none, keeping four rows of conversation; then the plan gives way.
 The field, the hint row and a y/n never do. The rows are not drawn while a question, your own
 y/n, a subagent's y/n or question block, `/context`, the pager, a picker or a command's panel is.
 
-**↓ on an empty line** steps into the rows (not while a history entry is shown — the ↓ that
-ends a walk through the history lands on the empty line, and the next one steps in — and not
-in shell mode). ↑ and ↓ walk the rows; ↑ on the first row, or Esc, goes back to the line,
-and the hint row names the keys while you are in the rows. `x` asks `stop <name> and 2
-below it? y yes · n no` in place of that row; `y` stops the node and everything it started
-(the same stop as `/subagent stop`, written to the journal as yours), `n` or Esc leaves it
-running; with a question up, the first Esc only drops it. ⏎ on a row shows that node's
-conversation (see below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there;
-every other key is swallowed: nothing is typed and nothing is sent. The
-cursor follows its node when the rows change; when its node ends it moves to the nearest row, and
-with no row left the line has the keys again.
+**The rows take the keys from a watch.** ⏎ on a subagent's row starts watching it, and Esc
+back from that watch lands on the node's row, where ↑ and ↓ walk the rows; the work panel's
+⏎ on a subagent's row leads to the same watch, and its Esc-back lands on the row too (see
+The work picker below). ↑ on the first row, or Esc, goes back to the line, and the hint row
+names the keys while you are in the rows. `x` asks `stop <name> and 2 below it? y yes · n
+no` in place of that row; `y` stops the node and everything it started (the same stop as
+`/subagent stop`, written to the journal as yours), `n` or Esc leaves it running; with a
+question up, the first Esc only drops it. ⏎ on a row shows that node's conversation (see
+below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there; every other key
+is swallowed: nothing is typed and nothing is sent. The cursor follows its node when the
+rows change; when its node ends it moves to the nearest row, and with no row left the line
+has the keys again.
 
 A subagent's y/n cannot be answered from the rows. While the cursor is in them, a waiting
 subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer` (with a stop
@@ -411,7 +412,9 @@ on screen a question takes keys at once.
 Everything that runs beside this conversation — the live subagents and tasks, the
 background shells — in one list to jump between. `J` opens it wherever the chat does not
 have the keyboard (on the start screen, on a plugin's screen), `/work` from inside the
-chat; `config set keys.work <key>` moves the capital.
+chat; `config set keys.work <key>` moves the capital. Inside the chat, `↓` on an empty line
+is the third door — no history entry shown and bang level 0 — and it opens the panel only
+when the session has something to show; with nothing running the key does nothing.
 
 One list under two dim group names, **Subagents** and **Shells**; a group with nothing in
 it says `none`. A subagent's row is its label path with what it is doing
@@ -425,8 +428,9 @@ is true now.
 
 ↑ and ↓ move among the rows across the group names, which are no key's. ⏎ opens what is
 under the cursor: a subagent's conversation as the watch draws it (Esc comes back to the
-chat, never to the picker — the picker is one-shot, `J` opens it again), or a shell's kept
-output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
+chat, never to the picker — the picker is one-shot, `J` opens it again — and, with the
+node's row still drawn and no request waiting in the tree, puts the cursor on that row), or
+a shell's kept output in the pager, growing while the job prints. ⏎ on a subagent that waits on you just
 closes the picker: its request block takes the keyboard at once. `ctrl+d` on a shell asks
 `kill sh-3? y yes · n no` in that row's place; the question names its job, so `y` kills
 that job wherever the cursor has moved to since and `n` leaves it running. `ctrl+d` again
@@ -1103,11 +1107,12 @@ A task, and a subagent the assistant started, never read it, and their shells en
 
 **The row.** Shells stand in the tree under the field beside subagents:
 `○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
-counts as working. ↓ on an empty line steps into the rows; ⏎ opens the output in the pager,
-the whole kept buffer (a first line says how many characters were dropped), growing while
-you look; `x` asks `kill sh-3? y yes · n no` and `y` stops it: SIGTERM to the whole process
-group, SIGKILL after 2 seconds. On an ended shell `x` dismisses the row, with no question; the
-job stays in `/agents`. The last 20 ended shells stay in `/agents` with their status, and ⏎ opens
+counts as working. The tree row's ⏎ opens the output in the pager (the rows are reached from
+a watch's Esc-back), and so does the work panel's ⏎ on that shell's row — `J`, `/work`, or ↓
+on an empty line; the pager holds the whole kept buffer (a first line says how many
+characters were dropped), growing while you look. `x` asks `kill sh-3? y yes · n no` and `y`
+stops it: SIGTERM to the whole process group, SIGKILL after 2 seconds. On an ended shell `x`
+dismisses the row, with no question; the job stays in `/agents`. The last 20 ended shells stay in `/agents` with their status, and ⏎ opens
 their output in the pager. The row of a shell the assistant started leaves by itself once a request
 to the assistant has carried its end (a held-back wake keeps it until your next message does); the
 row of one you started with `!cmd &` reads as `answered` until you open or dismiss it, and one you

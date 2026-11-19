@@ -78,8 +78,8 @@
   grace, and never while the `:` line is open, since a half-written command is a long
   thought. While the grace holds it the field keeps every key and each such key re-arms the
   grace (the key that sends a message clears it: the sentence went; a ↑/↓ walk that lands
-  where it started recalls nothing, and a key that hands over to the tree rows is the
-  handoff it is — neither is a key of the field's editing and neither re-arms), the block is not drawn
+  where it started recalls nothing, and the key that opens the work panel is a holder's,
+  the panel keeping the keys — neither is a key of the field's editing and neither re-arms), the block is not drawn
   in the field's place, and the strip above the field — or, with the chat collapsed, its
   status — says `? a question is waiting`; a one-shot unref'd timer re-runs the claim when
   the person goes quiet. A key a block, a picker, a panel or a reader (the pager, a watch)
@@ -148,9 +148,12 @@
   read from `Conversation.tree()` at the key, so a node that changed between the two can
   reorder the stops under the key (the question names the node the cursor is on, so no wrong
   node is stopped).
-  **The cursor** (`treeSel`: the node's key and whether its stop question is up) enters with
-  ↓ on an empty field, with no history entry shown before the key (the ↓ that ends a history
-  walk does not also enter) and bang level 0, when a row is drawn. With it in the rows the
+  **The cursor** (`treeSel`: the node's key and whether its stop question is up) enters from
+  a watch's Esc-back: ⏎ on a subagent's row starts watching it, and Esc comes back onto that
+  row when it is still drawn and no request waits anywhere in the session's tree. ↓ on an
+  empty field belongs to the work panel (docs/usage.md): with no history entry shown before
+  the key, bang level 0 and work in the session, it opens the panel, whose ⏎ on a subagent's
+  row is another way to the same watch. With the cursor in the rows the
   chat handler gives every key to one branch, after a question, `/context` and an own y/n and
   before everything else: ↑ / ↓ move, ↑ on the first row and Esc leave, `x` asks, `y` calls
   `stopSubtree` on the node (the stop `/subagent stop` makes, journaled as the person's),

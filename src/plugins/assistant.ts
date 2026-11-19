@@ -526,6 +526,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // whatever it previewed; a key's `run` that closes a panel is a decision and
           // calls `setPanel(null)` itself. See command-panel.ts, `panelDrop`.
           const dropPanel = () => setPanel(panelDrop(panelRef.current));
+          // The work panel's place in the list, put back once the panel is gone: the list
+          // mounts anew at its end, and what the person was reading is a row, not an
+          // offset (`rowAnchor`), so it survives whatever arrived meanwhile.
+          ui.useEffect(() => {
+            if (panel || !workPlaceBackRef.current) return;
+            workPlaceBackRef.current = false;
+            const place = workPlaceRef.current;
+            workPlaceRef.current = null;
+            if (place) askScroll(anchorRow(drawn(), rowOpts(foldsRef.current), place));
+          }, [panel]);
           const [, setPanelTick] = ui.useState(0);
           ui.useEffect(() => {
             if (!panel) return;
@@ -551,6 +561,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the conversation last said about where it is on the screen — the
           // view reports it, and a click is turned into a row with it.
           const viewportRef = ui.useRef<Viewport | null>(null);
+          // Where the person was reading when the work panel took the list away (a panel
+          // is a window of the conversation's place): the close puts it back, so a glance
+          // at what runs does not move the text.
+          const workPlaceRef = ui.useRef<{ at: number; within: number } | null>(null);
+          const workPlaceBackRef = ui.useRef(false);
           // A row the list should be put at the top of once the rows have changed, and
           // the nonce that makes a repeat of the same row ask again.
           const [scrollTo, setScrollTo] = ui.useState<{ row: number; n: number; pin?: boolean } | null>(null);
@@ -1789,72 +1804,80 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               else apply(r);
             } catch (e) { fail(e); }
           };
-          // The work picker (`/work` and its `work` key): the session's live subagents and
-          // background shells in one list under two group headers (docs/usage.md). The
-          // rows are read at every draw — a group that is empty says `none`, a row's
-          // state is what is true now. The picker is ONE-SHOT: a key closes it and opens
-          // what is under the cursor — Enter watches a subagent (a waiting one just
-          // closes: its request block takes the keyboard), Enter opens a shell's output
-          // in the pager, and `ctrl+d` kills a shell after the question that stands in
-          // its row's place (`stopQuestion`, the tree's own words).
+          // The work picker (`/work`, its `work` key and `↓` on an empty field): the
+          // session's live subagents and background shells in one list under two group
+          // headers (docs/usage.md). The rows are read at every draw — a group that is
+          // empty says `none`, a row's state is what is true now. The picker is
+          // ONE-SHOT: a key closes it and opens what is under the cursor — Enter watches
+          // a subagent (a waiting one just closes: its request block takes the keyboard),
+          // Enter opens a shell's output in the pager, and `ctrl+d` kills a shell after
+          // the question that stands in its row's place (`stopQuestion`, the tree's own
+          // words).
+          // Every shell of a conversation's subtree the registry still holds: the running
+          // ones and the ended records each conversation keeps (`shell_list`'s view of
+          // them), with the conversation that owns each.
+          const workShells = (asked: Conversation): Map<string, { job: ShellJob; owner: Conversation }> => {
+            const map = new Map<string, { job: ShellJob; owner: Conversation }>();
+            const walk = (c: Conversation) => {
+              for (const job of [...c.jobs.values(), ...c.endedShellJobs]) map.set(job.id, { job, owner: c });
+              for (const child of c.children) walk(child);
+            };
+            walk(asked);
+            return map;
+          };
+          // The picker's rows over a conversation's subtree — the subagent tree and the
+          // session's background shells, as `workRows` lays them out. The picker draws
+          // them; the `↓` door asks only whether there are any.
+          const workRowsOf = (asked: Conversation) => {
+            // The subagents: the live tree as rows, with the label path each node sits on
+            // (the depth-first walk rebuilds it from the stack) and the state words of its
+            // tree row. One that waits on the person — its own y/n or a question put to
+            // it — is flagged, and its row says so.
+            const subs: WorkSub[] = [];
+            const stack: { depth: number; label: string }[] = [];
+            for (const n of asked.tree()) {
+              if (n.shell) continue;
+              while (stack.length && stack[stack.length - 1]!.depth >= n.depth) stack.pop();
+              stack.push({ depth: n.depth, label: n.label });
+              // One row's `asking` is the SAME predicate Enter closes on (`offeredWithin`
+              // — a request parked in the node or below it reaching the person): a row
+              // marked `? waiting for you` always lands the keyboard on that request, and
+              // an unmarked one always watches.
+              const who = asked.nodeByKey(n.key);
+              const asking = !!who && !!asked.offeredWithin(who);
+              subs.push({
+                key: n.key,
+                path: stack.map((s) => s.label),
+                asking,
+                state: asking ? 'waiting for you'
+                  : n.status === 'working' ? 'running'
+                  : n.status === 'waiting' ? 'waiting for you'
+                  : n.status === 'asks' ? 'asking'
+                  : n.status === 'queued' ? 'queued'
+                  : n.status === 'delayed' ? 'delayed'
+                  : n.answered ? 'answered' : 'idle',
+                ...(n.status === 'working' && n.latest ? { title: n.latest } : {}),
+              });
+            }
+            // The shells: one row each, `<state> — <owner>`; the conversation's own are
+            // the chat's.
+            const jobs: WorkJob[] = [...workShells(asked).values()].map(({ job, owner }) => ({
+              id: job.id,
+              command: job.command.replace(/\s+/g, ' ').trim(),
+              state: job.statusText,
+              owner: owner.parent ? owner.label : 'this chat',
+            }));
+            return workRows(subs, jobs, Date.now());
+          };
           const openWork = () => {
             const asked = conv;
             let askedKill: string | null = null; // the job whose kill question is up
-            // Every shell of the session's subtree the registry still holds: the running
-            // ones and the ended records each conversation keeps (`shell_list`'s view of
-            // them), with the conversation that owns each.
-            const shells = (): Map<string, { job: ShellJob; owner: Conversation }> => {
-              const map = new Map<string, { job: ShellJob; owner: Conversation }>();
-              const walk = (c: Conversation) => {
-                for (const job of [...c.jobs.values(), ...c.endedShellJobs]) map.set(job.id, { job, owner: c });
-                for (const child of c.children) walk(child);
-              };
-              walk(asked);
-              return map;
-            };
+            const shells = () => workShells(asked);
             // The kill question's job, while the registry still holds it. Pure — read at
             // every draw, never written from a read.
             const killPending = (): string | null => (askedKill !== null && shells().has(askedKill) ? askedKill : null);
             const rows = (): PanelRow[] => {
-              // The subagents: the live tree as rows, with the label path each node sits
-              // on (the depth-first walk rebuilds it from the stack) and the state words
-              // of its tree row. One that waits on the person — its own y/n or a question
-              // put to it — is flagged, and its row says so.
-              const subs: WorkSub[] = [];
-              const stack: { depth: number; label: string }[] = [];
-              for (const n of asked.tree()) {
-                if (n.shell) continue;
-                while (stack.length && stack[stack.length - 1]!.depth >= n.depth) stack.pop();
-                stack.push({ depth: n.depth, label: n.label });
-                // One row's `asking` is the SAME predicate Enter closes on
-                // (`offeredWithin` — a request parked in the node or below it reaching
-                // the person): a row marked `? waiting for you` always lands the
-                // keyboard on that request, and an unmarked one always watches.
-                const who = asked.nodeByKey(n.key);
-                const asking = !!who && !!asked.offeredWithin(who);
-                subs.push({
-                  key: n.key,
-                  path: stack.map((s) => s.label),
-                  asking,
-                  state: asking ? 'waiting for you'
-                    : n.status === 'working' ? 'running'
-                    : n.status === 'waiting' ? 'waiting for you'
-                    : n.status === 'asks' ? 'asking'
-                    : n.status === 'queued' ? 'queued'
-                    : n.status === 'delayed' ? 'delayed'
-                    : n.answered ? 'answered' : 'idle',
-                  ...(n.status === 'working' && n.latest ? { title: n.latest } : {}),
-                });
-              }
-              // The shells: one row each, `<state> — <owner>`; the conversation's own are
-              // the chat's.
-              const jobs: WorkJob[] = [...shells().values()].map(({ job, owner }) => ({
-                id: job.id,
-                command: job.command.replace(/\s+/g, ' ').trim(),
-                state: job.statusText,
-                owner: owner.parent ? owner.label : 'this chat',
-              }));
-              const all = workRows(subs, jobs, Date.now());
+              const all = workRowsOf(asked);
               const up = killPending();
               const out: PanelRow[] = [];
               for (const group of ['subagents', 'shells'] as const) {
@@ -1880,7 +1903,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (!node) return 'it has ended — nothing to open';
                   // A subagent that waits on the person needs no watch: closing the
                   // picker is all it takes, and its request block takes the keyboard.
-                  if (!asked.offeredWithin(node)) startWatch(node);
+                  if (!asked.offeredWithin(node)) {
+                    // The watch's Esc steps back onto the node's row, so the tree rows are
+                    // reached from the row the watch was opened from.
+                    setTreeSel({ at: node.key, ask: false });
+                    startWatch(node);
+                  }
                   setPanel(null);
                   return undefined;
                 }
@@ -1926,6 +1954,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               rows,
               get keys() { return killPending() !== null ? answerKeys : [openKey, killKey]; },
             });
+            // The panel took the list away: remember where the person was reading, for
+            // the close to put back (`workPlaceBackRef`). A refused open (`openPanel`
+            // leaves a question's place alone) remembers nothing.
+            const v = viewportRef.current;
+            if (panelRef.current) {
+              workPlaceRef.current = v && !v.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), v.scrollTop) : null;
+              workPlaceBackRef.current = true;
+            }
             host.notify();
           };
           // A plugin's command run from the chat: what it says is a note (display only,
@@ -3185,13 +3221,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
-              // ↓ on an empty field with no history entry shown (before this key) steps into the
-              // tree rows, when any are drawn: a handoff to another holder, not editing — the
-              // rows keep the key and nothing here re-arms the grace. The handoff still was a
-              // key the person pressed, so it disarms an Esc-Esc arm like every field key below.
+              // ↓ on an empty field with no history entry shown opens the work panel, when
+              // the session's subtree has work to show. A handoff to another holder, not
+              // editing — the panel keeps the key and nothing here re-arms the grace. The
+              // key still was the person's, so it disarms an Esc-Esc arm like every field
+              // key below.
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
-                const first = treeStops()[0];
-                if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); disarmEsc(); return true; }
+                if (workRowsOf(conv).length) { openWork(); disarmEsc(); return true; }
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its rows
@@ -3241,12 +3277,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // ── From here the key is the person's own composition: the bang level, an
               // attached image, completion, the folds, the field's editing and its
               // Esc. Every one of them is typing and re-arms the grace a waiting question
-              // owes the sentence; the holders above — a question, a y/n, the tree and the
-              // walk into it, a subagent's ask, a panel, the picker, the pager, a watch, the
+              // owes the sentence; the holders above — a question, a y/n, the tree, a
+              // subagent's ask, a panel, the picker, the pager, a watch, the
               // other side — returned before this line and re-arm nothing. The ↑/↓ group
               // between them and this line splits: its recall is typing and stamps where it
-              // edits above, its walk back onto the line it already holds and its handoff to
-              // the tree rows are not.
+              // edits above, its walk back onto the line it already holds is not.
               stampTyping();
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
