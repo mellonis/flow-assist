@@ -91,14 +91,16 @@ it is a narrower door to a subset of the same rows (see Approaches).
   `chatBoxWidth(width, fullscreen)`. Bottom edge flush with the chat box's bottom border
   row (the area's bottom row in full mode, where the box is the area). Scrolling: the
   list scrolls within the cursor's window (`isActive: false` — the cursor moves it, never
-  the keys); the wheel and PgUp/PgDn stay the covered conversation's.
+  the keys); the wheel and PgUp/PgDn reach no one while the strip is up, so the covered
+  conversation stays where it was left.
 - **Tab strip**: the question wizard's strip idiom (`cutStep` labels, current tab
   inverse, the gap outside the inverse). Counts in the labels.
 - **Hint row**: `Esc close · ←→ tabs · ↑↓ pick · ⏎ open · ^d stop/kill`, glyphs via the
   helpers. The way out comes first: the row is cut at the frame's width, and what falls
   off a narrow strip must never be the way out. `←→ tabs` is synthesized only when BOTH
-  arrow keys are declared, so a panel that withholds them (the stop question's keys, an
-  empty tab's row keys) never names an arrow that does nothing; `↑↓ pick` stays, since it
+  arrow keys are declared, so the stop question's keys — which declare no arrow — never
+  name one that does nothing; an empty tab still declares both, and they switch out of
+  it, while `⏎ open` and `^d stop/kill` are withheld there. `↑↓ pick` stays, since it
   still moves. A notice (the stop/kill question's context line, a panel `notice`) takes
   the hint row's place while it is up.
 - **Rows and actions** (unchanged apart from tabs): sub rows `path › …` + state,

@@ -353,7 +353,9 @@ below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there; ever
 is swallowed: nothing is typed and nothing is sent. The cursor follows its node when the
 rows change; when its node ends it moves to the nearest row, and with no row left the line
 has the keys again. A node that ends while its stop question is up takes the question with
-it; the work picker's own stands beside a row that has ended (see The work picker below).
+it; the work picker's own stands in place of a row that has ended — the row's text is
+replaced, and a row gone since has its question pushed where the row was (see The work
+picker below).
 
 A subagent's y/n cannot be answered from the rows. While the cursor is in them, a waiting
 subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer` (with a stop
