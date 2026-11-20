@@ -38,9 +38,9 @@ builds it: what is happening, what is left to do, what I am typing, what my keys
 
 ## Design (agreed)
 
-- **Order inside the box, top to bottom:** conversation · `⚠ error` · hint row · plan ·
-  queue line · field (its `⏎ send · …` placeholder inline on the empty field's own row) ·
-  ~~tree~~ · stacked `/diff`.
+- **Order inside the box, top to bottom:** conversation · `⚠ error` · plan · queue line ·
+  field (its `⏎ send · …` placeholder inline on the empty field's own row) · **hint row**
+  (the last row of the strip) · ~~tree~~ · stacked `/diff`.
 - **The hint row moves; it does not change.** Live turn status, armed-Esc prompt,
   shell-directory prefix, `/diff` keys, `[auto]` badge, `⏸ N`/`● N`, `ctx` — all keep
   their content and their right-hand placement. Only its position is new.
