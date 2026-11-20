@@ -25,6 +25,34 @@ test('the cursor walks the rows as they are now; Esc closes', () => {
   expect(panelKey(s, { name: 'escape' }).state).toBeNull();
 });
 
+// ↑ on a panel's first row is the way out when the panel says so — the strip's ↓ door
+// closed by the key that led in — and only while the list has more than one row. The key
+// and the hint follow one rule: a hint that reads `↑↓ pick` never hides a close.
+test('↑ on the first row closes a panel that says so; deeper it only moves', () => {
+  const closing: PanelSpec = { title: 'W', rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }], upAtTopCloses: true };
+  expect(panelKey(panelStart(closing), { name: 'up' }).state).toBeNull();
+  const deeper = { ...panelStart(closing), cursor: 1 };
+  expect(panelKey(deeper, { name: 'up' }).state?.cursor).toBe(0);
+  // Esc closes wherever the cursor is, as it always has.
+  expect(panelKey(deeper, { name: 'escape' }).state).toBeNull();
+  // A list of one row is no list to walk: ↑ stays and moves nowhere.
+  const single: PanelSpec = { title: 'W', rows: () => [{ id: 'a', text: 'a' }], upAtTopCloses: true };
+  expect(panelKey(panelStart(single), { name: 'up' }).state?.cursor).toBe(0);
+  // A panel that does not say so keeps ↑ for the move alone.
+  const plain: PanelSpec = { title: 'W', rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }] };
+  expect(panelKey(panelStart(plain), { name: 'up' }).state?.cursor).toBe(0);
+});
+
+// The close is Esc's: a panel over another goes back to it, the last one is gone.
+test('↑ on a nested panel\'s first row goes back one level, as Esc does', () => {
+  const outer: PanelSpec = { title: 'outer', rows: () => [{ id: 'x', text: 'x' }, { id: 'y', text: 'y' }] };
+  const closing: PanelSpec = { title: 'inner', rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }], upAtTopCloses: true };
+  const nested = panelAnswer(panelStart(outer), closing);
+  const back = panelKey(nested, { name: 'up' }).state;
+  expect(back?.stack.length).toBe(1);
+  expect(panelTop(back!).title).toBe('outer');
+});
+
 test('a declared key runs on the row under the cursor; the panel\'s own keys are never the plugin\'s', () => {
   const ran: string[] = [];
   const s = panelStart(spec(['a', 'b'], ran));

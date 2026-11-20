@@ -13,6 +13,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { hostStateDir } from '../config/load.ts';
 import { keyGlyph } from '../playback/keys.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { closeStrip, openStrip, stripRows, stripUp } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -186,6 +187,43 @@ test('a down-arrow on an empty field opens the work panel', async () => {
   await rig.ui.press('down');
   await settleUntil(() => panelUp(rig.ui));
   expect(panelUp(rig.ui)).toBe(true);
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('↑ on the first row closes the strip; a deeper ↑ only moves; Esc closes anywhere', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }, { mark: 'ALK', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  await spawn(rig, 1);
+  // ↓ opens the strip on its first row of two, and the hint names the way out there: ↑
+  // closes, ↓ picks.
+  await openStrip(rig.ui);
+  expect(marked(rig.ui, 'hyn-go')).toBe(true);
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`);
+  // ↑ on that row is the way out: the frame is gone and the chat's field has the keys.
+  await rig.ui.press('up');
+  await settleUntil(() => !stripUp(rig.ui));
+  expect(stripUp(rig.ui)).toBe(false);
+  expect(frameOf(rig.ui)).toContain(`${keyGlyph('up')}${keyGlyph('down')} history`);
+  // One row down, ↑ is a move: the strip stays up and its cursor is on row one again,
+  // where the hint says ↑ closes once more.
+  await openStrip(rig.ui);
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('up')} close`);
+  await rig.ui.press('down');
+  await settle();
+  expect(marked(rig.ui, 'alk-go')).toBe(true);
+  expect(hintOf(rig.ui)).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  await rig.ui.press('up');
+  await settle();
+  expect(stripUp(rig.ui)).toBe(true);
+  expect(marked(rig.ui, 'hyn-go')).toBe(true);
+  // Esc closes wherever the cursor is: down to the last row, then out.
+  await rig.ui.press('down');
+  await settle();
+  expect(marked(rig.ui, 'alk-go')).toBe(true);
+  await closeStrip(rig.ui);
+  expect(stripUp(rig.ui)).toBe(false);
+  expect(stripRows(rig.ui)).toEqual([]);
   rig.ui.app.unmount();
 }, 20_000);
 
@@ -394,13 +432,14 @@ test('the panel is the bottom strip: the tabs under its top border and the hint 
   // ONE tab row, right under the frame's top border.
   expect(rows[heading + 1]).toContain('Subagents (2)');
   expect(rows[heading + 1]).toContain('Shells (1)');
-  // The hint is the strip's last row inside the frame, the way out first.
-  const hint = rows.findIndex((r) => r.includes(`${keyGlyph('up')}${keyGlyph('down')} pick`));
+  // The hint is the strip's last row inside the frame, the way out first. The cursor is
+  // on the first row of two, so ↑ closes there: the token names that close.
+  const hint = rows.findIndex((r) => r.includes(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`));
   expect(hint).toBeGreaterThan(heading + 1);
   expect(rows[hint]).toContain([
     `${keyGlyph('escape')} close`,
     `${keyGlyph('left')}${keyGlyph('right')} tabs`,
-    `${keyGlyph('up')}${keyGlyph('down')} pick`,
+    `${keyGlyph('up')} close · ${keyGlyph('down')} pick`,
     `${keyGlyph('return')} open`,
     `${keyGlyph('ctrl+d')} stop/kill`,
   ].join(' · '));

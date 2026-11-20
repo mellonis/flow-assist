@@ -55,6 +55,10 @@ export type PanelSpec = {
   // ends, one that appears above), by the row's `id`; when that row is gone it stays at
   // the place it was. Without it the cursor is an index into the rows.
   follow?: boolean;
+  // ↑ on the first row is the way out, as Esc is — the door `↓` opened closed by the key
+  // that led in. A list of more than one row has it, and the hint there says so; a single
+  // row does not, and its ↑ is the move that goes nowhere.
+  upAtTopCloses?: boolean;
   // A cursor move, observed: the row under it now, and its index. A preview is laid on
   // screen here (`/theme`), never a decision — a key's `run` is the only thing that
   // decides, and it never calls this. A move between rows observes; a panel's cursor
@@ -132,6 +136,13 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
     if (state.stack.length > 1) return { state: { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } };
     // The last panel closes. The preview a spec laid on screen is put back by whoever
     // drops it (`panelDrop`) — the chat's one drop path, never a key's decision.
+    return { state: null };
+  }
+  // ↑ on the first row is the way out of a panel that says so (`PanelSpec.upAtTopCloses`),
+  // the same close Esc is: a panel over another goes back to it, the last one closes.
+  // Deeper, and on a list of one row, ↑ is the move it has always been.
+  if (key.name === 'up' && panelTop(state).upAtTopCloses && cursor === 0 && rows.length > 1) {
+    if (state.stack.length > 1) return { state: { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } };
     return { state: null };
   }
   if (key.name === 'up' || key.name === 'down') {

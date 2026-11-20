@@ -2436,6 +2436,9 @@ export type CommandPanelView = {
   look?: 'window' | 'bottom';
   // The strip's tabs, drawn under its top border when there are any.
   tabs?: Array<{ label: string; current: boolean }>;
+  // ↑ on the first row is the way out (`PanelSpec.upAtTopCloses`): the hint names the
+  // close there instead of only the move.
+  upAtTopCloses?: boolean;
 };
 
 // A strip is exactly this tall: the frame's two rows, one for the tab strip, eight for the
@@ -2502,14 +2505,22 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // declared under another label still walks the tabs.
   const keys = panel.keys;
   const tabArrows = tabs.length > 0 && keys.some((k) => k.cap === keyGlyph('left')) && keys.some((k) => k.cap === keyGlyph('right'));
+  // The move token, ONE for both looks: a panel that closes on ↑ says the close on its
+  // first row, and the plain move everywhere else. A list of one row has no move to pick
+  // from and no close to offer, so there is no token at all.
+  const pickToken = panel.rows.length > 1
+    ? (panel.upAtTopCloses && panel.cursor === 0
+      ? `${keyGlyph('up')} close · ${keyGlyph('down')} pick`
+      : `${CAP.upDown} pick`)
+    : null;
   const hint = strip
     ? [
         `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
         ...(tabArrows ? [`${CAP.leftRight} tabs`] : []),
-        ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
+        ...(pickToken ? [pickToken] : []),
         ...keys.filter((k) => !tabArrows || (k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right'))).map((k) => `${k.cap} ${k.label}`),
       ].join(' · ')
-    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
+    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(pickToken ? [pickToken] : []), ...keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
   // The strip's tabs, ONE row under the top border: the wizard's own tab row, so the two
   // strips look the same.
   const tabStrip = tabRows ? tabRow(tabs, inner, 'strip') : null;

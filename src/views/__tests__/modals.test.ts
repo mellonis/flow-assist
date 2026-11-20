@@ -1072,6 +1072,30 @@ test('the strip names the tabs only when both arrows are declared', async () => 
   expect(both.frame).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
 });
 
+// ONE token, computed once for both looks: a panel that closes on ↑ names the close on
+// its first row, and a hint reading `↑↓ pick` there would hide it. A list of one row has
+// no close to offer — the key does not close it — so the token says nothing.
+test('the move token names the close on a closing panel\'s first row, the same in both looks', async () => {
+  const bottom = (lines: string[]) => lines.findIndex((l) => l.includes('╰'));
+  const top = await stripFrame(stripView({ cursor: 0, upAtTopCloses: true }));
+  const hint = top.lines[bottom(top.lines) - 1]!;
+  expect(hint).toContain(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`);
+  expect(hint).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  // A row deeper the close is gone, and the plain move is said — as for a panel that
+  // never closes on ↑.
+  const deeper = await stripFrame(stripView({ cursor: 2, upAtTopCloses: true }));
+  expect(deeper.frame).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  expect(deeper.frame).not.toContain(`${keyGlyph('up')} close`);
+  // One row: no move to pick from, and no close to name.
+  const single = await stripFrame(stripView({ rows: [{ id: 'sub:a', text: 'a › writing' }], cursor: 0, upAtTopCloses: true }));
+  expect(single.frame).not.toContain(`${keyGlyph('up')} close`);
+  expect(single.frame).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  // The window look says the same token: the two cannot disagree.
+  const asWindow = await stripFrame(stripView({ cursor: 0, look: 'window', upAtTopCloses: true }));
+  expect(asWindow.frame).toContain(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`);
+  expect(asWindow.frame).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+});
+
 test('a strip with no rows names only the keys that act', async () => {
   // An empty tab: the picker withholds the rows' keys, so the hint says the way out and
   // the way across, and nothing that would act on no row.

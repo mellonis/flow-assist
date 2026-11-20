@@ -1962,6 +1962,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               look: 'bottom',
               follow: true,
               empty: 'none',
+              // ↑ on the first row closes the strip, as Esc does — the ↓ door shut by the
+              // key that led in, while the list has more than one row to walk.
+              upAtTopCloses: true,
               rows,
               tabs,
               get keys() {
@@ -3602,6 +3605,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
                 look: top.look ?? 'window', tabs,
+                // ↑ closes on the first row when the panel says so — the same rule
+                // `panelKey` reads, so the hint can never offer a close the key refuses.
+                upAtTopCloses: top.upAtTopCloses,
               });
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
