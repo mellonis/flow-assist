@@ -12,7 +12,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
-import { closeStrip, openStrip, stripRow, stripUp } from './helpers/work-panel';
+import { closeStrip, openStrip, stripRow, stripRows, stripUp } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -31,7 +31,6 @@ afterEach(() => {
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
-const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 const pause = () => { clock.t += 700; };
 const BLOCK = 'Confirm write: run_command';
@@ -84,8 +83,10 @@ test('the session\'s own y/n over the work strip on an idle subagent is armed, t
   await settleUntil(() => frameOf(ui).includes('parent done'));
   // The y went to the own y/n only: the idle subagent is still listed and was sent nothing.
   expect(stripUp(ui)).toBe(true);
-  const ownRow = rowsOf(ui).find((r) => r.includes('idle-own-go')) ?? '';
-  expect(ownRow).toContain('idle');
+  // The strip's own lines: the chat says `◆ idle-own-go finished:` above it, whose label
+  // alone holds the word `idle` — the row must say the state after the label.
+  const ownRow = stripRows(ui).find((r) => r.includes('idle-own-go')) ?? '';
+  expect(ownRow).toMatch(/idle-own-go\s+idle\b/);
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });
@@ -133,8 +134,8 @@ test('the session\'s own question over the work strip on an idle subagent is arm
   await settleUntil(() => !askUp(frameOf(ui)));
   // The strip was never closed: it is back, its row still idle.
   expect(stripUp(ui)).toBe(true);
-  const qstRow = rowsOf(ui).find((r) => r.includes('idle-qst-go')) ?? '';
-  expect(qstRow).toContain('idle');
+  const qstRow = stripRows(ui).find((r) => r.includes('idle-qst-go')) ?? '';
+  expect(qstRow).toMatch(/idle-qst-go\s+idle\b/);
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });

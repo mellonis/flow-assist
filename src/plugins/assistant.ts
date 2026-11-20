@@ -1770,7 +1770,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the cursor — Enter watches a subagent (a waiting one just closes: its request
           // block takes the keyboard), Enter opens a shell's output in the pager, and
           // `ctrl+d` kills a shell or stops a subagent after the question that stands in
-          // its row's place (`stopQuestion`, the tree's own words and its own stop route).
+          // its row's place (`stopQuestion`, the strip's own words and its own stop route).
           // Every shell of a conversation's subtree the registry still holds: the running
           // ones and the ended records each conversation keeps (`shell_list`'s view of
           // them), with the conversation that owns each.
@@ -1793,9 +1793,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // subagent asks its parent's chain, not the person).
           const workRowsOf = (asked: Conversation): { rows: WorkRow[]; waiting: number } => {
             // The subagents: the live tree as rows, with the label path each node sits on
-            // (the depth-first walk rebuilds it from the stack) and the state words of its
-            // tree row. One that waits on the person — its own y/n or a question put to
-            // it — is flagged, and its row says so.
+            // (the depth-first walk rebuilds it from the stack) and its state words. One
+            // that waits on the person — its own y/n or a question put to it — is flagged,
+            // and its row says so.
             const subs: WorkSub[] = [];
             const stack: { depth: number; label: string }[] = [];
             for (const n of asked.tree()) {
@@ -1901,8 +1901,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               },
             };
             // `ctrl+d`: a shell is killed, a subagent is stopped with what it started —
-            // the tree rows' own `x stop` route, its words in the row's place — and both
-            // after the question naming the row.
+            // the strip's own stop, its words in the row's place — and both after the
+            // question naming the row.
             const stopKey: PanelKeyDef = {
               key: 'ctrl+d', label: 'stop/kill',
               run: (id) => {

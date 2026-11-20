@@ -23,17 +23,23 @@ export async function closeStrip(ui: UI): Promise<void> {
   await settleUntil(() => !stripUp(ui));
 }
 
-// A live node's row as the strip words it now — its label and its state — or '' when the
-// door opened nothing (an ended node is `/agents`' to show). Only the strip's own lines are
-// read: the chat above it says the same names. The field has the keys again on the way out.
-export async function stripRow(ui: UI, label: string): Promise<string> {
-  await ui.press('down');
-  await settle(4);
+// The strip's own lines — from its heading down to the frame's bottom border — without
+// opening or closing it. The chat above says the same labels (`subagent «hyn-go» started`),
+// so a frame-wide read would pass on a chat line instead.
+export function stripRows(ui: UI): string[] {
   const rows = rowsOf(ui);
   const top = rows.findIndex((r) => r.includes(PANEL));
-  if (top < 0) return '';
+  if (top < 0) return [];
   const bottom = rows.findIndex((r, i) => i > top && r.includes('╰'));
-  const row = rows.slice(top + 1, bottom > top ? bottom : rows.length).find((r) => r.includes(label)) ?? '';
+  return rows.slice(top + 1, bottom > top ? bottom : rows.length);
+}
+
+// A live node's row as the strip words it now — its label and its state — or '' when the
+// door opened nothing (an ended node is `/agents`' to show). The field has the keys again
+// on the way out.
+export async function stripRow(ui: UI, label: string): Promise<string> {
+  await openStrip(ui);
+  const row = stripRows(ui).find((r) => r.includes(label)) ?? '';
   await closeStrip(ui);
   return row;
 }

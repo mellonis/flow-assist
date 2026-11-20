@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { agentsPanelRows, stopQuestion, treeCursor } from '../agent-tree.js';
+import { agentsPanelRows, stopQuestion } from '../agent-tree.js';
 import type { TreeNode } from '../conversation-types.js';
 
 const node = (key: string, over: Partial<TreeNode> = {}): TreeNode => ({
@@ -9,17 +9,6 @@ const node = (key: string, over: Partial<TreeNode> = {}): TreeNode => ({
 test('an idle subagent reads idle, and answered once a later answer is unread', () => {
   const panel = agentsPanelRows([node('a', { status: 'idle', startedAt: null }), node('b', { status: 'idle', answered: true, startedAt: null })], [], 0);
   expect(panel.map((r) => [r.text, r.detail, r.tone])).toEqual([['◦ a', 'idle', undefined], ['◦ b', 'answered', 'warn']]);
-});
-
-test('the cursor stays on its node when rows reorder, moves to the nearest row when it ends, and leaves with no rows', () => {
-  const rows = (...keys: string[]) => keys.map((key) => ({ key }));
-  expect(treeCursor('b', 1, rows('c', 'b', 'a'))).toBe('b');
-  expect(treeCursor('b', 1, rows('c', 'a'))).toBe('a');
-  expect(treeCursor('z', 5, rows('c', 'a', ''))).toBe('a');
-  expect(treeCursor('z', 0, rows('c', 'a'))).toBe('c');
-  expect(treeCursor('b', 0, rows(''))).toBeNull();
-  expect(treeCursor('b', 0, [])).toBeNull();
-  expect(treeCursor(null, 0, rows('a'))).toBeNull();
 });
 
 test('the stop question names the node and what is below it', () => {

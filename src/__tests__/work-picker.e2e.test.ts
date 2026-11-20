@@ -41,27 +41,35 @@ const results = (req: { messages: { role: string; content?: unknown }[] } | unde
 // A subagent the person starts: held at its first step, then its request of the kind.
 // `outer` starts a task of its own (`beta one`) whose first command asks the person y/n —
 // a request parked BELOW the subagent; `quiet` starts one that just answers (`gamma one`),
-// so it ends by itself while anything is looking at it.
+// so it ends by itself while anything is looking at it; `tree` starts a task (`delta`) and
+// stays at work, so the subtree it started is still below it when a stop is asked.
 const labelOf = (mark: string) => `${mark.toLowerCase()}-go`;
 const QUIET_TASK = 'gamma one';
-interface Kid { mark: string; kind: 'run' | 'ask' | 'outer' | 'quiet' }
+const TREE_TASK = 'delta';
+interface Kid { mark: string; kind: 'run' | 'ask' | 'outer' | 'quiet' | 'tree' }
 const requestOf = (kid: Kid, root: string) => (kid.kind === 'ask'
   ? { tool: 'ask_parent', args: { question: `Q-${kid.mark}?` } }
   : kid.kind === 'outer'
     ? { tool: 'subagent', args: { task: 'beta one' } }
     : kid.kind === 'quiet'
       ? { tool: 'subagent', args: { task: QUIET_TASK } }
-      : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
-const scriptOf = (kid: Kid, root: string): Turn[] => [[{ hold: true as const }, requestOf(kid, root)], [{ text: `${kid.mark} settled` }]];
+      : kid.kind === 'tree'
+        ? { tool: 'subagent', args: { task: TREE_TASK } }
+        : { tool: 'run_command', args: { command: `touch ${path.join(root, `${kid.mark}.txt`)}` } });
+const scriptOf = (kid: Kid, root: string): Turn[] => [
+  [{ hold: true as const }, requestOf(kid, root)],
+  kid.kind === 'tree' ? [{ hold: true as const }] : [{ text: `${kid.mark} settled` }],
+];
 // The task `outer`'s subagent tool starts: matched by the task text in its prompt. Its
 // first step asks the person to approve a command.
 const TASK_TURN = (root: string): Turn[] => [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(root, 'beta.txt')}` } }], [{ text: 'BETA settled' }]];
 
-interface Rig { ui: UI; children: ScriptedModel[]; kids: Kid[] }
+interface Rig { ui: UI; children: ScriptedModel[]; kids: Kid[]; sessions: string }
 async function boot(kids: Kid[] = [], opts: { cols?: number; rows?: number } = {}): Promise<Rig> {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-')));
+  const sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-s-'));
   const model = new ScriptedModel();
   const children = kids.map((kid) => {
     const child = model.when((req) => firstUser(req).includes(kid.mark));
@@ -78,12 +86,17 @@ async function boot(kids: Kid[] = [], opts: { cols?: number; rows?: number } = {
     task.script([{ hold: true as const }, { text: 'QUIET settled' }]);
     children.push(task);
   }
+  if (kids.some((k) => k.kind === 'tree')) {
+    const task = model.when((req) => firstUser(req).includes(TREE_TASK));
+    task.script([{ hold: true as const }, { text: 'TREE settled' }]);
+    children.push(task);
+  }
   const ui = await bootApp(model, opts.cols ?? 130, opts.rows ?? 34, undefined, {
-    sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-s-')) },
+    sessions: { dir: sessions },
     shell: { roots: [root] },
     ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false },
   }, { toastMs: 10_000 });
-  return { ui, children, kids };
+  return { ui, children, kids, sessions };
 }
 const spawn = async (rig: Rig, i: number) => {
   await ask(rig.ui, `/subagent ${rig.kids[i]!.mark} go`);
@@ -140,6 +153,13 @@ function styleAt(ui: UI, text: string) {
   const buffer = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean; dim?: boolean } } } | null }).lastBuffer;
   return buffer!.get(rows[y]!.indexOf(text), y).style;
 }
+// Every journal under a sessions directory, joined: what a child's stop recorded.
+const journalOf = (sessions: string) => {
+  const out: string[] = [];
+  const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (f.endsWith('.log.jsonl')) out.push(fs.readFileSync(f, 'utf8')); } };
+  walk(sessions);
+  return out.join('\n');
+};
 
 test('a down-arrow on an empty field opens the work panel', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
@@ -528,6 +548,33 @@ test('ctrl+d stops a subagent after its question, and y names it', async () => {
   expect(stripText(rig.ui)).toContain('none');
   expect(stripText(rig.ui)).not.toContain('hyn-go');
   expect(rig.ui.exits()).toBe(0);
+  rig.ui.app.unmount();
+}, 20_000);
+
+test('the strip\'s stop names what the node started, and y ends the whole subtree as the person', async () => {
+  const rig = await boot([{ mark: 'TREE', kind: 'tree' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  // The subagent starts a task of its own and stays at work: one row below it, still live.
+  rig.children[0]!.release();
+  const task = rig.children[1]!;
+  await settleUntil(() => task.held);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  expect(stripText(rig.ui)).toContain('tree-go › delta');
+  // ctrl+d on the subagent's row asks for it AND the work it started.
+  await rig.ui.backend.press({ name: 'd', ctrl: true });
+  await settle();
+  expect(stripText(rig.ui)).toContain('stop tree-go and 1 below it? y yes · n no');
+  expect(stripText(rig.ui)).not.toContain('tree-go · ');
+  // `y` stops the subtree as the person: both rows go, and the child's journal says so —
+  // a stopped child's chat row is read with the person's next message, so the transcript
+  // has the parent's row only.
+  await rig.ui.press('y');
+  await settleUntil(() => frameOf(rig.ui).includes('◆ tree-go stopped:'));
+  expect(frameOf(rig.ui)).toContain('◆ tree-go stopped:');
+  expect(stripText(rig.ui)).toContain('none');
+  expect(journalOf(rig.sessions)).toMatch(/"task":"delta"[^\n]*"outcome":"stopped"[^\n]*"by":"person"/);
   rig.ui.app.unmount();
 }, 20_000);
 

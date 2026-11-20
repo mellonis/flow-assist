@@ -1,14 +1,9 @@
-// The agent tree (ask-children-spec.md (agent tree)): what a node says of itself, the cursor
-// rule of the rows it is listed in, and the question that guards a stop. Pure: the panel and
-// the work strip draw what these return.
+// The agent tree as `/agents` lists it (ask-children-spec.md (agent tree)): `agentsPanelRows` —
+// the live nodes, then the ones that ended, each with its state — and `stopQuestion`, what
+// the panel asks before a stop. Pure: the panel draws what these return.
 import type { PanelRow } from './command-panel.js';
 import type { EndedChild, TreeNode } from './conversation-types.js';
 import { formatDuration } from './duration.js';
-
-// A row of a listing, as far as its cursor is concerned: `key` is the node's conversation
-// key ('' stands for no node at all — a row a listing adds of its own, which the cursor
-// never stops on).
-export interface TreeRow { key: string }
 
 // The wait of a delayed node, to the minute and rounded up: a row with a clock would
 // redraw an idle panel.
@@ -64,17 +59,6 @@ export function nodeState(n: TreeNode, now = Date.now()): string {
 // How a listing words the end of a child: an answer is `done`, the rest by their name.
 export function endedVerdict(outcome: string): string {
   return outcome === 'answer' ? 'done' : outcome;
-}
-
-// Where a listing's cursor stands after its rows changed: on the same node, else on the row
-// nearest the place it left, else nowhere (null) — also when it stood on no row at all.
-export function treeCursor(prevKey: string | null, prevIndex: number, rows: readonly TreeRow[]): string | null {
-  if (prevKey === null) return null;
-  const stops = rows.filter((r) => r.key !== '');
-  if (!stops.length) return null;
-  const same = stops.find((r) => r.key === prevKey);
-  if (same) return same.key;
-  return stops[Math.min(Math.max(prevIndex, 0), stops.length - 1)]!.key;
 }
 
 // The question that stands in place of a row before a stop; `y` stops the node and what it started.

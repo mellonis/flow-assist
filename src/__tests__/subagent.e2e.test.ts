@@ -71,9 +71,8 @@ test('a held subagent runs while the person sends a message and gets its answer;
   await settleUntil(() => frameOf(ui).includes('◆ find-me-the finished:'));
   expect(frameOf(ui)).toContain('◆ find-me-the finished:');
   expect(frameOf(ui)).toContain('It is in the third file.');
-  await settleUntil(() => frameOf(ui).includes('find-me-the · idle'));
-  // The run is over — nothing is in flight — and its resting row is still under the `↓`
-  // door, so the badge names the door and counts the row it opens, not background work.
+  // The run is over — nothing is in flight — and the strip still lists it, so the badge
+  // names the door and counts the row it opens, not background work.
   expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 1 in background`);
   ui.app.unmount();
 });

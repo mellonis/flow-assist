@@ -8,6 +8,7 @@ import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
 import { lockPath } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { stripRows } from './helpers/work-panel';
 import { isSessionFile } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -227,6 +228,14 @@ test('/new with a shell running asks stop / keep running: Esc stays, k leaves it
   await settle(3);
   expect(frameOf(ui)).not.toContain('Background shells are running');
   expect(frameOf(ui)).toContain('A answer.');
+  // The job survived the cancel: the strip still lists it, running, in this chat.
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  const work = stripRows(ui).join('\n');
+  expect(work).toContain('sh-1 · sleep 60');
+  expect(work).toContain('running — this chat');
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
   // Keep running: a new session; the first stays headless, working in the picker.
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
@@ -311,8 +320,16 @@ test('the pager shows the whole output of a long job: all 400 lines are reachabl
   await ui.type('!');
   await ui.type('seq -f "row%g" 1 400; sleep 60 &');
   await ui.press('return');
+  await started(ui, 'sh-1');
+  // `/agents` is where the line count is read now: the strip's row is the door to the
+  // output, not the place its state and count are read.
+  await ask(ui, '/agents');
   await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('400 lines'));
+  expect(rowWith(ui, '○ sh-1 ·')).toContain('400 lines');
+  await ui.press('escape');
+  await settleUntil(() => !frameOf(ui).includes('Flow Assist · Agents'));
   await ui.press('down');
+  await settleUntil(() => stripUp(ui));
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ row1'));
   expect(frameOf(ui)).not.toContain('lines cut');
