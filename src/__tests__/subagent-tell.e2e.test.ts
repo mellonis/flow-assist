@@ -13,6 +13,9 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
+const rowsOf = (ui: UI) => frameOf(ui).split('\n');
+// The last `/subagent` listing's line for a node: the transcript keeps every listing above.
+const lastListing = (ui: UI, label: string) => rowsOf(ui).filter((r) => r.includes(`· ${label} ·`)).at(-1) ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 // A refused command stays in the field to be fixed: this takes it out.
 async function wipe(ui: UI, text: string) { for (let i = 0; i < text.length; i++) ui.backend.press({ name: 'backspace' }); await settle(); }
@@ -32,7 +35,7 @@ async function chat(marks: { mark: string; turns: Parameters<ScriptedModel['scri
   return { model, children, ui };
 }
 
-test('a message to an idle subagent runs a turn of it: the answer is not a row of the session, the row says answered until the watch has read it', async () => {
+test('a message to an idle subagent runs a turn of it: the answer is not a row of the session, the listing says answered until the watch has read it', async () => {
   const { children: [child], ui } = await chat([{ mark: 'TALK-ONE', turns: [[{ text: 'the first reply' }], [{ text: 'the second reply' }]] }]);
   await ask(ui, '/subagent TALK-ONE go');
   await settleUntil(() => frameOf(ui).includes('◆ talk-one-go finished:'));
@@ -41,33 +44,34 @@ test('a message to an idle subagent runs a turn of it: the answer is not a row o
   await ask(ui, '/subagent tell 1 and once more?');
   await settleUntil(() => child!.requests.length === 2);
   expect(frameOf(ui)).toContain('message sent to «talk-one-go»');
-  await settleUntil(() => frameOf(ui).includes('◦ talk-one-go · answered'));
   // Its second answer is its own: the session shows only the first.
   expect(frameOf(ui)).not.toContain('the second reply');
   expect(frameOf(ui).match(/◆ talk-one-go finished:/g)).toHaveLength(1);
   await ask(ui, '/subagent');
-  await settleUntil(() => /1 · talk-one-go · answered/.test(frameOf(ui)));
+  await settleUntil(() => lastListing(ui, 'talk-one-go').includes('answered'));
   // The task is the original one in both requests; the message is a turn of the person's.
   expect(firstUser(child!.requests[1]!)).toBe('TALK-ONE go');
-  // ⏎ on its row opens the watch: the answer is read there, and the row stops saying answered.
+  // ⏎ on its row in the strip opens the watch: the answer is read there, and the listing
+  // stops saying answered.
   await ui.press('down');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('the second reply'));
   expect(frameOf(ui)).toContain('and once more?');
   await ui.press('escape');
   await settle(4);
-  expect(frameOf(ui)).toContain('◦ talk-one-go · idle');
-  expect(frameOf(ui)).not.toContain('◦ talk-one-go · answered');
+  await ask(ui, '/subagent');
+  await settleUntil(() => lastListing(ui, 'talk-one-go').includes('idle'));
+  expect(lastListing(ui, 'talk-one-go')).toContain('idle');
   ui.app.unmount();
 });
 
-test('an answer that lands while its subagent is watched is read there: the row does not say answered afterwards', async () => {
+test('an answer that lands while its subagent is watched is read there: the listing does not say answered afterwards', async () => {
   const { children: [child], ui } = await chat([{ mark: 'SEEN-ONE', turns: [[{ text: 'first' }], [{ hold: true }, { text: 'read as it came' }]] }]);
   await ask(ui, '/subagent SEEN-ONE go');
   await settleUntil(() => frameOf(ui).includes('◆ seen-one-go finished:'));
   await ask(ui, '/subagent tell seen-one-go next please');
   await settleUntil(() => child!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ seen-one-go'));
+  // Its row is in the strip while it works: ⏎ there watches it.
   await ui.press('down');
   await ui.press('return');
   await settle(4);
@@ -76,8 +80,9 @@ test('an answer that lands while its subagent is watched is read there: the row 
   await settle(6);
   await ui.press('escape');
   await settle(4);
-  expect(frameOf(ui)).toContain('◦ seen-one-go · idle');
-  expect(frameOf(ui)).not.toContain('◦ seen-one-go · answered');
+  await ask(ui, '/subagent');
+  await settleUntil(() => lastListing(ui, 'seen-one-go').includes('idle'));
+  expect(lastListing(ui, 'seen-one-go')).toContain('idle');
   ui.app.unmount();
 });
 

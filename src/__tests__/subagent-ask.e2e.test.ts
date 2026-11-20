@@ -298,12 +298,12 @@ test('in a 12-row bottom panel with a draft, the notice line does not squeeze th
   const r = rowsOf(ui);
   const top = chatTop(ui);
   const noticeAt = r.findIndex((l) => l.includes(NOTICE));
-  // The conversation keeps its rows: between the title and the hint row there are at least 4.
-  const hintAt = r.findIndex((l) => l.includes('history · wheel'));
+  // The conversation keeps its rows above the strip: the notice, the field and the hint
+  // row under it are what takes the place below.
   expect(top).toBeGreaterThanOrEqual(0);
-  expect(hintAt - top - 1).toBeGreaterThanOrEqual(4);
-  expect(noticeAt).toBeGreaterThan(hintAt);
+  expect(noticeAt - top - 1).toBeGreaterThanOrEqual(4);
   expect(r.findIndex((l) => l.includes('› draft'))).toBe(noticeAt + 1);
+  expect(r.findIndex((l) => l.includes('history · wheel'))).toBeGreaterThan(noticeAt + 1);
   expect(r.some((l) => l.includes('/subagent TINY-ONE do it'))).toBe(true);
   ui.app.unmount();
 });
@@ -321,7 +321,8 @@ test('/subagent lists a subagent that waits for the answer as waiting', async ()
 });
 
 test('the notice line is a row of the field\'s place: a plan that fit whole gives way to one line when it stands', async () => {
-  const { model, children: [a], ui } = await boot(['PLAN-ONE'], { hold: true, rows: 18, cols: 100 });
+  // 17 rows: the whole plan fits, and the notice row is what tips it to one line.
+  const { model, children: [a], ui } = await boot(['PLAN-ONE'], { hold: true, rows: 17, cols: 100 });
   model.script([{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }], [{ text: 'Planned.' }]);
   await ask(ui, '/subagent PLAN-ONE do it');
   await settleUntil(() => a!.child.held);

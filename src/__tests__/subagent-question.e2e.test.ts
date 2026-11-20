@@ -203,7 +203,6 @@ test('the watch of the subagent draws its question and its keys answer it', asyn
   const { children: [a], ui } = await boot(['QWATCH'], { hold: true as const });
   await ask(ui, '/subagent QWATCH do it');
   await settleUntil(() => a!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ qwatch-do-it'));
   await ui.press('down');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · '));
@@ -232,28 +231,6 @@ test('Esc dismisses the question: the subagent reads the no-answer text', async 
   await settleUntil(() => a!.requests.length === 2);
   expect(results(a!.requests[1])).toEqual([NO_ANSWER]);
   expect(frameOf(ui)).not.toContain(title('qesc-do-it'));
-  ui.app.unmount();
-});
-
-test('with the cursor in the tree rows the question is a notice, not answerable; stopping the subagent ends its wait', async () => {
-  const { children: [a], ui } = await boot(['QSTOP'], { hold: true as const });
-  await ask(ui, '/subagent QSTOP do it');
-  await settleUntil(() => a!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ qstop-do-it'));
-  await ui.press('down'); // the cursor goes to the row
-  a!.release();
-  await settleUntil(() => frameOf(ui).includes('a question from «qstop-do-it» waits — Esc to answer'));
-  expect(frameOf(ui)).not.toContain(title('qstop-do-it'));
-  pause();
-  await ui.type('no');
-  await settle(4);
-  expect(a!.requests.length).toBe(1);
-  await ui.press('x');
-  await ui.press('y');
-  await settleUntil(() => !frameOf(ui).includes('a question from «qstop-do-it»'));
-  await settle(6);
-  expect(frameOf(ui)).not.toContain(title('qstop-do-it'));
-  expect(a!.requests.length).toBe(1); // the wait ended as a stop, not as an answer
   ui.app.unmount();
 });
 

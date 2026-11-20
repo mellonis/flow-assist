@@ -535,7 +535,7 @@
   `this chat`). This chat's own row is its conversation's `status`, so it reads
   `this chat · done` when an answer or a result came while the picker covered the
   chat's end — its own turn's status only (working, waiting, done or nothing), never
-  its tasks': those show in the footer's `N in background`. **The other sessions** show
+  its tasks': those show in the hint row's `N in background`. **The other sessions** show
   on the chat's hint row as `⏸ N` (left on a y/n or a question) and `● N` (put away with
   an answer nobody read; `registry.attention()`), a zero part omitted and nothing
   drawn when both are zero. They sit in the hint row's always-kept sibling cell beside the

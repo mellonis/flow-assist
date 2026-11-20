@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderCommandPanel, renderDiffPanel, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
@@ -437,6 +437,53 @@ test('chat omits the todo block when the plan is empty', async () => {
   handle.unmount();
 });
 
+test('the hint row is the last row inside the box, under the field; the plan and the queue line are above the field', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [],
+    todo: [{ id: 't1', text: 'one', status: 'pending' }],
+    queued: ['a queued line'],
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const hint = rows.findIndex((r) => r.includes('history · wheel'));
+  const field = rows.findIndex((r) => r.includes('send ·'));
+  const queue = rows.findIndex((r) => r.includes('a queued line'));
+  const plan = rows.findIndex((r) => r.includes('▾ plan'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(plan).toBeGreaterThan(0);
+  expect(queue).toBeGreaterThan(plan);
+  expect(field).toBeGreaterThan(queue);
+  expect(hint).toBeGreaterThan(field);
+  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
+  // Nothing of the column is under the hint: every row down to the border carries nothing
+  // but the frame's own sides — the plan, the queue line and the field strip are all above it.
+  for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
+  handle.unmount();
+});
+
+test('during a turn the queue line is above the field and the live status row is the strip\'s last', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [], streaming: true, toolLabel: 'compact', elapsed: 3200,
+    todo: [{ id: 't1', text: 'one', status: 'pending' }],
+    queued: ['a queued line'],
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  // Mid-turn the field's own row offers the queue instead of the send placeholder.
+  const field = rows.findIndex((r) => r.includes('an answer is coming'));
+  const hint = rows.findIndex((r) => r.includes('3s · compact'));
+  const queue = rows.findIndex((r) => r.includes('a queued line'));
+  const plan = rows.findIndex((r) => r.includes('▾ plan'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(plan).toBeGreaterThan(0);
+  expect(queue).toBeGreaterThan(plan);
+  expect(field).toBeGreaterThan(queue);
+  expect(hint).toBeGreaterThan(field);
+  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
+  for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
+  handle.unmount();
+});
+
 test('chat shows the async-command spinner status line while streaming', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
@@ -468,6 +515,70 @@ test('chat footer shows the live background-task count when bg tasks are running
     backend,
   );
   expect(backend.lastFrame).toContain('2 in background');
+  handle.unmount();
+});
+
+test('the bg badge names the ↓ door and counts its rows when this chat has work', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      // The registry-wide count is 0 (a chat of resting children), and the door still has
+      // two rows: the number is the door's, and the key that opens it is named.
+      bgCount: 0,
+      bgDoor: 2,
+    }),
+    backend,
+  );
+  expect(backend.lastFrame).toContain(`${keyGlyph('down')} 2 in background`);
+  expect(backend.lastFrame).not.toContain('waiting');
+  handle.unmount();
+});
+
+test('a waiting subagent says so in warn beside the count', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      // The palette the real app resolves (MODAL_COLOR_DEFAULTS' `warn`); given whole here.
+      theme: { modals: { chat: { warn: 'yellow' } } },
+      bgCount: 2,
+      bgDoor: 2,
+      bgWaiting: 1,
+    }),
+    backend,
+  );
+  const frame = backend.lastFrame;
+  expect(frame).toContain('2 in background · 1 waiting');
+  const rows = frame.split('\n');
+  const at = rows.findIndex((r) => r.includes('1 waiting'));
+  const style = backend.lastBuffer!.get(rows[at]!.indexOf('1 waiting'), at).style as { fg?: string; dim?: boolean };
+  // Something waiting on the person is not greyed with the hint.
+  expect(style.fg).toBe('yellow');
+  expect(style.dim).toBeFalsy();
+  handle.unmount();
+});
+
+test('with no work of this chat the badge stays the plain registry count', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      bgCount: 1,
+      bgDoor: 0,
+    }),
+    backend,
+  );
+  expect(backend.lastFrame).toContain('1 in background');
+  // No door to name: the badge is the count alone. (The row's own `↑↓ history` carries the
+  // glyph, so the door is read by its badge and not by the bare arrow.)
+  expect(backend.lastFrame).not.toContain(`${keyGlyph('down')} 1 in background`);
   handle.unmount();
 });
 
@@ -987,6 +1098,30 @@ test('the strip names the tabs only when both arrows are declared', async () => 
   expect(both.frame).toContain(`${keyGlyph('left')}${keyGlyph('right')} tabs`);
 });
 
+// ONE token, computed once for both looks: a panel that closes on ↑ names the close on
+// its first row, and a hint reading `↑↓ pick` there would hide it. A list of one row has
+// no close to offer — the key does not close it — so the token says nothing.
+test('the move token names the close on a closing panel\'s first row, the same in both looks', async () => {
+  const bottom = (lines: string[]) => lines.findIndex((l) => l.includes('╰'));
+  const top = await stripFrame(stripView({ cursor: 0, upAtTopCloses: true }));
+  const hint = top.lines[bottom(top.lines) - 1]!;
+  expect(hint).toContain(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`);
+  expect(hint).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  // A row deeper the close is gone, and the plain move is said — as for a panel that
+  // never closes on ↑.
+  const deeper = await stripFrame(stripView({ cursor: 2, upAtTopCloses: true }));
+  expect(deeper.frame).toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  expect(deeper.frame).not.toContain(`${keyGlyph('up')} close`);
+  // One row: no move to pick from, and no close to name.
+  const single = await stripFrame(stripView({ rows: [{ id: 'sub:a', text: 'a › writing' }], cursor: 0, upAtTopCloses: true }));
+  expect(single.frame).not.toContain(`${keyGlyph('up')} close`);
+  expect(single.frame).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+  // The window look says the same token: the two cannot disagree.
+  const asWindow = await stripFrame(stripView({ cursor: 0, look: 'window', upAtTopCloses: true }));
+  expect(asWindow.frame).toContain(`${keyGlyph('up')} close · ${keyGlyph('down')} pick`);
+  expect(asWindow.frame).not.toContain(`${keyGlyph('up')}${keyGlyph('down')} pick`);
+});
+
 test('a strip with no rows names only the keys that act', async () => {
   // An empty tab: the picker withholds the rows' keys, so the hint says the way out and
   // the way across, and nothing that would act on no row.
@@ -1325,30 +1460,8 @@ test('a capped string is cut between clusters, never inside one', () => {
 });
 
 
-// The live subagents under the field (ask-children-spec.md (agent tree)): one budget serves what is
-// drawn and what a key may reach.
+// The column's measures, as the chat's keys read them.
 const room = (over: Record<string, unknown> = {}) => chatRoom({ width: 80, height: 24, input: '', ...over });
-const budget = (over: Partial<Parameters<typeof treeBudget>[0]> = {}) => {
-  const r = room();
-  return treeBudget({ boxH: r.boxH, besides: r.besides, planFull: r.planFull, nodes: 9, max: 4, hidden: r.hidden, ...over });
-};
-const treeRowsOf = (...keys: string[]) => keys.map((key) => ({ key, text: `⚙ ${key} · working`, tone: 'work' as const }));
-
-test('treeBudget gives min(max, nodes), nothing when hidden, and keeps four list rows with the whole plan', () => {
-  expect(budget()).toBe(4);
-  expect(budget({ nodes: 2 })).toBe(2);
-  expect(budget({ nodes: 0 })).toBe(0);
-  expect(budget({ max: 0 })).toBe(0);
-  expect(budget({ hidden: true })).toBe(0);
-  // 12 rows: border and padding 4, hint 2, field 2, list 4; the block's gap takes one more.
-  const tight = { boxH: 12, besides: 4, planFull: 0 };
-  expect(budget({ ...tight, boxH: 13 })).toBe(0);
-  expect(budget({ ...tight, boxH: 14 })).toBe(1);
-  expect(budget({ ...tight, boxH: 16 })).toBe(3);
-  // The whole plan block counts before any tree row does.
-  expect(budget({ ...tight, boxH: 17, planFull: 3 })).toBe(0);
-  expect(budget({ ...tight, boxH: 18, planFull: 3 })).toBe(1);
-});
 
 test('chatRoom says hidden for a question, a y/n, /context, the pager, the picker and a panel', () => {
   expect(room().hidden).toBe(false);
@@ -1359,73 +1472,17 @@ test('chatRoom says hidden for a question, a y/n, /context, the pager, the picke
   expect(room({ panel: {} }).hidden).toBe(true);
 });
 
-test('the chat draws the tree as the last block: one line per row, the cursor row inverted, the stop question in its place, the keys in the hint row', async () => {
-  const rows = treeRowsOf('a', 'b');
-  const draw = async (tree: unknown) => {
-    const backend = new TestBackend(80, 24);
-    const handle = await render(h(renderChatModal, { ...baseChat, tree } as never), backend);
-    const frame = backend.lastFrame ?? '';
-    handle.unmount();
-    return frame.split('\n');
-  };
-  const quiet = await draw({ rows, more: 0, cursor: null, ask: null });
-  const at = quiet.findIndex((l) => l.includes('⚙ a · working'));
-  expect(at).toBeGreaterThan(quiet.findIndex((l) => l.includes('› ')));
-  expect(quiet[at + 1]).toContain('⚙ b · working');
-  // The block is its rows alone: nothing under the last one.
-  expect(quiet.slice(at + 2).join('').replace(/[│╰╯─\s]/g, '')).toBe('');
-  expect(quiet.join('\n')).not.toContain('x stop');
-  expect(quiet.join('\n')).toContain('history');
-  const onB = await draw({ rows, more: 0, cursor: 'b', ask: null });
-  expect(onB.join('\n')).toContain('↑↓ move · x stop · Esc back');
-  expect(onB.join('\n')).not.toContain('history');
-  expect(onB[onB.findIndex((l) => l.includes('⚙ b · working')) + 1] ?? '').not.toContain('x stop');
-  const asking = await draw({ rows, more: 0, cursor: 'b', ask: 'stop b? y yes · n no' });
-  const q = asking.findIndex((l) => l.includes('stop b? y yes · n no'));
-  expect(q).toBe(asking.findIndex((l) => l.includes('⚙ a · working')) + 1);
-  expect(asking.join('\n')).not.toContain('⚙ b · working');
-});
-
-test('the cursor row is drawn inverse, the others are not, and the block is out of every selection', async () => {
-  const backend = new TestBackend(80, 24);
-  const rows = treeRowsOf('a', 'b');
-  const handle = await render(h(renderChatModal, { ...baseChat, tree: { rows, more: 0, cursor: 'b', ask: null } } as never), backend);
-  const lines = backend.lastFrame!.split('\n');
-  const y = (t: string) => lines.findIndex((l) => l.includes(t));
-  const grid = (backend as unknown as { lastBuffer: Grid }).lastBuffer;
-  const inverseOn = (row: number) => { for (let x = 0; x < grid.width; x++) { const c = grid.get(x, row); if (c.style.inverse && c.char.trim()) return true; } return false; };
-  expect(inverseOn(y('⚙ b · working'))).toBe(true);
-  expect(inverseOn(y('⚙ a · working'))).toBe(false);
-  // A selection over the rows takes nothing of them.
-  const text = handle.select({ x: 0, y: y('⚙ a · working') }, { x: 79, y: y('⚙ b · working') });
-  expect(text).not.toContain('working');
-  handle.unmount();
-});
-
-test('the tree is not drawn under a y/n, and a row is cut to one line', async () => {
-  const backend = new TestBackend(40, 24);
-  const long = [{ key: 'a', text: `⚙ ${'w'.repeat(80)}`, tone: 'work' as const }];
-  const handle = await render(h(renderChatModal, { ...baseChat, width: 40, tree: { rows: long, more: 0, cursor: null, ask: null } } as never), backend);
-  const frame = backend.lastFrame ?? '';
-  handle.unmount();
-  expect(frame.split('\n').filter((l) => l.includes('wwww'))).toHaveLength(1);
-  const b2 = new TestBackend(80, 60);
-  const h2 = await render(h(renderChatModal, { ...baseChat, height: 60, pendingConfirm: { name: 'run_command', args: '{}' }, tree: { rows: treeRowsOf('a'), more: 0, cursor: null, ask: null } } as never), b2);
-  expect(b2.lastFrame).not.toContain('⚙ a · working');
-  h2.unmount();
-});
-
 // A watched child (ask-children-spec.md (watching a child)): its rows in the list's place under a
 // breadcrumb title, the hint row naming what it does and the keys, and none of the session's
-// plan, queue, field, completion or tree.
-test('the chat draws a watched child: breadcrumb title, its rows, state and keys in the hint row, no field, tree or plan', async () => {
+// plan, queue, field or completion.
+test('the chat draws a watched child: breadcrumb title, its rows, state and keys in the hint row, no field or plan', async () => {
   const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
   const rows = chatRows([{ role: 'user', content: 'child task' }, { role: 'assistant', content: 'child words' }], o);
   const draw = async (watch: Record<string, unknown>) => {
     const backend = new TestBackend(100, 24);
     const handle = await render(h(renderChatModal, {
       ...baseChat, width: 100, messages: [{ role: 'user', content: 'session words' }], queued: ['queued thing'], input: 'draft text',
-      todo: [{ id: '1', text: 'session plan item', status: 'pending' }], tree: { rows: treeRowsOf('a'), more: 0, cursor: null, ask: null },
+      todo: [{ id: '1', text: 'session plan item', status: 'pending' }],
       watch: { path: ['outer', 'inner'], rows, state: '⚙ read_file(a.ts)', ended: false, ask: null, ...watch },
     } as never), backend);
     const frame = backend.lastFrame ?? '';
@@ -1436,7 +1493,7 @@ test('the chat draws a watched child: breadcrumb title, its rows, state and keys
   expect(live).toContain('╭─ ƒ Flow Assist · outer › inner');
   expect(live).toContain('child words');
   expect(live).not.toContain('session words');
-  for (const hidden of ['draft text', 'queued thing', 'session plan item', '⚙ a · working', 'history']) expect(live).not.toContain(hidden);
+  for (const hidden of ['draft text', 'queued thing', 'session plan item', 'history']) expect(live).not.toContain(hidden);
   const hint = live.split('\n').find((l) => l.includes('⚙ read_file(a.ts)'))!;
   expect(hint).toMatch(/⚙ read_file\(a\.ts\)\s+x stop · Esc back/);
   const asking = await draw({ ask: 'stop inner? y yes · n no' });

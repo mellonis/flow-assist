@@ -17,7 +17,6 @@
 import { askRows, askSubmitRows, askTabs, type AskRow, type AskState, type AskSubmitRow, type AskTab } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
-import type { TreeRow } from '../assistant/agent-tree.js';
 import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
 import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
@@ -36,6 +35,9 @@ import { formatDuration } from '../assistant/duration.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
+// The inline piece of ONE line of text (the `Span` named below is the local type of a
+// laid-out markdown span, not the component).
+import { Span as TextSpan } from '@flowtty/react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import { diffPanelLayout } from '../runtime/panel-layout.js';
 import type { CompletionList } from '../config/commandline.js';
@@ -1624,21 +1626,19 @@ export interface ChatRoomInput {
   // `/diff`: the panel's data (null — closed). Where the split stands is measured from
   // the same numbers the render uses, so the keys cannot act on a panel that is not drawn.
   diffPanel?: DiffPanelView | null;
-  // How many rows the tree draws, as `renderChatModal` had them from `treeBudget`: both
-  // the plan's shape and the split's height give way to them.
-  treeRows?: number;
   // Only the completion list's height is read: its rows sit in the field's place.
   completion?: { list?: { height: number } | null } | null;
 }
 
 // The measures of the chat's column, in one place so what is drawn and what a key may
-// act on cannot disagree. `besides` is everything in the column but the conversation, the
-// plan and the tree — the error, the hint row, the queue line, the field's place — each
-// with the gap above it (the frame's border and padding take 4 rows more); `planFull` is
-// the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, a watched
-// child, the picker or a command panel takes the column, and the tree is not drawn.
+// act on cannot disagree. `besides` is everything in the column but the conversation and
+// the plan — the error, the queue line, the field strip (the field's place and the hint
+// row under it, no gap between them) — each child with the gap above it (the frame's
+// border and padding take 4 rows more); `planFull` is the rows of the whole plan block.
+// `hidden`: a question, a y/n, `/context`, the pager, a watched child, the picker or a
+// command panel takes the column.
 export function chatRoom(p: ChatRoomInput) {
-  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null, diffPanel = null, treeRows = 0 } = p;
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null, diffPanel = null } = p;
   const fullscreen = p.fullscreen ?? false;
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = chatBoxHeight(height, fullscreen);
@@ -1667,40 +1667,22 @@ export function chatRoom(p: ChatRoomInput) {
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
     : visible.length + (askNotice ? 1 : 0) + (completion?.list?.height ?? 0);
-  const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
+  // The field and the hint under it are ONE child of the column, so they share one gap
+  // above the strip; the hint's own row is inside it.
+  const fieldStrip = fieldPlace + 1;
+  const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, queued.length ? 1 : 0, fieldStrip]
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
   const hidden = !!(pager || watch || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
-  // The tree's block takes its rows and the gap above them.
-  const treeBlock = treeRows > 0 ? 1 + treeRows : 0;
-  const planShape = planFit(boxH - 4, besides + treeBlock, planFull);
+  const planShape = planFit(boxH - 4, besides, planFull);
   // `/diff`'s split. The rows it may use are the content less the strip that stays full
   // width below it — the error, the hint row, the queue line and the field's place (each
-  // with its gap), and the plan and the tree as they are drawn — less the one gap the
-  // split's own row brings. `fieldRows: 0`: the field is in that strip, not the split's.
-  const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0) + treeBlock;
+  // with its gap), and the plan as it is drawn — less the one gap the split's own row
+  // brings. `fieldRows: 0`: the field is in that strip, not the split's.
+  const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0);
   const split = diffPanel ? diffPanelLayout({ width: boxW - 4, height: Math.max(0, boxH - 4 - stripRows - 1), fieldRows: 0, minChatRows: 4 }) : null;
   return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, planShape, split, hidden };
 }
-
-// The conversation list keeps at least this many rows before any tree row is drawn.
-const TREE_LIST_MIN = 4;
-
-// How many tree rows the column has room for: `min(max, nodes)` reduced until the
-// conversation list keeps four rows with the whole plan block counted — the tree gives way
-// before the plan does. The block's gap above is part of what it reserves; the block has
-// no line of its own besides the rows, the stop question taking the cursor row's place
-// and the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are
-// `chatRoom`'s. The chat draws this many rows, and its keys use the same geometry, with
-// the nodes read at the key (ask-children-spec.md (agent tree)).
-export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
-  if (hidden || max <= 0 || nodes <= 0) return 0;
-  const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;
-  return Math.max(0, Math.min(max, nodes, free - 1));
-}
-
-// The tree as `renderChatModal` draws it (`treeRows`' rows, then the cursor and the question).
-export interface TreeView { rows: TreeRow[]; more: number; cursor: string | null; ask: string | null }
 
 export function renderChatModal({
   width,
@@ -1744,6 +1726,8 @@ export function renderChatModal({
   onViewFail,
   completion = null,
   bgCount = 0,
+  bgDoor = 0,
+  bgWaiting = 0,
   waitingElsewhere = 0,
   unreadElsewhere = 0,
   contextBadge = '',
@@ -1767,14 +1751,9 @@ export function renderChatModal({
   panel = null,
   diffPanel = null,
   model,
-  tree = null,
   hover = false,
   onPickRow,
 }: {
-  // The live subagents and tasks of the conversation, as rows under the field (null — none).
-  // `cursor` is the key of the row the cursor is on (null — it is in the field), `ask` the
-  // stop question once `x` was pressed. The rows are what `treeBudget` left them.
-  tree?: TreeView | null;
   // The backend reports hover: what a click acts on is underlined under the pointer.
   hover?: boolean;
   // A click on a row of the session picker or a command panel: the cursor goes there,
@@ -1881,6 +1860,14 @@ export function renderChatModal({
   onViewFail?: (kind: string, why: string) => void;
   completion?: Completion | null;
   bgCount?: number;
+  // This chat's own work rows, the ones the `↓` door opens (`workRowsOf` in the assistant
+  // plugin — the same walk the key reads), and how many of THOSE ROWS wait on the person:
+  // the strip's own `asking` (`offeredWithin`), so a question a task put to its parent's
+  // chain is not counted, and a shell waits on no one. While the door has rows the badge
+  // counts them and names the key: a chat of resting children still has a door, and the
+  // registry-wide `bgCount` would say 0.
+  bgDoor?: number;
+  bgWaiting?: number;
   // Other sessions of this host that wait for an answer (`⏸`) and ones put away with an
   // answer nobody read (`●`), drawn beside the badges, which no state of the hint hides.
   waitingElsewhere?: number;
@@ -1937,13 +1924,7 @@ export function renderChatModal({
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
   const props = { width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion, diffPanel };
   const base = chatRoom(props);
-  // The tree under the field: what budget leaves it, and the rows that block takes with
-  // its gap — the plan gives way to it only after the list's four rows are safe.
-  const treeShown = tree && !base.hidden ? tree.rows.slice(0, treeBudget({ boxH: base.boxH, besides: base.besides, planFull: base.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
-  // One measure with the tree counted: the plan's shape and `/diff`'s split both give way
-  // to its rows.
-  const room = treeShown.length ? chatRoom({ ...props, treeRows: treeShown.length }) : base;
-  const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
+  const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = base;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
   // The field's own text, a token among it drawn as an attachment. Not dim: in the field
@@ -1963,16 +1944,14 @@ export function renderChatModal({
   const ghost = atEnd ? completion?.ghost ?? '' : '';
   const label = atEnd ? completion?.label ?? '' : '';
   const others = atEnd ? completion?.others ?? [] : [];
-  // The cursor is in the rows: the hint row names their keys.
-  const treeKeys = treeShown.length > 0 && tree!.cursor !== null;
-  const planShape = room.planShape;
+  const planShape = base.planShape;
   const oneLine = planShape === 'line' ? planLine(planList) : null;
   // The chat's own name, with the model it runs after it; what is on screen follows
   // after ` · `, and the whole title is cut to the border, never wrapped.
   const chatName = `${ASSISTANT_MARK} Flow Assist${model ? ` (${model})` : ''}`;
   // `/diff`'s split: where the panel stands. A panel the layout gave no rows
   // (`diff.height === 0`) is not drawn — it stays open and comes back when room does.
-  const split = room.split;
+  const split = base.split;
   const diffShown = !!split && (split.mode === 'side' || split.diff.height > 0);
   // Side by side the conversation's rows are laid out at its half, less the list's
   // scrollbar; the field strip below keeps the chat's full width. The panel's rows are
@@ -1998,9 +1977,24 @@ export function renderChatModal({
           palette: m,
           // The body hears PgUp/PgDn and the wheel while the chat has the keyboard and
           // nothing stands in the conversation's place.
-          scroll: { isActive: !!focused && !pager && !watch && !room.hidden },
+          scroll: { isActive: !!focused && !pager && !watch && !base.hidden },
         }))
     : null;
+  // The background badge of the hint row: the `↓` door and the number of rows it opens
+  // while this chat has work (the same walk the key reads), the registry-wide count
+  // otherwise, and `· N waiting` while a row of the door waits on the person (`bgWaiting`,
+  // the strip's own `asking`). The whole badge is drawn in the warn colour then, its count
+  // with it, bright: a thing waiting on a person is not a hint about a key, and it must
+  // not be greyed with the rest of the row.
+  const bgShown = bgDoor > 0 ? bgDoor : bgCount;
+  const bgBadge = bgShown > 0
+    ? `${bgDoor > 0 ? `${keyGlyph('down')} ` : ''}${bgShown} in background${bgWaiting > 0 ? ` · ${bgWaiting} waiting` : ''}`
+    : '';
+  // The hint row's own keys, the badge appended to them as a span. Said apart from the
+  // badge because the hint can stand for a status instead (`Esc stops`, a notice), and
+  // neither of those ends with the badge.
+  const hintKeys = [`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
+    imagesOn && `${CAP.image} image`, `${CAP.auto} auto`].filter(Boolean).join(' · ');
   // The conversation and whatever stands in its place, in a column of their own: the
   // split stands beside them, and the pager keeps their half. One parent whether or not
   // the panel is open — a list moved to another parent is mounted anew, and `/diff`
@@ -2071,84 +2065,6 @@ export function renderChatModal({
       },
       chatRow,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
-      // The hint on the left, how full the model's context is on the right — it stays
-      // put while the hint changes, and turns yellow when it is time to /compact.
-      // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
-      pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
-      // A watched child: what it does (or the stop question) on the left, the keys on the
-      // right; a y/n that waits elsewhere is one line above, and `x stop` is not offered
-      // while a y/n of the node stands (a `y` means one thing).
-      watch ? h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
-        watch.notice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, watch.notice) : null,
-        h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
-          h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-            h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
-          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
-      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
-      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-      (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
-        // Working: what is happening NOW is the bright part. A tool that is running
-        // pulses through the accent colours; with none running the model is either
-        // thinking (waiting for its first token, reasoning, working out the next tool
-        // call) or writing (its text is arriving) — never the name of the last tool.
-        // The seconds are that running thing's, not the turn's: a turn that runs a
-        // build sat at `3m 12s`, which says nothing about what is happening now. What
-        // the turn has cost so far stands beside them, when the provider says.
-        ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
-            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${formatDuration(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
-            toolLabel
-              // `Shimmer` takes the label as a string and colours it per character, so
-              // it is the label itself that is handed over, not a styled child.
-              ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
-              // No tool: the request's own word, with the tool's shimmer — the colour
-              // says which phase, magenta while the model thinks, the assistant's
-              // accent while its text arrives.
-              : h(Box, { overflow: 'hidden' }, h(Shimmer, {
-                  color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
-                  highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
-                  children: `${verb || VERBS[0]}…`,
-                })),
-            stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
-        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint && !treeKeys) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
-        armedHint
-          ? armedHint
-          : escArmed
-          ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
-          : treeKeys
-          ? `${CAP.upDown} move · x ${treeShown.find((r) => r.key === tree!.cursor)?.ended ? 'dismiss' : 'stop'} · ${CAP.esc} back`
-          : emptyNotice
-              ? `⚠ ${emptyNotice}`
-              // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
-              // and a hint that has been there all along must not be the one to fall
-              // off for a newcomer. The mode itself is stated beside the row, not in
-              // it, so nothing about the mode is lost to the cut.
-              // A hint for an action nobody has a key for is not shown at all — a key
-              // on screen is an instruction, and `config.keys.details: []` disables it.
-              // In shell mode the row starts with the shell's directory — where the
-              // command will run — cut from the left when long, so its tail stays; the
-              // field's own row says what ⏎ does there, this one the other keys.
-              : bangLevel && shellCwd
-              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
-              // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
-              // names them instead of the history it does not walk here. A click folds
-              // too, and the row says so: a fold a person finds by clicking needs no
-              // manual. With the field offering `⏎ continue` after a limit, ⏎ is the
-              // field's and is not a fold.
-              // A y/n, a question or the `/context` panel takes the keys, and the
-              // panel's keys are not offered then.
-              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
-              ? (continueOffer
-                ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
-                : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
-              : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
-                  imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
-      waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
-        waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
-        unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
-      // A sibling of the hint, not part of it: the left cell is the hint OR the status
-      // of a running turn, and the mode has to stay on screen through both.
-      autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
-      contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. In a chat
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
@@ -2190,86 +2106,159 @@ export function renderChatModal({
               tail ? h(Text, { dim: true, wrap: 'truncate' }, tail) : null);
           })()
         : null,
-      // The input field group (the y/n confirm block or the multiline input box). It
-      // never shrinks: in a small panel the plan gives way (`planFit`), the field and
-      // its hint keep their rows. Not drawn under the pager.
-      pager || (watch && !confirmAsk && !watch.question) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
-        pendingQuestion
-          ? renderAsk(pendingQuestion, m.bg, wrap)
-          : watch?.question
-          ? renderAsk(watch.question, m.bg, wrap)
-          : contextPanel
-          ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
-          : confirmAsk
-          ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
-              h(Text, { bold: true, color: 'yellow' }, confirmAsk.title),
-              confirmAsk.command != null
-                ? h(Text, { wrap: 'wrap' }, confirmAsk.command)
-                : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
-              confirmAsk.input != null ? h(Text, { dim: true, wrap: 'wrap' }, confirmAsk.input) : null,
-              h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
-          // The field is where the person types — its caret, prompt and placeholder are
-          // not text to copy, and a drag over it must not pick them up.
-          : h(Box, { flexDirection: 'column', width: '100%' },
-              askNotice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, askNotice) : null,
-              completion?.list ? renderCompletionList(completion.list, boxW - 4) : null,
-              h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
-              visible.map((row, i) => {
-                // The prompt marks the field's first line; it dims while an answer is
-                // coming, when ⏎ queues instead of sending. A non-zero bang level swaps
-                // both the glyph and the colour — `! ` or `‼ ` in m.shell, the same
-                // colour at both levels — so the field itself says what Enter will do,
-                // the way Claude Code's bash mode does. Every glyph is exactly GUTTER
-                // (2) columns wide: `‼` (U+203C) is one cell (`stringWidth`), so it
-                // takes a trailing space of its own, same as `! `, to line up a
-                // wrapped command's continuation rows under the first.
-                const bangGlyph = bangLevel ? `${runMark(bangLevel === 2)} ` : '› ';
-                const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
-                // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
-                // its row; a collapsed one instead is how "two newlines" would vanish.
-                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, row.before ? typed(row.before, row.start, 'b') : h(Text, { wrap: 'truncate' }, ''));
-                // The caret sits ON the first suggested character, as a shell's
-                // autosuggestion does, so what was typed and what is offered read as one
-                // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the
-                // other candidates follow, and ⇥ says which key takes them.
-                const caretAt = row.start + row.before.length;
-                const ghostHead = ghost ? nextGrapheme(ghost, 0) : 0;
-                const offer = ghost
-                  ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost.slice(0, ghostHead)),
-                     h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(ghostHead))]
-                  : [h(Text, { key: 'c', inverse: true, ...(tokens.some((t) => t.start <= caretAt && caretAt < t.end) ? { color: m.accent } : {}) }, row.caret)];
-                return h(Box, { key: i, flexDirection: 'row' },
-                  prompt,
-                  ...(row.before ? typed(row.before, row.start, 'b') : []),
-                  ...offer,
-                  // The offered candidate's label (a session's title beside its
-                  // number): said, dim, never part of the text.
-                  label ? h(Text, { wrap: 'truncate', dim: true }, ` ${redactSecrets(label)}`) : null,
-                  others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
-                  input === ''
-                    ? h(Text, { wrap: 'truncate', dim: true }, bangLevel === 2
-                        ? ` ${CAP.enter} run with the terminal · ${CAP.backspace} on empty back to !`
-                        : bangLevel === 1
-                        ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
-                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} ${continueOffer ? 'continue' : 'send'} · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
-                    // Text after the caret is the person's own text — drawn like the rest
-                    // of it, never the placeholder's dim, or it would grey out whenever
-                    // the caret moved back.
-                    : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
-              }))),
+      // The field strip: the field (or the y/n or the question that stands in its place)
+      // and, under it, the hint that says what its keys do. ONE child of the column, with
+      // no gap between the two — the column's gap separates pieces, never a field from its
+      // own legend. The strip never shrinks: in a small panel the plan gives way
+      // (`planFit`), the field and its hint keep their rows. The field is not drawn under
+      // the pager; the hint is.
+      h(Box, { key: 'field-strip', flexDirection: 'column', width: '100%', flexShrink: 0 },
+        pager || (watch && !confirmAsk && !watch.question) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+          pendingQuestion
+            ? renderAsk(pendingQuestion, m.bg, wrap)
+            : watch?.question
+            ? renderAsk(watch.question, m.bg, wrap)
+            : contextPanel
+            ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
+            : confirmAsk
+            ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
+                h(Text, { bold: true, color: 'yellow' }, confirmAsk.title),
+                confirmAsk.command != null
+                  ? h(Text, { wrap: 'wrap' }, confirmAsk.command)
+                  : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
+                confirmAsk.input != null ? h(Text, { dim: true, wrap: 'wrap' }, confirmAsk.input) : null,
+                h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
+            // The field is where the person types — its caret, prompt and placeholder are
+            // not text to copy, and a drag over it must not pick them up.
+            : h(Box, { flexDirection: 'column', width: '100%' },
+                askNotice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, askNotice) : null,
+                completion?.list ? renderCompletionList(completion.list, boxW - 4) : null,
+                h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
+                visible.map((row, i) => {
+                  // The prompt marks the field's first line; it dims while an answer is
+                  // coming, when ⏎ queues instead of sending. A non-zero bang level swaps
+                  // both the glyph and the colour — `! ` or `‼ ` in m.shell, the same
+                  // colour at both levels — so the field itself says what Enter will do,
+                  // the way Claude Code's bash mode does. Every glyph is exactly GUTTER
+                  // (2) columns wide: `‼` (U+203C) is one cell (`stringWidth`), so it
+                  // takes a trailing space of its own, same as `! `, to line up a
+                  // wrapped command's continuation rows under the first.
+                  const bangGlyph = bangLevel ? `${runMark(bangLevel === 2)} ` : '› ';
+                  const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
+                  // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
+                  // its row; a collapsed one instead is how "two newlines" would vanish.
+                  if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, row.before ? typed(row.before, row.start, 'b') : h(Text, { wrap: 'truncate' }, ''));
+                  // The caret sits ON the first suggested character, as a shell's
+                  // autosuggestion does, so what was typed and what is offered read as one
+                  // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the
+                  // other candidates follow, and ⇥ says which key takes them.
+                  const caretAt = row.start + row.before.length;
+                  const ghostHead = ghost ? nextGrapheme(ghost, 0) : 0;
+                  const offer = ghost
+                    ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost.slice(0, ghostHead)),
+                       h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(ghostHead))]
+                    : [h(Text, { key: 'c', inverse: true, ...(tokens.some((t) => t.start <= caretAt && caretAt < t.end) ? { color: m.accent } : {}) }, row.caret)];
+                  return h(Box, { key: i, flexDirection: 'row' },
+                    prompt,
+                    ...(row.before ? typed(row.before, row.start, 'b') : []),
+                    ...offer,
+                    // The offered candidate's label (a session's title beside its
+                    // number): said, dim, never part of the text.
+                    label ? h(Text, { wrap: 'truncate', dim: true }, ` ${redactSecrets(label)}`) : null,
+                    others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
+                    input === ''
+                      ? h(Text, { wrap: 'truncate', dim: true }, bangLevel === 2
+                          ? ` ${CAP.enter} run with the terminal · ${CAP.backspace} on empty back to !`
+                          : bangLevel === 1
+                          ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
+                          : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} ${continueOffer ? 'continue' : 'send'} · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
+                      // Text after the caret is the person's own text — drawn like the rest
+                      // of it, never the placeholder's dim, or it would grey out whenever
+                      // the caret moved back.
+                      : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
+                }))),
+        ),
+        // The last row of the field strip: the field keeps the keys, this says what they are.
+        // The hint on the left, how full the model's context is on the right — it stays
+        // put while the hint changes, and turns yellow when it is time to /compact.
+        // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
+        pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
+        // A watched child: what it does (or the stop question) on the left, the keys on the
+        // right; a y/n that waits elsewhere is one line above, and `x stop` is not offered
+        // while a y/n of the node stands (a `y` means one thing).
+        watch ? h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+          watch.notice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, watch.notice) : null,
+          h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+            h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+              h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
+            h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
+        h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+        h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+        (!escArmed && !armedHint && (streaming || toolLabel))
+          // Working: what is happening NOW is the bright part. A tool that is running
+          // pulses through the accent colours; with none running the model is either
+          // thinking (waiting for its first token, reasoning, working out the next tool
+          // call) or writing (its text is arriving) — never the name of the last tool.
+          // The seconds are that running thing's, not the turn's: a turn that runs a
+          // build sat at `3m 12s`, which says nothing about what is happening now. What
+          // the turn has cost so far stands beside them, when the provider says.
+          ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
+              h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${formatDuration(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
+              toolLabel
+                // `Shimmer` takes the label as a string and colours it per character, so
+                // it is the label itself that is handed over, not a styled child.
+                ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
+                // No tool: the request's own word, with the tool's shimmer — the colour
+                // says which phase, magenta while the model thinks, the assistant's
+                // accent while its text arrives.
+                : h(Box, { overflow: 'hidden' }, h(Shimmer, {
+                    color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+                    highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
+                    children: `${verb || VERBS[0]}…`,
+                  })),
+              stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
+          : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+          armedHint
+            ? armedHint
+            : escArmed
+            ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
+            : emptyNotice
+                ? `⚠ ${emptyNotice}`
+                // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
+                // and a hint that has been there all along must not be the one to fall
+                // off for a newcomer. The mode itself is stated beside the row, not in
+                // it, so nothing about the mode is lost to the cut.
+                // A hint for an action nobody has a key for is not shown at all — a key
+                // on screen is an instruction, and `config.keys.details: []` disables it.
+                // In shell mode the row starts with the shell's directory — where the
+                // command will run — cut from the left when long, so its tail stays; the
+                // field's own row says what ⏎ does there, this one the other keys.
+                : bangLevel && shellCwd
+                ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
+                // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
+                // names them instead of the history it does not walk here. A click folds
+                // too, and the row says so: a fold a person finds by clicking needs no
+                // manual. With the field offering `⏎ continue` after a limit, ⏎ is the
+                // field's and is not a fold.
+                // A y/n, a question or the `/context` panel takes the keys, and the
+                // panel's keys are not offered then.
+                : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
+                ? (continueOffer
+                  ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
+                  : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
+                // The badge ends the row as a span, so the hint is ONE paragraph: measured
+                // and cut as a single line, the string around it untouched. With nothing
+                // to say the row is that string alone: a second child — even an empty
+                // string — leaves the row blank (flowtty lays text and children apart).
+                : [hintKeys, ...(bgBadge ? [h(TextSpan, bgWaiting > 0 ? { color: m.warn, dim: false } : {}, ` · ${bgBadge}`)] : [])])),
+        waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
+          waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
+          unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
+        // A sibling of the hint, not part of it: the left cell is the hint OR the status
+        // of a running turn, and the mode has to stay on screen through both.
+        autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
+        contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null)
       ),
-      // The live subagents and tasks, the last block of the column: one line per row, the
-      // cursor's row inverted as a picker's is, or, once `x` was pressed, replaced by the stop
-      // question in the warn colour. Chrome, not conversation: out of every selection.
-      treeShown.length ? h(Box, { key: 'tree', flexDirection: 'column', width: '100%', flexShrink: 0, selectable: false },
-        treeShown.map((r) => {
-          const at = r.key !== '' && r.key === tree!.cursor;
-          const asking = at && tree!.ask !== null;
-          return h(Text, {
-            key: r.key || 'more', wrap: 'truncate',
-            ...(asking ? { color: m.warn, bold: true } : at ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
-          }, asking ? cutStep(tree!.ask!, wrap) : r.text);
-        })) : null,
       // `/diff` on a terminal too narrow to stand beside the conversation: the panel
       // takes its rows below the field strip, the column above keeps the rest. Its last
       // row is the frame's own bottom, so it is the last child.
@@ -2447,6 +2436,9 @@ export type CommandPanelView = {
   look?: 'window' | 'bottom';
   // The strip's tabs, drawn under its top border when there are any.
   tabs?: Array<{ label: string; current: boolean }>;
+  // ↑ on the first row is the way out (`PanelSpec.upAtTopCloses`): the hint names the
+  // close there instead of only the move.
+  upAtTopCloses?: boolean;
 };
 
 // A strip is exactly this tall: the frame's two rows, one for the tab strip, eight for the
@@ -2513,14 +2505,22 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // declared under another label still walks the tabs.
   const keys = panel.keys;
   const tabArrows = tabs.length > 0 && keys.some((k) => k.cap === keyGlyph('left')) && keys.some((k) => k.cap === keyGlyph('right'));
+  // The move token, ONE for both looks: a panel that closes on ↑ says the close on its
+  // first row, and the plain move everywhere else. A list of one row has no move to pick
+  // from and no close to offer, so there is no token at all.
+  const pickToken = panel.rows.length > 1
+    ? (panel.upAtTopCloses && panel.cursor === 0
+      ? `${keyGlyph('up')} close · ${keyGlyph('down')} pick`
+      : `${CAP.upDown} pick`)
+    : null;
   const hint = strip
     ? [
         `${CAP.esc} ${panel.nested ? 'back' : 'close'}`,
         ...(tabArrows ? [`${CAP.leftRight} tabs`] : []),
-        ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []),
+        ...(pickToken ? [pickToken] : []),
         ...keys.filter((k) => !tabArrows || (k.cap !== keyGlyph('left') && k.cap !== keyGlyph('right'))).map((k) => `${k.cap} ${k.label}`),
       ].join(' · ')
-    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
+    : [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(pickToken ? [pickToken] : []), ...keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
   // The strip's tabs, ONE row under the top border: the wizard's own tab row, so the two
   // strips look the same.
   const tabStrip = tabRows ? tabRow(tabs, inner, 'strip') : null;

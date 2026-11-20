@@ -39,8 +39,8 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { setConfigValue } from '../config/load.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
-import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { agentsPanelRows, stopQuestion } from '../assistant/agent-tree.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -65,7 +65,7 @@ import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type Histor
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelRow, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
-import { workRows, type WorkJob, type WorkSub } from '../assistant/work-panel.js';
+import { workRows, type WorkJob, type WorkRow, type WorkSub } from '../assistant/work-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
@@ -181,15 +181,11 @@ function jobMessages(job: ShellJob): ChatMsg[] {
   return [{ role: 'shell', content: '', command: job.command, views: [{ kind: 'console', data, phase: job.running ? 'live' : 'done', startedAt: job.startedAt, callId: `job#${job.id}`, turn: 0, rows }] } as unknown as ChatMsg];
 }
 
-// The tree cursor's state (ask-children-spec.md (agent tree)).
-interface TreeSel { at: string | null; ask: boolean }
-const NO_TREE_SEL: TreeSel = { at: null, ask: false };
 // The child the chat is watching (ask-children-spec.md (watching a child)): `path` the labels from the
 // session's child down to it; `ended` how it ended (null while it runs) and `final` its
-// snapshot at that moment; `back` the tree row the cursor stood on when the watch began;
-// `ask` whether the stop question is up, `stopped` whether the person answered it with a yes
-// (a node stopped before it began has no end of its own to word).
-interface Watching { node: Conversation; path: string[]; ended: string | null; final: ConversationSnapshot | null; back: string | null; ask: boolean; stopped: boolean }
+// snapshot at that moment; `ask` whether the stop question is up, `stopped` whether the
+// person answered it with a yes (a node stopped before it began has no end of its own to word).
+interface Watching { node: Conversation; path: string[]; ended: string | null; final: ConversationSnapshot | null; ask: boolean; stopped: boolean }
 
 export function buildAssistantPlugin({ renders, config, make }: BuildAssistantParams): Plugin {
   return make('assistant', {
@@ -393,7 +389,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const askGuard = ui.useRef(createAskGuard());
           const ownSeenRef = ui.useRef<unknown>(null);
           const ownArmedAt = ui.useRef<number | null>(null);
-          // The conversation's own question that ended a watch, or came over the tree cursor,
+          // The conversation's own question that ended a watch, or came over a holder,
           // takes no key for the pause from its appearing (ask-children-spec.md (subagent y/n)).
           // The pause runs from the block's draw, which the grace may put a sentence's while
           // after the arrival: `questionOverHolder` records that it took a holder's keys over
@@ -624,16 +620,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [bangLevel, setBangLevelState] = ui.useState<0 | 1 | 2>(0);
           const bangLevelRef = ui.useRef(bangLevel);
           const setBangLevel = (v: 0 | 1 | 2) => { bangLevelRef.current = v; setBangLevelState(v); };
-          // The cursor in the tree rows under the field (ask-children-spec.md (agent tree)): `at` is the
-          // key of the node it stands on (null — it is in the field), `ask` whether the stop
-          // question for that node is up. Cleared whenever the rows are not drawn.
-          const [, setTreeSelState] = ui.useState<TreeSel>(NO_TREE_SEL);
-          const treeSelRef = ui.useRef<TreeSel>(NO_TREE_SEL);
-          const setTreeSel = (v: TreeSel) => { treeSelRef.current = v; setTreeSelState(v); };
-          // The cursor's place among the stops, for the nearest row when its node ends; the
-          // props the last render drew, which the keys measure the rows from.
-          const treeIdxRef = ui.useRef(0);
-          const chatPropsRef = ui.useRef<Record<string, unknown> | null>(null);
           // A turn that was stopped (Esc, Ctrl+C) or failed does not send the queue: the
           // queued messages come back into the field — in order, joined by blank lines,
           // AHEAD of whatever was typed meanwhile (the order they would have gone out
@@ -957,27 +943,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // told last may come after the listeners are cleared. The subscription redraws the
           // chat on every change of the node (a child's own `notify` is silent).
           const setWatch = (next: Watching | null) => { watchRef.current = next; setWatching(next); };
-          // A background shell's row stopped: a shell is killed (TERM, then KILL), a node
-          // stopped with what it started.
-          const stopRow = (key: string) => {
-            const shell = convRef.current!.jobByKey(key);
-            if (shell) shell.owner.killJob(shell.job, 'person');
-            else convRef.current!.nodeByKey(key)?.stopSubtree('x');
-          };
           // A background shell opened: its output as a console block in the pager, growing
-          // while the job prints (the render reads the job at every draw). Opening it reads it,
-          // and the row of an ended one leaves the tree.
+          // while the job prints (the render reads the job at every draw). Opening it reads it.
           const openJobView = (job: ShellJob, owner: Conversation) => {
             if (watchRef.current) endWatch();
             owner.readJob(job);
             jobPagerRef.current = { job, owner };
             setPager(JOB_PAGER_ID);
-            setTreeSel(NO_TREE_SEL);
             host.notify();
           };
           const startWatch = (node: Conversation) => {
             if (watchRef.current) endWatch();
-            const state: Watching = { node, path: watchPath(node), ended: null, final: null, back: treeSelRef.current.at, ask: false, stopped: false };
+            const state: Watching = { node, path: watchPath(node), ended: null, final: null, ask: false, stopped: false };
             const closed = () => {
               const cur = watchRef.current;
               if (!cur || cur.node !== node || cur.ended !== null) return;
@@ -993,12 +970,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (node.closed) closed();
             setWatchFolds(allFolded());
             setPager(null);
-            setTreeSel(NO_TREE_SEL);
             host.notify();
           };
-          // Ends the watch. `stepBack`: the person's Esc, which puts the cursor back on the
-          // node's row when it is still drawn and no y/n waits anywhere in the session's tree (with
-          // one waiting the cursor stays in the field, so its block is drawn at once), and counts
+          // Ends the watch. `stepBack`: the person's Esc, which lands in the field and counts
           // the session's end as seen.
           const endWatch = (stepBack = false) => {
             const w = watchRef.current;
@@ -1010,15 +984,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // A request the watch drew is drawn by the session's view from here on: the guard
             // sees none in between, so the block arms afresh.
             askGuard.current.show(null);
-            if (stepBack) {
-              const props = chatPropsRef.current;
-              if (w.back !== null && props && !convRef.current!.offered() && treeNow({ ...props, watch: null }).view.rows.some((r) => r.key === w.back)) setTreeSel({ at: w.back, ask: false });
-              markSeenRef.current();
-            }
+            if (stepBack) markSeenRef.current();
             host.notify();
           };
           // The session's own y/n or question ends the watch, takes the keys with the 600 ms
-          // pause an own request over the tree cursor has, and counts the session's end seen.
+          // pause an own request over a holder has, and counts the session's end seen.
           // The y/n draws at once and is armed here; the question's window starts when its
           // block draws and takes the keys.
           const endWatchForOwnAsk = () => {
@@ -1324,7 +1294,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             confirm: (ev) => {
               if (!ev.request) return;
               // The session's own y/n, the settings file's included, is what the person must
-              // see: it ends a watch, and is armed as one over the tree cursor is.
+              // see: it ends a watch, and is armed as one over a holder is.
               if (watchRef.current) endWatchForOwnAsk();
               // The settings file's y/n closes neither a pager nor `/context`.
               if (ev.host) return;
@@ -1701,7 +1671,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             convRef.current = next;
             registryRef.current!.show(next);
             conv = next;
-            setTreeSel(NO_TREE_SEL);
             next.attach(port);
             // One taken back while it works shows its clock again, from its segment.
             if (next.busy) { setElapsedMs(Date.now() - next.segmentStartedAt); startTicker(); }
@@ -1801,7 +1770,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the cursor — Enter watches a subagent (a waiting one just closes: its request
           // block takes the keyboard), Enter opens a shell's output in the pager, and
           // `ctrl+d` kills a shell or stops a subagent after the question that stands in
-          // its row's place (`stopQuestion`, the tree's own words and its own stop route).
+          // its row's place (`stopQuestion`, the strip's own words and its own stop route).
           // Every shell of a conversation's subtree the registry still holds: the running
           // ones and the ended records each conversation keeps (`shell_list`'s view of
           // them), with the conversation that owns each.
@@ -1815,13 +1784,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return map;
           };
           // The picker's rows over a conversation's subtree — the subagent tree and the
-          // session's background shells, as `workRows` lays them out. The picker draws
-          // them; the `↓` door asks only whether there are any.
-          const workRowsOf = (asked: Conversation) => {
+          // session's background shells, as `workRows` lays them out — and, from the same
+          // walk, how many of them wait on the PERSON. The picker draws the rows, the `↓`
+          // door asks whether there are any, and the hint's badge counts both: one
+          // predicate, so the badge can never claim a wait the strip's rows do not show.
+          // `asking` is that predicate — `offeredWithin`, which takes a y/n below and an
+          // ask routed to the person, and NOT a question routed to a model (a child of a
+          // subagent asks its parent's chain, not the person).
+          const workRowsOf = (asked: Conversation): { rows: WorkRow[]; waiting: number } => {
             // The subagents: the live tree as rows, with the label path each node sits on
-            // (the depth-first walk rebuilds it from the stack) and the state words of its
-            // tree row. One that waits on the person — its own y/n or a question put to
-            // it — is flagged, and its row says so.
+            // (the depth-first walk rebuilds it from the stack) and its state words. One
+            // that waits on the person — its own y/n or a question put to it — is flagged,
+            // and its row says so.
             const subs: WorkSub[] = [];
             const stack: { depth: number; label: string }[] = [];
             for (const n of asked.tree()) {
@@ -1856,7 +1830,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               state: job.statusText,
               owner: owner.parent ? owner.label : 'this chat',
             }));
-            return workRows(subs, jobs, Date.now());
+            return { rows: workRows(subs, jobs, Date.now()), waiting: subs.filter((s) => s.asking).length };
           };
           const openWork = () => {
             const asked = conv;
@@ -1864,7 +1838,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // subagent and shells to show. `←`/`→` switch between the two, and the cursor
             // lands on the new tab's first row (`PanelKeyDef.reset`).
             type WorkTab = 'subagents' | 'shells';
-            const first = workRowsOf(asked);
+            const first = workRowsOf(asked).rows;
             let tab: WorkTab = first.some((r) => r.group === 'subagents') || !first.length ? 'subagents' : 'shells';
             // The stop question up, naming the row it stands for: a background shell to
             // kill, or a subagent to stop with what it started. `label`/`below` are the
@@ -1889,7 +1863,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // still answered — and finds nothing to stop.
             const rows = (): PanelRow[] => {
               const p = pending;
-              const out: PanelRow[] = workRowsOf(asked).filter((r) => r.group === tab).map((r) => (p && rowId(p) === r.id
+              const out: PanelRow[] = workRowsOf(asked).rows.filter((r) => r.group === tab).map((r) => (p && rowId(p) === r.id
                 ? { id: r.id, text: question(p), tone: 'warn' as const }
                 : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) }));
               if (p && !out.some((r) => r.id === rowId(p))) out.push({ id: rowId(p), text: question(p), tone: 'warn' });
@@ -1900,7 +1874,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             };
             // The tab strip: each tab with what it holds now, the open one current.
             const tabs = () => {
-              const all = workRowsOf(asked);
+              const all = workRowsOf(asked).rows;
               const count = (g: WorkTab) => all.filter((r) => r.group === g).length;
               return [
                 { label: `Subagents (${count('subagents')})`, current: tab === 'subagents' },
@@ -1917,12 +1891,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (!node) return 'it has ended — nothing to open';
                   // A subagent that waits on the person needs no watch: closing the
                   // picker is all it takes, and its request block takes the keyboard.
-                  if (!asked.offeredWithin(node)) {
-                    // The watch's Esc steps back onto the node's row, so the tree rows are
-                    // reached from the row the watch was opened from.
-                    setTreeSel({ at: node.key, ask: false });
-                    startWatch(node);
-                  }
+                  if (!asked.offeredWithin(node)) startWatch(node);
                   setPanel(null);
                   return undefined;
                 }
@@ -1932,8 +1901,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               },
             };
             // `ctrl+d`: a shell is killed, a subagent is stopped with what it started —
-            // the tree rows' own `x stop` route, its words in the row's place — and both
-            // after the question naming the row.
+            // the strip's own stop, its words in the row's place — and both after the
+            // question naming the row.
             const stopKey: PanelKeyDef = {
               key: 'ctrl+d', label: 'stop/kill',
               run: (id) => {
@@ -1993,6 +1962,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               look: 'bottom',
               follow: true,
               empty: 'none',
+              // ↑ on the first row closes the strip, as Esc does — the ↓ door shut by the
+              // key that led in, while the list has more than one row to walk.
+              upAtTopCloses: true,
               rows,
               tabs,
               get keys() {
@@ -2378,7 +2350,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'agents': {
                 // The whole tree in the conversation's place (ask-children-spec.md (agent tree)): the
                 // live nodes, then the ended ones. `x` asks to stop the node under the cursor
-                // and `y` stops it, as the rows under the field do; the question stands in
+                // and `y` stops it, as the work strip's ctrl+d does; the question stands in
                 // place of that row's text. The cursor follows its node.
                 setField('');
                 const asked = conv;
@@ -2764,8 +2736,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const hostKeys = () => (host.services as { hostKeys?: () => { panel: boolean; line: boolean } }).hostKeys?.() ?? { panel: false, line: false };
           const childAskNow = (): Offered | null => {
             const c = convRef.current!;
-            // With the cursor in the tree rows a request is not answerable: it is the notice line.
-            if (treeSelRef.current.at !== null) return null;
             if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || watchRef.current || hostKeys().panel) return null;
             const o = c.offered();
             return o && o.path.length ? o : null;
@@ -2820,23 +2790,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // With Ctrl+]'s action unbound the status names no key, and the footer's own
           // hint is the only way back that is said.
           const footerStatus = statusRow != null && dock?.side !== 'bottom' && !!focusCap;
-          // The tree rows the chat draws for `props` (the chat's props without `tree`): the
-          // render and the keys both ask here: the geometry is the render's, the nodes are read at the key.
-          const treeNow = (props: Record<string, unknown>) => {
-            const base = chatRoom(props as unknown as Parameters<typeof chatRoom>[0]);
-            const nodes = conv.tree();
-            const fit = treeBudget({ boxH: base.boxH, besides: base.besides, planFull: base.planFull, nodes: nodes.length, max: agentRowsOf(host.config as Record<string, unknown>), hidden: base.hidden });
-            const view = fit > 0 ? treeRows(nodes, fit, base.wrap) : { rows: [], more: 0 };
-            // One measure with the tree counted: the plan's shape and `/diff`'s split
-            // both give way to its rows.
-            const room = view.rows.length ? chatRoom({ ...props, treeRows: view.rows.length } as unknown as Parameters<typeof chatRoom>[0]) : base;
-            return { room, nodes, view };
-          };
-          // The rows a key may move among: the drawn ones, not the `+K more` row.
-          const treeStops = () => (chatPropsRef.current ? treeNow(chatPropsRef.current).view.rows.filter((r) => r.key !== '') : []);
           // What the block of a subagent's request is made of: a y/n or a question.
           const blockOf = (o: Offered) => o.kind === 'confirm' ? { confirm: { ...o.request, path: o.path } } : { question: o.request.state };
-          // The line that says a request waits behind the tree cursor, or elsewhere.
+          // The line that says a request waits outside the field, and how it is answered.
           const waitsText = (o: Offered, how: string): string =>
             o.kind === 'ask' ? `⏸ a question from «${o.owner.label}» waits — ${how} to answer` : `⏸ ${o.path.join(' › ')} waits for a y/n — ${how} to answer`;
           // An answer to a subagent's question counts after the pause (`askGuard`) for its first
@@ -2943,9 +2899,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
-          // The cursor leaves the rows with the keyboard: the chat folded away, the plugin's side
-          // or the runtime's panel or `:` line holding the keys.
-          if (treeSelRef.current.at !== null && (!open || !focused || hostKeys().panel || hostKeys().line)) setTreeSel(NO_TREE_SEL);
           // The subagent's y/n this render draws, if any; the guard learns it is on screen.
           const shownChild = open ? childAskNow() : null;
           // The guard counts a block only while the chat has the keyboard: with the plugin,
@@ -2975,11 +2928,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // right behind whatever took the keys over must not send it.
           const seenAsBlock = shownShape === 'block' && shownChild?.kind === 'ask' ? shownChild.request : open && watchAskNow()?.kind === 'ask' && watchAskShape(dock?.panel.width ?? width) === 'block' ? watchAskNow()!.request : null;
           if (childTypedRef.current && childTypedRef.current !== seenAsBlock) childTypedRef.current = null;
-          // Something that holds the keys the person is typing on: the tree cursor or a command
-          // panel. A request of the session's own that takes the keys over either is armed, as
-          // it is over a subagent's block. The picker, `/context` and a pager give way to the
-          // request at once: its first key answers it.
-          const keysHeld = () => treeSelRef.current.at !== null || !!panelRef.current;
+          // Something that holds the keys the person is typing on: a command panel. A request
+          // of the session's own that takes the keys over it is armed, as it is over a
+          // subagent's block. The picker, `/context` and a pager give way to the request at
+          // once: its first key answers it.
+          const keysHeld = () => !!panelRef.current;
           // The conversation's own y/n that takes a subagent's block's place is armed too:
           // the keys already on their way to the block must not answer it.
           const ownNow = convRef.current!.confirm ?? null;
@@ -2992,7 +2945,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }
           const wasChildBlock = childBlockRef.current;
           childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
-          // Its own question that takes the keys over the tree cursor, or over a subagent's
+          // Its own question that takes the keys over a holder, or over a subagent's
           // block the person may be typing into, is armed too — from the moment it APPEARS
           // (every key is swallowed for 600 ms from its appearing), which the grace may put
           // a sentence's while after the arrival: the first key behind the DRAWN block is
@@ -3071,7 +3024,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const liveChild = childAskNow();
               askGuard.current.show(liveChild ? guardSees(liveChild, 'session') : guardSees(watchAskNow(), 'watch'));
               const askArmed = askGuard.current.press();
-              // A question that arrived over the tree cursor took a holder's keys over;
+              // A question that arrived over a holder took its keys over;
               // its window is stamped when the block draws (or at the claim below).
               if (conv.question && conv.question !== questionSeenRef.current) {
                 questionSeenRef.current = conv.question;
@@ -3173,44 +3126,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
                 return true;
               }
-              // The cursor in the tree rows (ask-children-spec.md (agent tree)): every key is the rows'.
-              // ↑/↓ move, ↑ on the first row and Esc go back to the field, `x` asks to stop
-              // the node and `y` stops it with what it started. Besides the sessions key,
-              // nothing reaches the field, the model, Esc's stages or a subagent's y/n
-              // (`childAskNow` is null here, and this key was noted by the guard above).
-              if (treeSelRef.current.at !== null) {
-                // The sessions key is the one key besides these that works from the rows: the
-                // cursor and its question go, and the picker opens.
-                if (isKey(host.keys.sessions ?? [], key)) { setTreeSel(NO_TREE_SEL); openPicker(); return true; }
-                const sel = treeSelRef.current;
-                const stops = treeStops();
-                const i = stops.findIndex((r) => r.key === sel.at);
-                if (sel.ask) {
-                  if (key.name === 'y' && !key.ctrl && !key.meta) {
-                    stopRow(sel.at!);
-                    setTreeSel({ at: sel.at, ask: false });
-                    host.notify();
-                  } else if (key.name === 'n' || key.name === 'escape') setTreeSel({ at: sel.at, ask: false });
-                  return true;
-                }
-                if (key.name === 'escape' || !stops.length) setTreeSel(NO_TREE_SEL);
-                else if (key.name === 'up') setTreeSel(i <= 0 ? NO_TREE_SEL : { at: stops[i - 1]!.key, ask: false });
-                else if (key.name === 'down') setTreeSel({ at: stops[Math.min(stops.length - 1, i + 1)]!.key, ask: false });
-                else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) {
-                  // An ended shell has nothing to kill: `x` reads it, as opening it does, and its row
-                  // goes with no question; the job stays in /agents.
-                  const shell = conv.jobByKey(sel.at!);
-                  if (!shell || shell.job.running) setTreeSel({ at: sel.at, ask: true });
-                  else { shell.owner.readJob(shell.job); host.notify(); }
-                }
-                else if (key.name === 'return' && !key.ctrl && !key.meta && i >= 0) {
-                  const node = conv.nodeByKey(sel.at!);
-                  const shell = conv.jobByKey(sel.at!);
-                  if (node) startWatch(node);
-                  else if (shell) openJobView(shell.job, shell.owner);
-                }
-                return true;
-              }
               // A subagent's y/n, offered while the list is what the chat shows: `y` or `n`
               // alone, on an empty field, after the pause, and only the owner's. Every other
               // key — ⏎ and Esc included — goes on to its usual handler, and a `y` that does
@@ -3270,7 +3185,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // key below. The session's own question owns the field's place: the key does
               // nothing until it clears (it goes on to the walk, which opens nothing).
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0 && !conv.question) {
-                if (workRowsOf(conv).length) { openWork(); disarmEsc(); return true; }
+                if (workRowsOf(conv).rows.length) { openWork(); disarmEsc(); return true; }
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its rows
@@ -3616,6 +3531,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             asked: !!watchAsk,
             toEnd: watchToEndRef,
           } : null;
+          // The chat's own work, read ONCE for the door's count and for who waits on the
+          // person — the hint's badge and the strip's rows come from the same walk.
+          const chatWork = workRowsOf(conv);
           const chatProps: Record<string, unknown> = {
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -3666,8 +3584,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   ? `⏸ a question from «${shownChild.owner.label}» waits — ${bangLevel > 0 ? 'leave shell mode' : 'clear the field'} to answer it`
                   : `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`)
                 : `⏸ ${tooSmall(shownChild)}`)
-              : treeSelRef.current.at !== null && !pendingAsk && convRef.current!.offered()?.path.length
-              ? waitsText(convRef.current!.offered()!, keyGlyph('escape'))
               : null,
             pendingQuestion: ownHeldNow ? null : pendingQuestion ?? (!watching && shownChild?.kind === 'ask' && shownShape === 'block' && !childHeld ? shownChild.request.state : null),
             // The transcript's lead-in is lit for ITS conversation's own question only —
@@ -3689,6 +3605,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
                 look: top.look ?? 'window', tabs,
+                // ↑ closes on the first row when the panel says so — the same rule
+                // `panelKey` reads, so the hint can never offer a close the key refuses.
+                upAtTopCloses: top.upAtTopCloses,
               });
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
@@ -3760,6 +3679,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // left running (`leftRunning`, redrawn by the registry when one ends) and
             // the background shells that run (`shellCount`).
             bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning() + registryRef.current!.shellCount(),
+            // This chat's own work — the same walk the `↓` key opens on (`workRowsOf`):
+            // the door's rows, and how many of them wait on the PERSON (the strip's own
+            // `asking` — a question a task put to its parent's chain is not one). The hint's
+            // badge counts the door's rows while the door has work and says who waits.
+            bgDoor: chatWork.rows.length,
+            bgWaiting: chatWork.waiting,
             // The other sessions that wait for an answer or were put away unread: the
             // one on screen never counts itself.
             ...(() => { const o = registryRef.current!.attention(); return { waitingElsewhere: o.waiting, unreadElsewhere: o.done }; })(),
@@ -3775,11 +3700,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // LLM edits (via notify()) shows up immediately.
             todo: conv.plan.snapshot(),
           };
-          // The live subagents and tasks of this conversation, as rows under the field: as
-          // many as the column has room for (`treeNow`, which the keys ask too). The cursor
-          // follows its node, and goes back to the field when no row is drawn.
-          chatPropsRef.current = chatProps;
-          const { nodes, view, room } = treeNow(chatProps);
+          // The measures the keys read: whether `/diff`'s panel is drawn, and the width the
+          // conversation's rows are laid out at.
+          const room = chatRoom(chatProps as unknown as Parameters<typeof chatRoom>[0]);
           // Whether the panel is drawn: the split the layout gave, which the key handlers read.
           diffShownRef.current = !!room.split && (room.split.mode === 'side' || room.split.diff.height > 0);
           // The conversation's rows are laid out at its half while the panel stands beside
@@ -3788,14 +3711,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           chatWrapRef.current = room.split && room.split.mode === 'side'
             ? Math.max(20, room.split.chat.width - 2)
             : chatWrapWidth(width, fullscreenRef.current);
-          const was = treeSelRef.current;
-          const at = was.at === null || room.hidden ? null : treeCursor(was.at, treeIdxRef.current, view.rows);
-          const ask = at !== null && at === was.at && was.ask;
-          if (at !== was.at || ask !== was.ask) setTreeSel({ at, ask });
-          treeIdxRef.current = Math.max(0, view.rows.filter((r) => r.key !== '').findIndex((r) => r.key === at));
-          const asked = ask ? nodes.find((n) => n.key === at) : undefined;
-          const shownTree = view.rows.length ? { ...view, cursor: at, ask: asked ? stopQuestion(asked) : null } : null;
-          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({ ...chatProps, tree: shownTree });
+          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)(chatProps);
         };
       },
     },

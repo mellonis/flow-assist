@@ -754,10 +754,11 @@ test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row ter
   if (shape === 'line') expect(f.bottom - f.top + 1).toBe(12);
   // Inside the frame's border and padding.
   const inside = rows(ui).slice(f.top + 2, f.bottom - 1);
-  // The field and its hint, whole, on the last row of the frame's content.
-  expect(inside.at(-1)).toContain('› ');
-  expect(inside.at(-1)).toContain('⏎ send ·');
-  expect(inside.at(-1)).toContain('new line · Esc Esc collapse');
+  // The field whole, the hint row under it on the last row of the frame's content.
+  const fieldRow = inside.find((l) => l.includes('⏎ send ·'))!;
+  expect(fieldRow).toContain('› ');
+  expect(fieldRow).toContain('new line · Esc Esc collapse');
+  expect(inside.at(-1)).toContain('history · wheel');
   // At least one row of conversation — the answer is on screen.
   expect(ui.backend.lastFrame).toContain('Planned.');
   if (shape === 'line') {

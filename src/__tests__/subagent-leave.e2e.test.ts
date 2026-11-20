@@ -59,6 +59,7 @@ test('a session left with an idle subagent keeps it: the picker reads the sessio
   await ask(ui, '/subagent tell keep-one-go anything new?');
   await settleUntil(() => child.requests.length === 2);
   expect(frameOf(ui)).toContain('message sent to «keep-one-go»');
-  await settleUntil(() => frameOf(ui).includes('◦ keep-one-go · answered'));
+  // Its later answer waits unread: the hint counts it.
+  await settleUntil(() => frameOf(ui).includes('● 1'));
   ui.app.unmount();
 });

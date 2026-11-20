@@ -34,7 +34,7 @@ waits until you open it and answer, since keys typed elsewhere answer nothing th
 answer or background result came while you were not looking — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row
 shows only your own turn; its background tasks, and the turn of a session you left, are
-the footer's `N in background`). A session you left that finishes its turn says so once,
+the hint row's `N in background`). A session you left that finishes its turn says so once,
 with a toast (`● «title» finished — its answer is unread`) and no system alert, also when it
 stays open for a subagent; the answer of a subagent you wrote to (`/subagent tell`) that
 lands in a session you left says so once too (`● «name» answered — open the session to
@@ -291,8 +291,9 @@ toward the three that run at once.
 `/subagent` alone lists this conversation's jobs, the live ones numbered
 (`1 · find-the-failing · working · 1m 12s`; a subagent that rests reads `idle`, or
 `answered` when its latest answer to a later message is unread), then the last twenty that
-ended (`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's; the
-`N in background` count on the hint row covers every conversation at once.
+ended (`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's;
+the hint row counts this chat's own background work, or — with none of its own — every
+conversation's (see The hint row and the work strip).
 `/subagent stop <number or name>` reads a number against the list you last saw (a job that
 ended since keeps the others' numbers, and its own is answered with a line), so list first;
 a name needs no list. It stops one and whatever it started: what it had written so far comes back as a `◆ <label>
@@ -323,70 +324,60 @@ first.
 Started in a chat where nothing was said yet, `/subagent` makes the conversation a saved
 session like a first message would; the line you typed is its first message.
 
-### The live subagents under the field
+### The hint row and the work strip
 
-The subagents and tasks a conversation has running are listed under the line you type in,
-one row each: `⚙ <name> · <what it is doing>` while it works, `⏸ <name> · waiting for a
-y/n` when it asks you, `? <name> · asks its parent` while a question waits for an answer, `○ <name> · queued` or `· in 4m` when it has not started,
-`◦ <name> · idle` when a subagent you started rests after its answer (`· answered` while a
-later answer is unread). What a
-node started stands under it, indented. A task is marked `(task)`. The rows carry no clocks
-(an idle chat does not redraw); `/agents` shows the time. Ended nodes are not rows — their
-`◆` message is already in the conversation, and `/agents` lists the last twenty.
+The hint row is the last row of the field's strip, under the line you type in, and it
+carries the count of background work and the way in to it. `↓ N in background` says that `↓`
+opens the work strip and counts the rows it opens: this chat's live subagents and tasks, and
+its background shells, running and the last ended ones. With nothing of this chat's, the
+badge is the registry's count — background tasks and the turns of sessions you left,
+background shells of the whole process — and carries no `↓`, since there is nothing here to
+open. A `· K waiting` follows it while K rows of the strip wait on you — a y/n or a question
+parked in a subagent of this chat, or in one below it (`? waiting for you`) — and the whole
+badge, the count included, turns the warn colour then.
 
-`ui.agentRows` is how many rows may be drawn: 4 by default, 0 to 8, 0 for none. With more
-live nodes than that, the ones waiting for you come first, then the working ones, then the
-rest, and the last row reads `+3 more — /agents`. In a short chat the rows give way first,
-down to none, keeping four rows of conversation; then the plan gives way.
-The field, the hint row and a y/n never do. The rows are not drawn while a question, your own
-y/n, a subagent's y/n or question block, `/context`, the pager, a picker or a command's panel is.
-
-**The rows take the keys from a watch.** ⏎ on a subagent's row starts watching it, and Esc
-back from that watch lands on the node's row, where ↑ and ↓ walk the rows; the work panel's
-⏎ on a subagent's row leads to the same watch, and its Esc-back lands on the row too (see
-The work picker below). ↑ on the first row, or Esc, goes back to the line, and the hint row
-names the keys while you are in the rows. `x` asks `stop <name> and 2 below it? y yes · n
-no` in place of that row; `y` stops the node and everything it started (the same stop as
-`/subagent stop`, written to the journal as yours), `n` or Esc leaves it running; with a
-question up, the first Esc only drops it. ⏎ on a row shows that node's conversation (see
-below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there; every other key
-is swallowed: nothing is typed and nothing is sent. The cursor follows its node when the
-rows change; when its node ends it moves to the nearest row, and with no row left the line
-has the keys again. A node that ends while its stop question is up takes the question with
-it; the work picker's own stands in place of a row that has ended — the row's text is
-replaced, and a row gone since has its question appended to the end of its tab's rows (see
-The work picker below).
-
-A subagent's y/n cannot be answered from the rows. While the cursor is in them, a waiting
-subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer` (with a stop
-question up, the first Esc drops the question and the next one leaves the rows); after Esc its
-block is drawn and, like any block that has just appeared, waits a short pause before a `y`
-counts. A subagent that waits while the line is empty draws its block in place of the rows,
-so the rows are away exactly then; `/agents` or `/subagent stop <name>` still reach it.
+`↓` on an empty line opens the strip — `J` and `/work` too (see The work picker below). The
+field and its hint row keep their rows whatever the chat's height: the plan above them gives
+way first, down to one line, then not drawn at all, and a question or a y/n takes the field's
+place, its hint row staying under it, with `↓` opening nothing while one waits. `↑` on the
+strip's first row closes it, as Esc does, while a deeper `↑` only moves the cursor; the
+strip's hint says which — `↑ close · ↓ pick` on the first row of a list of more than one,
+`↑↓ pick` below it, and neither on a list of one row, which has no move to pick from and no
+close to offer. `⏎` on a subagent's row watches it (see Watching a subagent or task), and on
+a shell's opens its kept output in the pager; `ctrl+d` stops a subagent with everything it
+started, or kills a shell, after the question that names its row. Esc closes the strip from
+any row, and a watch opened from the strip comes back to the field, not to the strip: the
+strip is one-shot, and `↓` opens it again. With a stop question up, a closing `↑` drops the
+question with the strip, exactly as Esc does.
 
 **`/agents`** opens the whole tree where the conversation is: the live nodes in tree order
 with `<state> · <time spent>`, and the model added when a node runs one that is not the
 chat's own (`idle · 1m 12s · small-model` — with a chat on no model of its own, every
 model is named), then the last twenty that ended (`done`, `failed`, `stopped`, `empty`,
-`limit`, the time and the tokens). ↑ and ↓ move, `x` asks the same question in place of the row and
-`y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. ⏎ on
-a live row closes the panel and shows that node's conversation; on an ended row it says there
-is nothing to watch. The cursor stays on its node while others start and end. `/subagent` still prints the
-numbered list that `stop <number>` reads.
+`limit`, the time and the tokens). A background shell is a node of its own, `○ sh-3 · bun run
+dev`, saying how it runs with its line count (`running 4m · 312 lines`); among the ended
+ones it reads `exited 0 · 4m · 312 lines`.
+↑ and ↓ move, `x` asks the same question in place of the row and `y` stops the node, Esc
+closes. On an ended row `x` only says there is nothing to stop. ⏎ on a live subagent's or
+task's row closes the panel and shows that node's conversation; on a shell's row, running or
+ended, it opens the output in the pager (see Commands that run on: background shells); on an
+ended subagent's or task's row it says there is nothing to watch. The cursor stays on its
+node while others start and end. `/subagent` still prints the numbered list that `stop
+<number>` reads.
 
 ### Watching a subagent or task
 
-⏎ on a row under the line, or on a live row of `/agents`, shows what that node is doing: its
+⏎ on a row of the work strip, or on a live row of `/agents`, shows what that node is doing: its
 conversation takes the list's place, folded the way the chat folds its own. The frame title
-names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`); the line, the plan,
-the queue and the rows are not drawn. The hint row says what the node is doing, as its row did (`⚙ <latest
-step>`, `⏸ waiting for a y/n`, `○ queued`), and on the right `x stop · Esc back`.
+names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`); the line, the plan and
+the queue are not drawn. The hint row says what the node is doing (`⚙ <latest step>`,
+`⏸ waiting for a y/n`, `○ queued`), and on the right `x stop · Esc back`.
 
 PgUp/PgDn and the wheel scroll the rows, which follow their end while they rest there; End
 jumps to it, and the details key opens or folds everything in them. Esc steps back to your
-conversation, where you left it, and does not stop the node; from a watch that began in the
-rows it puts the cursor on that node's row, unless a y/n waits somewhere in the tree: then the
-cursor stays in the field and that block is shown at once. `x` asks `stop <name> and 2 below it? y yes · n
+conversation, where you left it — in the field, whatever opened the watch — and does not
+stop the node; a request waiting anywhere in the tree is shown at once, its block taking the
+field's place. `x` asks `stop <name> and 2 below it? y yes · n
 no` in the hint row and `y` stops the node and what it started; `n` or Esc drops the
 question. The sessions key opens the picker. Ctrl+C never stops your conversation's turn from here: it
 arms the exit, and a second one exits. Every other key, ⇧⇥ included, is swallowed: nothing is
@@ -406,9 +397,9 @@ answers it there. Where the block would not fit the docked chat, a line says the
 and `/subagent stop <name>` declines it.
 
 Your own conversation's y/n or question, the settings file's y/n included, ends the watch. The y/n waits the same pause before
-a `y` counts; a question that arrives while the cursor is in the rows, or that ends a watch,
-takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
-on screen a question takes keys at once.
+a `y` counts; a question that arrives while another holder has the keys — a watch, a child's
+block — takes no key for 600 ms, so a ⏎ on its way there does not pick an option. With
+neither on screen a question takes keys at once.
 
 ### The work picker: `J`, `/work`, or `↓` on an empty line
 
@@ -440,21 +431,22 @@ chat's own as `this chat`); a shell you killed sinks below the running ones and 
 `killed (person) — this chat`. The rows are read again at every draw, so a state is what
 is true now.
 
-↑ and ↓ move among the rows. ⏎ opens what is under the cursor: a subagent's conversation
-as the watch draws it, or a shell's kept output in the pager, growing while the job
-prints. The watch's Esc comes back to the chat, never to the picker (the picker is
-one-shot, `J` opens it again), and with the node's row still drawn and no request waiting
-in the tree it puts the cursor on that row; a watch opened from `/agents` returns to the
-field instead. ⏎ on a subagent that waits on you just closes the picker: its request block
-takes the keyboard at once.
+↑ and ↓ move among the rows, and ↑ on the first row closes the strip — the door `↓` opened,
+shut by the key that led in (the hint reads `↑ close · ↓ pick` there; a list of one row has
+neither a close nor a move to name). ⏎ opens what is under the cursor: a subagent's
+conversation as the watch draws it, or a shell's kept output in the pager, growing while the
+job prints. The watch's Esc comes back to the chat, never to the picker (the picker is
+one-shot, `J` opens it again), and lands in the field. ⏎ on a subagent that waits on you
+just closes the picker: its request block takes the keyboard at once.
 
 `ctrl+d` stops a subagent or kills a shell, after the question that names its row —
 `stop review and 2 below it? y yes · n no`, `kill sh-3? y yes · n no` — the same words and
-the same stop the rows under the field ask with `x`: a subagent goes with everything it
+the same stop `/agents` asks with `x`: a subagent goes with everything it
 started. `y` answers the row the question names, wherever the cursor has moved to since,
 and nothing else; `n` leaves it as it was. While the question stands the keys are `y`, `n`
-and `^d cancel` — the tabs' arrows are not offered then — and `↑`/`↓` still move. The
-question stays on screen even when its work ends while it is up, and a `y` then stops
+and `^d cancel` — the tabs' arrows are not offered then — and `↑`/`↓` still move, `↑` on the
+first row of a list of more than one closing the strip and dropping the question, as Esc
+does. The question stays on screen even when its work ends while it is up, and a `y` then stops
 nothing and says so. The counts beside the tabs are live work: `Subagents (0)` can sit
 beside a question still standing for a row that has ended. `ctrl+d` again drops the
 pending question and stops nothing, and Esc closes the picker, question and all.
@@ -775,7 +767,7 @@ list, so its Esc dismisses at once).
 
 **A question waits out the sentence you are typing.** When it arrives while you are still
 typing, the block does not take the field from under your keys: they stay the field's and
-the strip above it says `? a question is waiting`, and the block comes up about half a
+a line above the field says `? a question is waiting`, and the block comes up about half a
 second after you stop. A message you send in that time is sent as usual — it queues behind
 the turn, as any message does while an answer is coming. A `:` command line holds the
 question off while it is open: run the line or leave it, and the block follows. Nothing is
@@ -1002,7 +994,7 @@ the tokens its requests spend together (2,000,000 by default — each prompt wit
 part read from the provider's cache, plus the answer; 0 is no budget). A background
 task has its own round cap, `ai.taskRounds` (12 by default; 0 is no cap). The chat then says where the turn stopped — `stopped after 150
 rounds (ai.maxRounds) — ⏎ continue · last: <the last call>`, or `stopped after 2.0M
-tokens (ai.maxTurnTokens) — …` — and Enter on the empty field, whose hint then reads
+tokens (ai.maxTurnTokens) — …` — and Enter on the empty field, whose own row then reads
 `⏎ continue`, sends "continue", so the assistant carries on where it stopped. Both
 limits are yours to set, `ai.taskRounds` too; the assistant cannot change them.
 
@@ -1104,8 +1096,8 @@ shells too; a task's commands wait for your yes like the chat's do, and a task s
 
 **When one ends** the assistant gets its end — exit code, duration and the last 20 lines — as
 data, to the conversation that started it, in its next turn. You see a toast
-(`sh-3 exited 1 after 4m`) and the row below. A shell you stopped yourself, or the assistant
-stopped, ends quiet. The end of a shell the assistant started can also start a turn of its own,
+(`sh-3 exited 1 after 4m`) and its row in the work strip and `/agents`. A shell you stopped
+yourself, or the assistant stopped, ends quiet. The end of a shell the assistant started can also start a turn of its own,
 so it reports without waiting for you. It does that only when
 
 - the conversation is idle, no question or y/n is drawn, no message of yours is queued, and it is
@@ -1128,18 +1120,25 @@ holds the wake, the end lands as a row and the subagent reads it with your next 
 A task, and a subagent the assistant started, never read it, and their shells end with their run
 (the toast tells you).
 
-**The row.** Shells stand in the tree under the field beside subagents:
-`○ sh-3 · bun run dev · running 4m · 312 lines`, ended `exited 0` or `killed`. A running one
-counts as working. The tree row's ⏎ opens the output in the pager (the rows are reached from
-a watch's Esc-back), and so does the work panel's ⏎ on that shell's row — `J`, `/work`, or ↓
-on an empty line; the pager holds the whole kept buffer (a first line says how many
-characters were dropped), growing while you look. `x` asks `kill sh-3? y yes · n no` and `y`
+**The row.** A background shell shows in two places in the chat: the work strip's **Shells**
+tab and `/agents`. The strip's row is its id and command with its state and owner
+(`sh-3 · bun run dev`, `running — this chat`); `/agents` gives it a node of its own with its
+line count (`○ sh-3 · bun run dev`, `running 4m · 312 lines`), and among the ended ones its
+state, time and line count (`exited 0 · 4m · 312 lines`). A running one counts as working.
+⏎ on its row — in the strip or in `/agents` — opens the output in the pager: the whole kept
+buffer (a first line says how many characters were dropped), growing while you look. Opening
+an ended job reads it, its live row giving way to the ended list. `ctrl+d` in the strip, or
+`x` in `/agents`, asks `kill sh-3? y yes · n no` about a running shell, and `y`
 stops it: SIGTERM to the whole process group, SIGKILL after 2 seconds. On an ended shell `x`
-dismisses the row, with no question; the job stays in `/agents`. The last 20 ended shells stay in `/agents` with their status, and ⏎ opens
-their output in the pager. The row of a shell the assistant started leaves by itself once a request
+only says there is nothing to stop, and the job stays in `/agents`. The last 20 ended shells
+stay in `/agents` with their state, time and line count, and ⏎ opens their output in the
+pager. The row of a shell the assistant started leaves `/agents`'s live rows once a request
 to the assistant has carried its end (a held-back wake keeps it until your next message does); the
-row of one you started with `!cmd &` reads as `answered` until you open or dismiss it, and one you
-killed leaves at once. The footer's background count includes running shells.
+row of one you started with `!cmd &` stays until you open it, and one you killed leaves at
+once. The strip's **Shells** tab lists every shell the session still holds, ended ones
+included, and `/agents` lists each of them too, the unread ended ones still as live nodes
+until their output is opened. The hint row's background count includes the shells, running
+and ended alike.
 
 **Leaving.** `/new`, a switch from the picker and `/resume` with shells running in the
 session ask first: `s` stops them, `k` keeps them running in the session you leave (it stays
