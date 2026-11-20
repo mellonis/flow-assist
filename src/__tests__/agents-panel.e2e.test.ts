@@ -25,7 +25,7 @@ const boards = (make: any) => [make('boards', { name: 'boards', keycaps: () => [
 
 // A booted chat with one scripted child per mark. `hold`: the child waits before it acts;
 // `writes`: it then asks for a write, else it just answers.
-async function boot(marks: { mark: string; writes?: boolean; script?: Turn[] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; ui?: Record<string, unknown>; main?: Turn[]; guest?: boolean } = {}) {
+async function boot(marks: { mark: string; writes?: boolean; script?: Turn[] }[], opts: { main?: Turn[] } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-agents-')));
@@ -38,7 +38,7 @@ async function boot(marks: { mark: string; writes?: boolean; script?: Turn[] }[]
     return child;
   });
   if (opts.main) model.script(...opts.main);
-  const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, boards as never, { sessions: { dir: sessions }, shell: { roots: [root] }, ...(opts.ui ? { ui: opts.ui } : {}), ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });
+  const ui = await bootApp(model, 140, 34, boards as never, { sessions: { dir: sessions }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
   await ui.press('F');
   return { children, ui, model, root, sessions };
 }
