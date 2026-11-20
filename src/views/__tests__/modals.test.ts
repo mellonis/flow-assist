@@ -437,23 +437,49 @@ test('chat omits the todo block when the plan is empty', async () => {
   handle.unmount();
 });
 
-test('the hint row is the last row inside the box, under the field; the plan is above the field', async () => {
+test('the hint row is the last row inside the box, under the field; the plan and the queue line are above the field', async () => {
   const backend = new TestBackend(100, 24);
   const handle = await render(h(renderChatModal, {
     ...baseChat, width: 100, messages: [],
     todo: [{ id: 't1', text: 'one', status: 'pending' }],
+    queued: ['a queued line'],
   }), backend);
   const rows = backend.lastFrame.split('\n');
   const hint = rows.findIndex((r) => r.includes('history · wheel'));
   const field = rows.findIndex((r) => r.includes('send ·'));
+  const queue = rows.findIndex((r) => r.includes('a queued line'));
   const plan = rows.findIndex((r) => r.includes('▾ plan'));
   const border = rows.findLastIndex((r) => r.includes('╰'));
   expect(plan).toBeGreaterThan(0);
-  expect(field).toBeGreaterThan(plan);
+  expect(queue).toBeGreaterThan(plan);
+  expect(field).toBeGreaterThan(queue);
   expect(hint).toBeGreaterThan(field);
   expect(hint).toBeLessThan(border); // inside the box, the last row before the border
   // Nothing of the column is under the hint: every row down to the border carries nothing
   // but the frame's own sides — the plan, the queue line and the field strip are all above it.
+  for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
+  handle.unmount();
+});
+
+test('during a turn the queue line is above the field and the live status row is the strip\'s last', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [], streaming: true, toolLabel: 'compact', elapsed: 3200,
+    todo: [{ id: 't1', text: 'one', status: 'pending' }],
+    queued: ['a queued line'],
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  // Mid-turn the field's own row offers the queue instead of the send placeholder.
+  const field = rows.findIndex((r) => r.includes('an answer is coming'));
+  const hint = rows.findIndex((r) => r.includes('3s · compact'));
+  const queue = rows.findIndex((r) => r.includes('a queued line'));
+  const plan = rows.findIndex((r) => r.includes('▾ plan'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(plan).toBeGreaterThan(0);
+  expect(queue).toBeGreaterThan(plan);
+  expect(field).toBeGreaterThan(queue);
+  expect(hint).toBeGreaterThan(field);
+  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
   for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
   handle.unmount();
 });

@@ -80,7 +80,7 @@
   grace (the key that sends a message clears it: the sentence went; a ↑/↓ walk that lands
   where it started recalls nothing, and the key that opens the work panel is a holder's,
   the panel keeping the keys — neither is a key of the field's editing and neither re-arms), the block is not drawn
-  in the field's place, and the strip above the field — or, with the chat collapsed, its
+  in the field's place, and a line above the field — or, with the chat collapsed, its
   status — says `? a question is waiting`; a one-shot unref'd timer re-runs the claim when
   the person goes quiet. A key a block, a picker, a panel or a reader (the pager, a watch)
   takes is no typing and re-arms nothing. Past the grace the claim runs unchanged — the

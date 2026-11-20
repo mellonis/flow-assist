@@ -108,7 +108,7 @@ test('the settings-file y/n answers by y with an idle subagent listed; the subag
   await ui.press('y');
   await settleUntil(() => frameOf(ui).includes('Configured.'));
   expect(frameOf(ui)).toContain('Applied config.local.json');
-  expect(await stripRow(ui, 'idle-cfg-go')).toContain('idle');
+  expect(await stripRow(ui, 'idle-cfg-go')).toMatch(/idle-cfg-go\s+idle\b/);
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });

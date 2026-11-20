@@ -45,7 +45,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **A question waits out the sentence you are typing.** A question that parks while you
   are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
-  no longer takes the field from under your keys: the field keeps them, the strip above it
+  no longer takes the field from under your keys: the field keeps them, a line above it
   says `? a question is waiting`, and the block comes up once you have been quiet for
   about half a second (`ASK_GRACE_MS`, read from `askClock`). While it waits the block is
   not drawn in the field's place and nothing is answered for you; a message you send in

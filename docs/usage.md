@@ -293,7 +293,7 @@ toward the three that run at once.
 `answered` when its latest answer to a later message is unread), then the last twenty that
 ended (`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's;
 the hint row counts this chat's own background work, or — with none of its own — every
-conversation's (see Background work: the hint and the work strip).
+conversation's (see The hint row and the work strip).
 `/subagent stop <number or name>` reads a number against the list you last saw (a job that
 ended since keeps the others' numbers, and its own is answered with a line), so list first;
 a name needs no list. It stops one and whatever it started: what it had written so far comes back as a `◆ <label>
@@ -324,7 +324,7 @@ first.
 Started in a chat where nothing was said yet, `/subagent` makes the conversation a saved
 session like a first message would; the line you typed is its first message.
 
-### Background work: the hint and the work strip
+### The hint row and the work strip
 
 The hint row is the last row of the field's strip, under the line you type in, and it
 carries the count of background work and the way in to it. `↓ N in background` says that `↓`
@@ -767,7 +767,7 @@ list, so its Esc dismisses at once).
 
 **A question waits out the sentence you are typing.** When it arrives while you are still
 typing, the block does not take the field from under your keys: they stay the field's and
-the strip above it says `? a question is waiting`, and the block comes up about half a
+a line above the field says `? a question is waiting`, and the block comes up about half a
 second after you stop. A message you send in that time is sent as usual — it queues behind
 the turn, as any message does while an answer is coming. A `:` command line holds the
 question off while it is open: run the line or leave it, and the block follows. Nothing is
