@@ -116,9 +116,9 @@
 - **The agent tree (agent tree)** is a conversation's live subagents, tasks and background
   shells, listed by `/agents` and by the work strip. No rows of it are drawn under the field:
   the hint row there carries the count and the door — `↓ N in background` while this chat has
-  work (N the strip's rows, the same walk the `↓` key reads) and `· K waiting` in the warn
-  colour while K rows wait on the person — and the plan above the field, never the field or
-  its hint, is what gives way. The data is `Conversation.tree()`: the live
+  work (N the strip's rows, the same walk the `↓` key reads), with `· K waiting` while K rows
+  wait on the person, the whole badge in the warn colour then — and the plan above the field,
+  never the field or its hint, is what gives way. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
   conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / asks / queued /
   delayed / idle, `answered` — an idle node whose latest answer nobody has read, `latest` — the tool label while one runs, else the round's verb, `below` — its live

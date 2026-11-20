@@ -34,7 +34,7 @@ waits until you open it and answer, since keys typed elsewhere answer nothing th
 answer or background result came while you were not looking — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row
 shows only your own turn; its background tasks, and the turn of a session you left, are
-the footer's `N in background`). A session you left that finishes its turn says so once,
+the hint row's `N in background`). A session you left that finishes its turn says so once,
 with a toast (`● «title» finished — its answer is unread`) and no system alert, also when it
 stays open for a subagent; the answer of a subagent you wrote to (`/subagent tell`) that
 lands in a session you left says so once too (`● «name» answered — open the session to
@@ -332,23 +332,23 @@ opens the work strip and counts the rows it opens: this chat's live subagents an
 its background shells, running and the last ended ones. With nothing of this chat's, the
 badge is the registry's count — background tasks and the turns of sessions you left,
 background shells of the whole process — and carries no `↓`, since there is nothing here to
-open. A `· K waiting` follows it, in the warn colour, while K rows of the strip wait on you:
-a y/n or a question parked in a subagent of this chat, or in one below it (`? waiting for
-you`).
+open. A `· K waiting` follows it while K rows of the strip wait on you — a y/n or a question
+parked in a subagent of this chat, or in one below it (`? waiting for you`) — and the whole
+badge, the count included, turns the warn colour then.
 
 `↓` on an empty line opens the strip — `J` and `/work` too (see The work picker below). The
 field and its hint row keep their rows whatever the chat's height: the plan above them gives
-way first, down to one line, and a question or a y/n takes the field's place, the strip not
-drawn while it waits. `↑` on the strip's first row closes it, as Esc does, while a
-deeper `↑` only moves the cursor; the strip's hint says which — `↑ close · ↓ pick` on the
-first row of a list of more than one, `↑↓ pick` below it, and neither on a list of one row,
-which has no move to pick from and no close to offer. `⏎` on a subagent's row watches it
-(see Watching a subagent or task), and on a shell's opens its kept output in the pager;
-`ctrl+d` stops a subagent with everything it started, or kills a shell, after the question
-that names its row. Esc closes the strip from any row, and a watch opened
-from the strip comes back to the field, not to the strip: the strip is one-shot, and `↓`
-opens it again. With a stop question up, a closing `↑` drops the question with the strip,
-exactly as Esc does.
+way first, down to one line, then not drawn at all, and a question or a y/n takes the field's
+place, its hint row staying under it, with `↓` opening nothing while one waits. `↑` on the
+strip's first row closes it, as Esc does, while a deeper `↑` only moves the cursor; the
+strip's hint says which — `↑ close · ↓ pick` on the first row of a list of more than one,
+`↑↓ pick` below it, and neither on a list of one row, which has no move to pick from and no
+close to offer. `⏎` on a subagent's row watches it (see Watching a subagent or task), and on
+a shell's opens its kept output in the pager; `ctrl+d` stops a subagent with everything it
+started, or kills a shell, after the question that names its row. Esc closes the strip from
+any row, and a watch opened from the strip comes back to the field, not to the strip: the
+strip is one-shot, and `↓` opens it again. With a stop question up, a closing `↑` drops the
+question with the strip, exactly as Esc does.
 
 **`/agents`** opens the whole tree where the conversation is: the live nodes in tree order
 with `<state> · <time spent>`, and the model added when a node runs one that is not the
@@ -357,12 +357,13 @@ model is named), then the last twenty that ended (`done`, `failed`, `stopped`, `
 `limit`, the time and the tokens). A background shell is a node of its own, `○ sh-3 · bun run
 dev`, saying how it runs with its line count (`running 4m · 312 lines`); among the ended
 ones it reads `exited 0 · 4m · 312 lines`.
-↑ and ↓ move, `x` asks the same question in place of the row and
-`y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. ⏎ on
-a live row closes the panel and shows that node's conversation; on an ended row it says there
-is nothing to watch, but an ended shell's output opens in the pager (see Commands that run
-on: background shells). The cursor stays on its node while others start and end. `/subagent`
-still prints the numbered list that `stop <number>` reads.
+↑ and ↓ move, `x` asks the same question in place of the row and `y` stops the node, Esc
+closes. On an ended row `x` only says there is nothing to stop. ⏎ on a live subagent's or
+task's row closes the panel and shows that node's conversation; on a shell's row, running or
+ended, it opens the output in the pager (see Commands that run on: background shells); on an
+ended subagent's or task's row it says there is nothing to watch. The cursor stays on its
+node while others start and end. `/subagent` still prints the numbered list that `stop
+<number>` reads.
 
 ### Watching a subagent or task
 
@@ -1135,8 +1136,9 @@ pager. The row of a shell the assistant started leaves `/agents`'s live rows onc
 to the assistant has carried its end (a held-back wake keeps it until your next message does); the
 row of one you started with `!cmd &` stays until you open it, and one you killed leaves at
 once. The strip's **Shells** tab lists every shell the session still holds, ended ones
-included, so a job that has left the tree is still there to open. The hint row's background
-count includes running shells.
+included, and `/agents` lists each of them too, the unread ended ones still as live nodes
+until their output is opened. The hint row's background count includes the shells, running
+and ended alike.
 
 **Leaving.** `/new`, a switch from the picker and `/resume` with shells running in the
 session ask first: `s` stops them, `k` keeps them running in the session you leave (it stays

@@ -1983,9 +1983,9 @@ export function renderChatModal({
   // The background badge of the hint row: the `↓` door and the number of rows it opens
   // while this chat has work (the same walk the key reads), the registry-wide count
   // otherwise, and `· N waiting` while a row of the door waits on the person (`bgWaiting`,
-  // the strip's own `asking`). The waiting part is drawn in the warn colour, bright: a
-  // thing waiting on a person is not a hint about a key, and it must not be greyed with
-  // the rest of the row.
+  // the strip's own `asking`). The whole badge is drawn in the warn colour then, its count
+  // with it, bright: a thing waiting on a person is not a hint about a key, and it must
+  // not be greyed with the rest of the row.
   const bgShown = bgDoor > 0 ? bgDoor : bgCount;
   const bgBadge = bgShown > 0
     ? `${bgDoor > 0 ? `${keyGlyph('down')} ` : ''}${bgShown} in background${bgWaiting > 0 ? ` · ${bgWaiting} waiting` : ''}`

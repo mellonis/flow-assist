@@ -9,16 +9,17 @@ What each version of flow-assist brought, newest first. The version is the one i
   work.** The hint is the last row of the chat's field strip, under the line you type in, and
   it never gives way: a plan above the field is what shrinks. The count it carries names the
   door — `↓ N in background`, N this chat's own work rows (its live subagents and tasks, its
-  background shells, the ended ones the strip still lists), with `· K waiting` in the warn
-  colour while K of them wait on you — and `↓` on an empty line opens the work strip; with no
-  work of this chat's, the badge is the registry's count over every conversation and carries
-  no `↓`. `↑` on the strip's first row closes it, the mirror of the `↓` that opened it (a
-  deeper `↑` only moves, and the hint says which: `↑ close · ↓ pick`). The tree block under
-  the field is gone, with its rows, its budget (`ui.agentRows` is removed), its keys (`x` to
-  stop, `y`/`n` to answer) and its `+K more — /agents` row: the strip watches, kills and
-  stops (`⏎`, `ctrl+d`), `/agents` stays the full list of nodes with the ended ones and their
-  times, and a watch's Esc lands in the field. With a stop question up, `↑` on the first row
-  drops it as Esc does.
+  background shells, the ended ones the strip still lists), with `· K waiting` while K of
+  them wait on you and the whole badge in the warn colour then — and `↓` on an empty line
+  opens the work strip; with no work of this chat's, the badge is the registry's count over
+  every conversation and carries no `↓`. `↑` on the strip's first row closes it, the mirror
+  of the `↓` that opened it, while the list has more than one row to walk (a deeper `↑` only
+  moves, and the hint says which: `↑ close · ↓ pick`; a list of one row has neither). The
+  tree block under the field is gone, with its rows, its budget (`ui.agentRows` is removed),
+  its keys (`x` to stop, `y`/`n` to answer) and its `+K more — /agents` row: the strip
+  watches, kills and stops (`⏎`, `ctrl+d`), `/agents` stays the full list of nodes with the
+  ended ones and their times, and a watch's Esc lands in the field. With a stop question up,
+  `↑` on the first row drops it as Esc does.
 
 - **The work picker: subagents and shells on two tabs of a bottom strip.** `J` opens one
   panel listing everything that runs beside the conversation — every live subagent and
@@ -38,8 +39,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   `kill sh-3? y yes · n no`), asked as `/agents`'s `x` asks it; `y` answers that row
   wherever the cursor has moved since, and a question whose work ends while it is up
   stops nothing and says so. Esc closes, and the picker does not come back from a watch —
-  it is one-shot. `↑` on its first row closes it as Esc does. The capital acts wherever the
-  chat does not have the keyboard, and `config set keys.work` moves it; `:help` lists it.
+  it is one-shot. `↑` on its first row closes it as Esc does, while the list has more than
+  one row. The capital acts wherever the chat does not have the keyboard, and `config set
+  keys.work` moves it; `:help` lists it.
 
 - **A question waits out the sentence you are typing.** A question that parks while you
   are still typing — the assistant's own `ask_user`, or a subagent's question put to you —

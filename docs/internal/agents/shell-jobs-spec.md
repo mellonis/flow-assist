@@ -191,7 +191,10 @@
   panel: `s` stops them
   and leaves, `k` leaves the session headless with its jobs, Esc stays, and a pending y/n or
   question blocks the leave; a refused switch from the picker brings the picker back with its
-  notice. The footer's `N in background` adds `registry.shellCount()`.
+  notice. The hint row's `N in background` counts the work strip's rows — this chat's live
+  subagents and its shells, running and the ended ones the strip lists — and reads the
+  registry's count over every conversation (background tasks, `leftRunning()`,
+  `shellCount()`) only when this chat has no work of its own.
   **Journal**: `job-start {id, command, cwd, by}` (stamped `at` with the spawn time),
   `job-out` (coalesced as `shell-out`, capped as it, by id) and `job-end {id, ms, code, by:
   'self'}` or `{killed: true, by: person | model | clear | exit | parent | signal}`; a
