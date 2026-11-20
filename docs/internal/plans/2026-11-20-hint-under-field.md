@@ -303,7 +303,12 @@ test('↑ on the first row closes the strip; a deeper ↑ only moves; Esc closes
 - Modify: `docs/internal/agents/ask-children-spec.md` — the "agent tree" section (116–150):
   the rows are no longer drawn under the field; `treeRows`/`treeBudget`/`ui.agentRows`
   gone; `Conversation.tree()` feeds `/agents` and the work strip; the stop question and
-  the cursor belong to `/agents` only.
+  the cursor belong to `/agents` only (the cursor rule `treeCursor` and `TreeRow` were
+  deleted with the block in Task 3 — the `/agents` panel follows its cursor itself).
+- Modify: `docs/internal/agents/shell-jobs-spec.md` (≈164) — it still names `TreeRow.ended`
+  and the row under the field; the job now shows in the work strip and in `/agents`.
+- Modify: `docs/usage.md` (≈444) — the work strip's keys line still says only "↑ and ↓ move
+  among the rows"; add that `↑` on the first row closes it (the hint says `↑ close · ↓ pick`).
 - Modify: `CHANGELOG.md` — under `Unreleased`: hint row under the field; the tree block
   removed (the work strip is the one place; `↓` opens, `↑` closes from the first row); the
   hint's `N in background` names the door and says `K waiting`; `ui.agentRows` removed.
