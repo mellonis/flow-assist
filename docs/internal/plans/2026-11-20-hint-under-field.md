@@ -138,19 +138,21 @@ test('the hint row is the last row inside the box, under the field; the plan is 
   `src/__tests__/work-hint.e2e.test.ts`.
 
 **Interfaces:**
-- Produces: `renderChatModal` props `bgDoor = false: boolean` (this chat's subtree has
-  work rows — `workRowsOf(conv).length > 0`) and `bgWaiting = 0: number` (live subagent
-  nodes of this chat with `status === 'waiting' || status === 'asks'`, shells excluded).
-  The badge text is
-  `${bgDoor ? keyGlyph('down') + ' ' : ''}${bgCount} in background${bgWaiting ? ` · ${bgWaiting} waiting` : ''}`,
-  drawn with `color: m.warn` when `bgWaiting > 0`, else dim.
+- Produces: `renderChatModal` props `bgDoor = 0: number` (this chat's work rows —
+  `workRowsOf(conv).length`) and `bgWaiting = 0: number` (live subagent nodes of this
+  chat with `status === 'waiting' || status === 'asks'`, shells excluded). The badge
+  text is
+  `${bgDoor > 0 ? keyGlyph('down') + ' ' : ''}${bgDoor > 0 ? bgDoor : bgCount} in background${bgWaiting ? ` · ${bgWaiting} waiting` : ''}`,
+  drawn with `color: m.warn` when `bgWaiting > 0`, else dim. The number is the door's
+  count while the door has work (a resting idle subagent exists with `bgCount` 0), the
+  registry-wide count otherwise.
 
 - [ ] **Step 1: Write the failing tests**:
 
 ```ts
-test('the bg badge names the ↓ door when this chat has work', async () => { /* bgCount: 1, bgDoor: true → toContain('↓ 1 in background') */ });
-test('a waiting subagent says so in warn beside the count', async () => { /* bgCount: 2, bgDoor: true, bgWaiting: 1 → toContain('· 1 waiting'); the cell's fg is the warn colour */ });
-test('with no work of this chat the badge stays the plain registry count', async () => { /* bgCount: 1, bgDoor: false → toContain('1 in background'); not.toContain('↓') */ });
+test('the bg badge names the ↓ door and counts its rows when this chat has work', async () => { /* bgCount: 0, bgDoor: 2 → toContain('↓ 2 in background') */ });
+test('a waiting subagent says so in warn beside the count', async () => { /* bgCount: 2, bgDoor: 2, bgWaiting: 1 → toContain('· 1 waiting'); the cell's fg is the warn colour */ });
+test('with no work of this chat the badge stays the plain registry count', async () => { /* bgCount: 1, bgDoor: 0 → toContain('1 in background'); not.toContain('↓') */ });
 ```
 
 - [ ] **Step 2: Run them — expect FAIL** (props and wording do not exist).
