@@ -321,7 +321,8 @@ test('/subagent lists a subagent that waits for the answer as waiting', async ()
 });
 
 test('the notice line is a row of the field\'s place: a plan that fit whole gives way to one line when it stands', async () => {
-  const { model, children: [a], ui } = await boot(['PLAN-ONE'], { hold: true, rows: 18, cols: 100 });
+  // 17 rows: the whole plan fits, and the notice row is what tips it to one line.
+  const { model, children: [a], ui } = await boot(['PLAN-ONE'], { hold: true, rows: 17, cols: 100 });
   model.script([{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }], [{ text: 'Planned.' }]);
   await ask(ui, '/subagent PLAN-ONE do it');
   await settleUntil(() => a!.child.held);
