@@ -437,6 +437,24 @@ test('chat omits the todo block when the plan is empty', async () => {
   handle.unmount();
 });
 
+test('the hint row is the last row inside the box, under the field; the plan is above the field', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [],
+    todo: [{ id: 't1', text: 'one', status: 'pending' }],
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const hint = rows.findIndex((r) => r.includes('history · wheel'));
+  const field = rows.findIndex((r) => r.includes('send ·'));
+  const plan = rows.findIndex((r) => r.includes('▾ plan'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(plan).toBeGreaterThan(0);
+  expect(field).toBeGreaterThan(plan);
+  expect(hint).toBeGreaterThan(field);
+  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
+  handle.unmount();
+});
+
 test('chat shows the async-command spinner status line while streaming', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(

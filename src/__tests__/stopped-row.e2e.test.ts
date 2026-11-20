@@ -31,12 +31,13 @@ function heldEditor(opts: { view?: boolean } = {}) {
   return { guest, release: () => release() };
 }
 
-// The conversation's rows between the frame's top and the hint row, blank ones dropped.
+// The conversation's rows between the frame's top and the field under it, blank ones
+// dropped: the field and the hint row below it are the strip, not conversation.
 const conversation = (frame: string) => {
   const rows = frame.split('\n').map((r) => r.replace(/^\s*│\s?/, '').replace(/\s*│\s*$/, ''));
   const top = rows.findIndex((r) => r.includes('› stop the edit'));
-  const hint = rows.findIndex((r, i) => i > top && /history · wheel/.test(r));
-  return rows.slice(top, hint).filter((r) => r.trim());
+  const field = rows.findIndex((r, i) => i > top && r.includes('⏎ '));
+  return rows.slice(top, field).filter((r) => r.trim());
 };
 
 async function stoppedMidEdit(view: boolean, extra: Record<string, unknown> = {}) {

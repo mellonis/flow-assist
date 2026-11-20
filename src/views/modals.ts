@@ -2071,84 +2071,6 @@ export function renderChatModal({
       },
       chatRow,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
-      // The hint on the left, how full the model's context is on the right — it stays
-      // put while the hint changes, and turns yellow when it is time to /compact.
-      // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
-      pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
-      // A watched child: what it does (or the stop question) on the left, the keys on the
-      // right; a y/n that waits elsewhere is one line above, and `x stop` is not offered
-      // while a y/n of the node stands (a `y` means one thing).
-      watch ? h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
-        watch.notice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, watch.notice) : null,
-        h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
-          h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-            h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
-          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
-      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
-      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-      (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
-        // Working: what is happening NOW is the bright part. A tool that is running
-        // pulses through the accent colours; with none running the model is either
-        // thinking (waiting for its first token, reasoning, working out the next tool
-        // call) or writing (its text is arriving) — never the name of the last tool.
-        // The seconds are that running thing's, not the turn's: a turn that runs a
-        // build sat at `3m 12s`, which says nothing about what is happening now. What
-        // the turn has cost so far stands beside them, when the provider says.
-        ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
-            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${formatDuration(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
-            toolLabel
-              // `Shimmer` takes the label as a string and colours it per character, so
-              // it is the label itself that is handed over, not a styled child.
-              ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
-              // No tool: the request's own word, with the tool's shimmer — the colour
-              // says which phase, magenta while the model thinks, the assistant's
-              // accent while its text arrives.
-              : h(Box, { overflow: 'hidden' }, h(Shimmer, {
-                  color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
-                  highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
-                  children: `${verb || VERBS[0]}…`,
-                })),
-            stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
-        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint && !treeKeys) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
-        armedHint
-          ? armedHint
-          : escArmed
-          ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
-          : treeKeys
-          ? `${CAP.upDown} move · x ${treeShown.find((r) => r.key === tree!.cursor)?.ended ? 'dismiss' : 'stop'} · ${CAP.esc} back`
-          : emptyNotice
-              ? `⚠ ${emptyNotice}`
-              // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
-              // and a hint that has been there all along must not be the one to fall
-              // off for a newcomer. The mode itself is stated beside the row, not in
-              // it, so nothing about the mode is lost to the cut.
-              // A hint for an action nobody has a key for is not shown at all — a key
-              // on screen is an instruction, and `config.keys.details: []` disables it.
-              // In shell mode the row starts with the shell's directory — where the
-              // command will run — cut from the left when long, so its tail stays; the
-              // field's own row says what ⏎ does there, this one the other keys.
-              : bangLevel && shellCwd
-              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
-              // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
-              // names them instead of the history it does not walk here. A click folds
-              // too, and the row says so: a fold a person finds by clicking needs no
-              // manual. With the field offering `⏎ continue` after a limit, ⏎ is the
-              // field's and is not a fold.
-              // A y/n, a question or the `/context` panel takes the keys, and the
-              // panel's keys are not offered then.
-              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
-              ? (continueOffer
-                ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
-                : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
-              : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
-                  imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
-      waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
-        waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
-        unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
-      // A sibling of the hint, not part of it: the left cell is the hint OR the status
-      // of a running turn, and the mode has to stay on screen through both.
-      autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
-      contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. In a chat
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
@@ -2258,6 +2180,85 @@ export function renderChatModal({
                     : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
               }))),
       ),
+      // The last row inside the box: the field keeps the keys, this says what they are.
+      // The hint on the left, how full the model's context is on the right — it stays
+      // put while the hint changes, and turns yellow when it is time to /compact.
+      // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
+      pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
+      // A watched child: what it does (or the stop question) on the left, the keys on the
+      // right; a y/n that waits elsewhere is one line above, and `x stop` is not offered
+      // while a y/n of the node stands (a `y` means one thing).
+      watch ? h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+        watch.notice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, watch.notice) : null,
+        h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+          h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+            h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
+          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
+      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+      (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
+        // Working: what is happening NOW is the bright part. A tool that is running
+        // pulses through the accent colours; with none running the model is either
+        // thinking (waiting for its first token, reasoning, working out the next tool
+        // call) or writing (its text is arriving) — never the name of the last tool.
+        // The seconds are that running thing's, not the turn's: a turn that runs a
+        // build sat at `3m 12s`, which says nothing about what is happening now. What
+        // the turn has cost so far stands beside them, when the provider says.
+        ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
+            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${formatDuration(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
+            toolLabel
+              // `Shimmer` takes the label as a string and colours it per character, so
+              // it is the label itself that is handed over, not a styled child.
+              ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
+              // No tool: the request's own word, with the tool's shimmer — the colour
+              // says which phase, magenta while the model thinks, the assistant's
+              // accent while its text arrives.
+              : h(Box, { overflow: 'hidden' }, h(Shimmer, {
+                  color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+                  highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
+                  children: `${verb || VERBS[0]}…`,
+                })),
+            stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
+        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint && !treeKeys) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+        armedHint
+          ? armedHint
+          : escArmed
+          ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
+          : treeKeys
+          ? `${CAP.upDown} move · x ${treeShown.find((r) => r.key === tree!.cursor)?.ended ? 'dismiss' : 'stop'} · ${CAP.esc} back`
+          : emptyNotice
+              ? `⚠ ${emptyNotice}`
+              // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
+              // and a hint that has been there all along must not be the one to fall
+              // off for a newcomer. The mode itself is stated beside the row, not in
+              // it, so nothing about the mode is lost to the cut.
+              // A hint for an action nobody has a key for is not shown at all — a key
+              // on screen is an instruction, and `config.keys.details: []` disables it.
+              // In shell mode the row starts with the shell's directory — where the
+              // command will run — cut from the left when long, so its tail stays; the
+              // field's own row says what ⏎ does there, this one the other keys.
+              : bangLevel && shellCwd
+              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
+              // `/diff` drawn and nothing typed: ↑/↓ and ⏎ are the panel's, so the row
+              // names them instead of the history it does not walk here. A click folds
+              // too, and the row says so: a fold a person finds by clicking needs no
+              // manual. With the field offering `⏎ continue` after a limit, ⏎ is the
+              // field's and is not a fold.
+              // A y/n, a question or the `/context` panel takes the keys, and the
+              // panel's keys are not offered then.
+              : diffShown && !input && !pendingConfirm && !pendingQuestion && !askNotice && !contextPanel
+              ? (continueOffer
+                ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
+                : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
+              : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
+                  imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
+      waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
+        waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
+        unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
+      // A sibling of the hint, not part of it: the left cell is the hint OR the status
+      // of a running turn, and the mode has to stay on screen through both.
+      autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
+      contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The live subagents and tasks, the last block of the column: one line per row, the
       // cursor's row inverted as a picker's is, or, once `x` was pressed, replaced by the stop
       // question in the warn colour. Chrome, not conversation: out of every selection.
