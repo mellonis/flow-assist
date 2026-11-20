@@ -489,6 +489,70 @@ test('chat footer shows the live background-task count when bg tasks are running
   handle.unmount();
 });
 
+test('the bg badge names the ↓ door and counts its rows when this chat has work', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      // The registry-wide count is 0 (a chat of resting children), and the door still has
+      // two rows: the number is the door's, and the key that opens it is named.
+      bgCount: 0,
+      bgDoor: 2,
+    }),
+    backend,
+  );
+  expect(backend.lastFrame).toContain(`${keyGlyph('down')} 2 in background`);
+  expect(backend.lastFrame).not.toContain('waiting');
+  handle.unmount();
+});
+
+test('a waiting subagent says so in warn beside the count', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      // The palette the real app resolves (MODAL_COLOR_DEFAULTS' `warn`); given whole here.
+      theme: { modals: { chat: { warn: 'yellow' } } },
+      bgCount: 2,
+      bgDoor: 2,
+      bgWaiting: 1,
+    }),
+    backend,
+  );
+  const frame = backend.lastFrame;
+  expect(frame).toContain('2 in background · 1 waiting');
+  const rows = frame.split('\n');
+  const at = rows.findIndex((r) => r.includes('1 waiting'));
+  const style = backend.lastBuffer!.get(rows[at]!.indexOf('1 waiting'), at).style as { fg?: string; dim?: boolean };
+  // Something waiting on the person is not greyed with the hint.
+  expect(style.fg).toBe('yellow');
+  expect(style.dim).toBeFalsy();
+  handle.unmount();
+});
+
+test('with no work of this chat the badge stays the plain registry count', async () => {
+  const backend = new TestBackend(140, 24);
+  const handle = await render(
+    h(renderChatModal, {
+      ...baseChat,
+      width: 140,
+      messages: [],
+      bgCount: 1,
+      bgDoor: 0,
+    }),
+    backend,
+  );
+  expect(backend.lastFrame).toContain('1 in background');
+  // No door to name: the badge is the count alone. (The row's own `↑↓ history` carries the
+  // glyph, so the door is read by its badge and not by the bare arrow.)
+  expect(backend.lastFrame).not.toContain(`${keyGlyph('down')} 1 in background`);
+  handle.unmount();
+});
+
 test('chat footer omits the bg-count indicator when none are running', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(

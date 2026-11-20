@@ -36,6 +36,9 @@ import { formatDuration } from '../assistant/duration.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
+// The inline piece of ONE line of text (the `Span` named below is the local type of a
+// laid-out markdown span, not the component).
+import { Span as TextSpan } from '@flowtty/react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import { diffPanelLayout } from '../runtime/panel-layout.js';
 import type { CompletionList } from '../config/commandline.js';
@@ -1748,6 +1751,8 @@ export function renderChatModal({
   onViewFail,
   completion = null,
   bgCount = 0,
+  bgDoor = 0,
+  bgWaiting = 0,
   waitingElsewhere = 0,
   unreadElsewhere = 0,
   contextBadge = '',
@@ -1885,6 +1890,13 @@ export function renderChatModal({
   onViewFail?: (kind: string, why: string) => void;
   completion?: Completion | null;
   bgCount?: number;
+  // This chat's own work rows, the ones the `↓` door opens (`workRowsOf` in the assistant
+  // plugin — the same predicate the key reads), and how many of its live subagents wait on
+  // the person now (`waiting`/`asks`; a shell waits on no one). While the door has rows the
+  // badge counts THEM and names the key: a chat of resting children still has a door, and
+  // the registry-wide `bgCount` would say 0.
+  bgDoor?: number;
+  bgWaiting?: number;
   // Other sessions of this host that wait for an answer (`⏸`) and ones put away with an
   // answer nobody read (`●`), drawn beside the badges, which no state of the hint hides.
   waitingElsewhere?: number;
@@ -2005,6 +2017,20 @@ export function renderChatModal({
           scroll: { isActive: !!focused && !pager && !watch && !room.hidden },
         }))
     : null;
+  // The background badge of the hint row: the `↓` door and the number of rows it opens
+  // while this chat has work (the same predicate the key reads), the registry-wide count
+  // otherwise, and `· N waiting` while a subagent of this chat waits on the person. The
+  // waiting part is drawn in the warn colour, bright: a thing waiting on a person is not a
+  // hint about a key, and it must not be greyed with the rest of the row.
+  const bgShown = bgDoor > 0 ? bgDoor : bgCount;
+  const bgBadge = bgShown > 0
+    ? `${bgDoor > 0 ? `${keyGlyph('down')} ` : ''}${bgShown} in background${bgWaiting > 0 ? ` · ${bgWaiting} waiting` : ''}`
+    : '';
+  // The hint row's own keys, the badge appended to them as a span. Said apart from the
+  // badge because the hint can stand for a status instead (`Esc stops`, a notice, the
+  // tree's keys), and none of those ends with the badge.
+  const hintKeys = [`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
+    imagesOn && `${CAP.image} image`, `${CAP.auto} auto`].filter(Boolean).join(' · ');
   // The conversation and whatever stands in its place, in a column of their own: the
   // split stands beside them, and the pager keeps their half. One parent whether or not
   // the panel is open — a list moved to another parent is mounted anew, and `/diff`
@@ -2258,8 +2284,11 @@ export function renderChatModal({
                 ? (continueOffer
                   ? `${CAP.upDown} file · click fold · ${CAP.esc} close`
                   : `${CAP.upDown} file · click or ${CAP.enter} fold · ${CAP.esc} close`)
-                : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
-                    imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
+                // The badge ends the row as a span, so the hint is ONE paragraph: measured
+                // and cut as a single line, the string around it untouched. With nothing
+                // to say the row is that string alone: a second child — even an empty
+                // string — leaves the row blank (flowtty lays text and children apart).
+                : [hintKeys, ...(bgBadge ? [h(TextSpan, bgWaiting > 0 ? { color: m.warn, dim: false } : {}, ` · ${bgBadge}`)] : [])])),
         waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
           waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
           unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,

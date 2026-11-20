@@ -9,6 +9,7 @@ import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
 import { listSessions } from '../assistant/sessions.ts';
+import { keyGlyph } from '../playback/keys.ts';
 import { listTree, sessionFiles } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -70,8 +71,10 @@ test('a held subagent runs while the person sends a message and gets its answer;
   await settleUntil(() => frameOf(ui).includes('◆ find-me-the finished:'));
   expect(frameOf(ui)).toContain('◆ find-me-the finished:');
   expect(frameOf(ui)).toContain('It is in the third file.');
-  await settleUntil(() => !frameOf(ui).includes('in background'));
-  expect(frameOf(ui)).not.toContain('in background');
+  await settleUntil(() => frameOf(ui).includes('find-me-the · idle'));
+  // The run is over — nothing is in flight — and its resting row is still under the `↓`
+  // door, so the badge names the door and counts the row it opens, not background work.
+  expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 1 in background`);
   ui.app.unmount();
 });
 

@@ -3760,6 +3760,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // left running (`leftRunning`, redrawn by the registry when one ends) and
             // the background shells that run (`shellCount`).
             bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning() + registryRef.current!.shellCount(),
+            // This chat's own work rows — the same predicate the `↓` key opens on
+            // (`workRowsOf`) — and how many of its subagents wait on the person now (a y/n
+            // or a question put to it; a shell waits on no one). The hint's badge counts
+            // the door's rows while the door has work and says who waits.
+            bgDoor: workRowsOf(conv).length,
+            bgWaiting: conv.tree().filter((n) => !n.shell && (n.status === 'waiting' || n.status === 'asks')).length,
             // The other sessions that wait for an answer or were put away unread: the
             // one on screen never counts itself.
             ...(() => { const o = registryRef.current!.attention(); return { waitingElsewhere: o.waiting, unreadElsewhere: o.done }; })(),
