@@ -159,10 +159,15 @@
   trailing `&` — not `&&`, `|&`, `>&`, `\&`, not inside quotes, not after a word-initial `#` —
   and starts a `by: 'person'` job with the whole environment in the conversation's directory,
   without holding the field. `Conversation.tree()` makes kept jobs `TreeNode`s of
-  `kind: 'shell'` (`key job:sh-N`) after the children of their level: running ranks as `working`,
-  an ended unread one as `idle` + `answered` until read (`readJob`); `x` then `y` on a running row is
-  `killJob`, `x` on an ended row is `readJob` with no question (the `TreeRow.ended` flag turns the hint
-  to `x dismiss`). The ended row of a job the model started (`by: 'model'`) is read when a request to
+  `kind: 'shell'` (`key job:sh-N`, carrying the job as `shell`: id, command, state, running,
+  ms, lines) after the children of their level: a running one ranks as `working`, an ended
+  one nobody has read — a shell the person killed reads at once — as `idle` + `answered`
+  until `readJob` reads it, which opening its output does.
+  The job is listed in `/agents` (`○ sh-3 · bun run dev` with `running 4m · 312 lines`, and
+  `exited 0 · 4m · 312 lines` among the ended ones) and in the work strip's Shells tab
+  (`sh-3 · bun run dev`, `running — this chat`). `x` then `y` on a running `/agents` row is `killJob(job, 'person')`,
+  asked in the row's place as `kill sh-3? y yes · n no`; `x` on an ended row says there is
+  nothing to stop. The ended row of a job the model started (`by: 'model'`) is read when a request to
   the model carries its end: `landInbox` notes the id in `landedEnds`, `runTurn` calls `endsSent()` once
   it has built the history. A wake held back by a guard, or `ai.backgroundFollowUp: false`, lands the
   end with no request, so the row stays until the next message; a person's job never leaves this way.
@@ -174,10 +179,13 @@
   the registry still holds (`ShellJob`, running, plus the ended records each
   conversation keeps under `MAX_ENDED_JOBS`) with `<state> — <owner conversation's
   label>` (`this chat` for the session's own), ended rows sinking below the running
-  ones. Its ⏎ opens the kept output in that same pager; its `ctrl+d` asks `kill sh-N?
+  ones. Its ⏎ opens the kept output in that same pager — the read that marks an ended job
+  read, so its live `/agents` row gives way to the ended list — and its `ctrl+d` asks `kill sh-N?
   y yes · n no` in the row's place and `y` is `killJob(job, 'person')` through the
   registry's own path, never a shell string on a command line. The rows are read at
-  every draw, so a state follows the job.
+  every draw, so a state follows the job. `↑` on its first row closes the strip as Esc does
+  (deeper it only moves), and a watch opened from it comes back to the field: the strip is
+  one-shot, and the `↓` door opens it again.
   `askLeave` (`/new`, a picker switch, `/resume n`) lists the shells (`shownJobs()`, subagents' too;
   a probe still within its settle is none, and the session stays loaded for its running turn) in a
   panel: `s` stops them

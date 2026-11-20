@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The hint row sits under the field, and the work strip is the one place for background
+  work.** The hint is the last row of the chat's field strip, under the line you type in, and
+  it never gives way: a plan above the field is what shrinks. The count it carries names the
+  door — `↓ N in background`, N this chat's own work rows (its live subagents and tasks, its
+  background shells, the ended ones the strip still lists), with `· K waiting` in the warn
+  colour while K of them wait on you — and `↓` on an empty line opens the work strip; with no
+  work of this chat's, the badge is the registry's count over every conversation and carries
+  no `↓`. `↑` on the strip's first row closes it, the mirror of the `↓` that opened it (a
+  deeper `↑` only moves, and the hint says which: `↑ close · ↓ pick`). The tree block under
+  the field is gone, with its rows, its budget (`ui.agentRows` is removed), its keys (`x` to
+  stop, `y`/`n` to answer) and its `+K more — /agents` row: the strip watches, kills and
+  stops (`⏎`, `ctrl+d`), `/agents` stays the full list of nodes with the ended ones and their
+  times, and a watch's Esc lands in the field. With a stop question up, `↑` on the first row
+  drops it as Esc does.
+
 - **The work picker: subagents and shells on two tabs of a bottom strip.** `J` opens one
   panel listing everything that runs beside the conversation — every live subagent and
   task (its label path, `running — <what it is doing>`, `? waiting for you` when a question
@@ -20,11 +35,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   Enter just closes the picker and its request block takes the keyboard. `ctrl+d` stops a
   subagent with everything it started, or kills a shell — SIGTERM to the group, SIGKILL
   two seconds later — after the question that names its row (`stop review? y yes · n no`,
-  `kill sh-3? y yes · n no`), asked as the tree's `x` asks it; `y` answers that row
+  `kill sh-3? y yes · n no`), asked as `/agents`'s `x` asks it; `y` answers that row
   wherever the cursor has moved since, and a question whose work ends while it is up
   stops nothing and says so. Esc closes, and the picker does not come back from a watch —
-  it is one-shot. The capital acts wherever the chat does not have the keyboard, and
-  `config set keys.work` moves it; `:help` lists it.
+  it is one-shot. `↑` on its first row closes it as Esc does. The capital acts wherever the
+  chat does not have the keyboard, and `config set keys.work` moves it; `:help` lists it.
 
 - **A question waits out the sentence you are typing.** A question that parks while you
   are still typing — the assistant's own `ask_user`, or a subagent's question put to you —
@@ -220,7 +235,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   Esc closes the list and keeps the text until it changes. At most eight rows show, scrolled
   around the selection with a count (`3/41`), and the list keeps its height while you type.
   One candidate still completes inline with ⇥; with the list closed, ↑/↓ keep their jobs
-  (history, earlier messages, the rows under the field). The `⇥ a · b` row of other candidates
+  (history, earlier messages; `↓` opens the work strip). The `⇥ a · b` row of other candidates
   is gone.
 
 - **Agents the assistant cannot start are visible, and `:config set` completes keys that are not set yet.**
@@ -244,12 +259,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   check is by the file (its source and real path), so a child of one agent that runs another may start
   neither.
 
-- **Background shells: the row of a shell the assistant started leaves once it has the end, and `x` dismisses an ended row.**
+- **Background shells: the row of a shell the assistant started leaves once it has the end, and opening an ended row reads it.**
   When a request to the assistant carries the end of a shell it started, its row leaves the tree; the
   job stays in `/agents` with its output. A wake held back (the cap, another session on screen,
   `ai.backgroundFollowUp: false`) keeps the row until your next message carries the end. The row of a
-  shell you started with `!cmd &` stays until you open or dismiss it. `x` on an ended row dismisses it
-  with no question, and the hint under the field says `x dismiss`; on a running row it still asks to
+  shell you started with `!cmd &` stays until you open it. ⏎ on an ended row opens its output, which
+  reads it, and `x` there says there is nothing to stop; on a running row `x` asks to
   kill. The `run_command` and `shell_output` descriptions tell the assistant not to call `shell_output`
   in a loop to wait for the end, which comes to it by itself and usually starts its next turn.
 
@@ -277,9 +292,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   100 lines at most), `shell_kill` stops one of its conversation after a y/n (SIGTERM, SIGKILL after
   2 seconds; `shell.autoRun` frees it as it frees `run_command`) and `shell_list` lists them.
   `shell.maxBackground` (4) shells run at once and each keeps its last `shell.jobChars` (64000)
-  characters. A shell is a row in the tree under the field (`○ sh-3 · bun run dev · running 4m · 312
-  lines`): ⏎ opens its whole kept output in the pager, `x` then `y` stops it, and the last 20 ended
-  ones stay in `/agents`. A shell's end (exit code, duration, last 20 lines) goes to the conversation
+  characters. A shell is a row in the work strip's Shells tab (`sh-3 · bun run dev`, with its
+  state and owner) and in `/agents` (`○ sh-3 · bun run dev · running 4m · 312 lines`): ⏎
+  opens its whole kept output in the pager, `ctrl+d` in the strip, or `x` then `y` in
+  `/agents`, stops it, and the last 20 ended ones stay in `/agents`. A shell's end (exit
+  code, duration, last 20 lines) goes to the conversation
   that started it, as data, with a toast. The end of a shell the assistant started wakes it to a turn of
   its own only when the conversation is idle with nothing asked, the session is the one on screen, the
   turn runs under its own auto mode and round cap, and fewer than three such turns have run without a
@@ -319,8 +336,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   the plugin. The assistant starts a file you have started with the `subagent` tool's `agent`
   and `args`, from a list in its system prompt. The journal records the file's path and hash.
 - **A task or a subagent can ask its parent a question.** With `ask_parent` it asks one question
-  and waits, its place given up as for a y/n (`? <name> · asks its parent` under the field); the
-  answer is its tool result. A question from a task goes to the conversation its result would go
+  and waits, its place given up as for a y/n (`asking` in its work strip row, `? <name> · asks
+  its parent` in `/agents`); the answer is its tool result. A question from a task goes to the conversation its result would go
   to, whose assistant reads it as data in a turn of its own and answers with `answer_child` in that
   same turn, asking you first if it must (the child reads that answer fenced as the model's words,
   never as yours); with no answer by the end of that turn, or when that conversation
@@ -342,10 +359,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   and `/export` see the plain text. A subagent you stop keeps the results that waited in
   its inbox as rows in its journal and export.
 - **A subagent you start stays after its answer, and you can write to it.** Its first answer
-  lands in the conversation as a `◆` message, as a background task's does; the subagent then rests (`◦ <name> ·
-  idle` under the field, `idle` in `/subagent`) with no slot and no timer, until you stop it
-  (`x` `y` on its row, `/subagent stop`), `/clear` it, or flow-assist exits. A task, and a
-  subagent the assistant starts, end with their answer.
+  lands in the conversation as a `◆` message, as a background task's does; the subagent then rests (`idle` in its
+  work strip row, `◦ <name> · idle` in `/agents`, `idle` in `/subagent`) with no slot and no timer, until you stop it
+  (`ctrl+d` then `y` on its strip row, `x` then `y` in `/agents`, `/subagent stop`), `/clear`
+  it, or flow-assist exits. A task, and a subagent the assistant starts, end with their answer.
 - **`/subagent tell <number or name> <text>`** sends a message to a subagent you started. A
   resting one runs a turn of its own on it, with its original task in front of it, taking a
   slot for that turn like any job; a working one takes it at its next step. The answer to a
@@ -417,11 +434,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
   and the wheel scroll them, End jumps to the end, and the details key opens or folds all of
   them. The frame title names the path (`ƒ Flow Assist (big-model) · fix-tests › read-logs`).
-  The hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
+  The hint row says what the node is doing (`⚙ <latest step>`, `⏸ waiting
   for a y/n`, `○ queued`), with `x stop · Esc back` on the right. Esc steps back and does
-  not stop the child; from a watch that began in the rows it puts the cursor on the node's
-  row, unless a y/n waits somewhere in the tree, in which case the cursor stays in the field
-  and that block is shown at once. `x` asks `stop <name> and N below it? y yes · n no` in the hint row, and `y` stops
+  not stop the child, landing in the field, where a y/n waiting anywhere in the tree is shown
+  at once. `x` asks `stop <name> and N below it? y yes · n no` in the hint row, and `y` stops
   the node and what it started. The sessions key opens the picker; Ctrl+C never stops your conversation's turn from here
   and arms the exit; every other key, ⇧⇥ included, is swallowed, so nothing is typed, sent or
   queued. A node that ends
@@ -436,32 +452,17 @@ What each version of flow-assist brought, newest first. The version is the one i
   that was open is dropped, so a `y` means one thing. The oldest request of the tree, when it
   belongs to another node, is one line, `⏸ <name> waits for a y/n — Esc to answer`. The conversation's own y/n or question,
   the settings file's y/n included, ends the watch; the y/n waits the same pause.
-- **A question of the conversation's own that arrives while the cursor is in the rows, or
-  that ends a watch, takes no key for 600 ms.** A ⏎ on its way to the rows does not pick an
+- **A question of the conversation's own that arrives while another holder has the keys — a
+  watch, a child's block — takes no key for 600 ms.** A ⏎ on its way there does not pick an
   option. With neither on screen a question takes keys at once.
 
-- **A conversation's live subagents and tasks are listed under the field.** One row each,
-  `⚙ <name> · <latest step>` while it works, `⏸ … · waiting for a y/n`, `○ … · queued` or
-  `in 4m` for one that has not started; what a node started is indented under it. The rows
-  are the last thing in the chat and give way first when the chat is short (the plan comes
-  next, never the field, the hint row or a y/n), and they are not drawn while a question,
-  a y/n, `/context`, the pager, a picker or a command's panel is. `ui.agentRows` sets how
-  many (4 by default, 0 to 8, 0 draws none); with more live nodes than rows the ones
-  that wait for you come first and the last row reads `+K more — /agents`.
-- **↓ on an empty line steps into those rows, and `x` stops one.** ↓ moves the cursor
-  to the first row (not from a history entry, not in shell mode); ↑ and ↓ walk the rows,
-  ↑ on the first and Esc go back to the line. `x` asks `stop <name> and N below it? y yes
-  · n no` in place of that row, and `y` stops the node and what it started, as
-  `/subagent stop` does. While the cursor is in the rows every key is theirs, except
-  the sessions key, which clears the cursor and opens the picker; a
-  subagent's y/n cannot be answered: a line says `⏸ <name> waits for a y/n — Esc to
-  answer`, and after Esc the block is armed afresh like any block that has just appeared.
 - **`/agents` shows the whole tree.** In the conversation's place: the live nodes in tree
   order with the time each has spent, then the last twenty that ended with how they ended.
-  `x` and `y` stop the node under the cursor, as in the rows; Esc closes it. A subagent's
+  `x` and `y` stop the node under the cursor, as the work strip's `ctrl+d` does; Esc closes
+  it. A shell's row, live or ended, opens its kept output in the pager with ⏎. A subagent's
   y/n is not drawn or answerable while it is open.
-- **A y/n of the conversation's own that arrives over a command's panel, or while the
-  cursor is in the rows, takes no answer for 600 ms.** A `y` on its way to the panel or
+- **A y/n of the conversation's own that arrives over a command's panel or a watch takes no
+  answer for 600 ms.** A `y` on its way to the panel or
   to the stop question does not approve the write. It applies to every command's panel,
   a plugin's included; with neither on screen an own y/n is answered at once, as before.
 - **`/subagent` starts a job beside the chat, and it may write.** `/subagent <prompt>` (or

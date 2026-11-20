@@ -113,14 +113,20 @@
   answer; every other question reads `dismissed`. A child's question (`ask_parent`) is a
   free-text block and takes none of this: its field is open from the start and Esc
   settles it.
-- **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
-  rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
+- **The agent tree (agent tree)** is a conversation's live subagents, tasks and background
+  shells, listed by `/agents` and by the work strip. No rows of it are drawn under the field:
+  the hint row there carries the count and the door — `↓ N in background` while this chat has
+  work (N the strip's rows, the same walk the `↓` key reads) and `· K waiting` in the warn
+  colour while K rows wait on the person — and the plan above the field, never the field or
+  its hint, is what gives way. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
   conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / asks / queued /
   delayed / idle, `answered` — an idle node whose latest answer nobody has read, `latest` — the tool label while one runs, else the round's verb, `below` — its live
-  descendants, `model` — the model it runs, when it has one); `nodeByKey` returns the
-  live descendant of a key. One rule, `childState`,
-  gives a child's status to `runningChildren()` and to `tree()`: `waiting` while a y/n is parked, `asks` while its `ask_parent` question waits (a child holds one of the two at a time), else `working`. Ended children are not
+  descendants, `model` — the model it runs, when it has one; a kept job is a node of
+  `kind: 'shell'` whose `key` is `job:sh-N`, with its `shell` — id, command, state, running,
+  ms, lines); `nodeByKey` returns the
+  live descendant of a key and `jobByKey` the job a key names. One rule, `childState`,
+  gives a child's status to `runningChildren()` and to `tree()`: `waiting` while a y/n is parked, `asks` while its `ask_parent` question waits (a child holds one of the two at a time), else `working`; a job that runs ranks as `working` and an ended one nobody has read (a shell the person killed reads at once) as `idle` + `answered`. Ended children are not
   nodes: their result is a row of the conversation and `endedChildren` keeps the last
   twenty. A change reaches the chat as the `tree` event, raised on the conversation where it
   happened and on every ancestor read at the event (a child may have moved), then the root's
@@ -130,62 +136,44 @@
   remembered, each once, and at its end each of them and its ancestors hear `tree` once and
   the root's `notify` runs once, so a child running tool after tool does not redraw the
   chat at the tool's pace. A closed root says nothing.
-  The rows are `src/assistant/agent-tree.ts`: `treeRows` makes one terminal line per node
-  (`<mark> <label> · <state>`, two cells of indent per level, no clock; an idle node is
-  `◦ <label> · idle`, or `· answered` while a later answer is unread; a node with a question open reads `? <label> · asks its parent`), keeps at most
-  `ui.agentRows` (4, 0 to 8) and, over that, the waiting and asking nodes first, then the working, then the answered
-  idle ones, then the rest, each in tree order, with a last row `+K more — /agents` that is not a stop of the
-  cursor; `treeCursor` keeps the cursor on its node, else the nearest stop, else nowhere.
-  **One budget serves the draw and the keys.** `chatRoom` measures the column (what the error,
-  hint row, queue line and field's place take, the plan block, and whether a question, a y/n,
-  `/context`, the pager, a picker or a panel hides the tree); `treeBudget` gives `min(rows,
-  nodes)` reduced so the conversation keeps four rows with the whole plan block counted, and
-  keeps one row for the gap above. So the tree gives way first, down to none; then the plan;
-  never the field, the hint row or a y/n. The block is the gap and the rows, nothing else: the
-  stop question takes the place of the cursor row's text and the keys are named in the hint
-  row's left cell. The plugin asks `treeNow` for the rows, in the render and in the key
-  handler alike: the geometry (`chatRoom`, the budget) is the last render's, the nodes are
-  read from `Conversation.tree()` at the key, so a node that changed between the two can
-  reorder the stops under the key (the question names the node the cursor is on, so no wrong
-  node is stopped).
-  **The cursor** (`treeSel`: the node's key and whether its stop question is up) enters from
-  a watch's Esc-back: ⏎ on a subagent's row starts watching it, and Esc comes back onto that
-  row when it is still drawn and no request waits anywhere in the session's tree. ↓ on an
-  empty field belongs to the work panel (docs/usage.md): with no history entry shown before
-  the key, bang level 0, work in the session and the session's own question not waiting in
-  the field's place, it opens the panel, whose ⏎ on a subagent's
-  row is another way to the same watch. With the cursor in the rows the
-  chat handler gives every key to one branch, after a question, `/context` and an own y/n and
-  before everything else: ↑ / ↓ move, ↑ on the first row and Esc leave, `x` asks, `y` calls
-  `stopSubtree` on the node (the stop `/subagent stop` makes, journaled as the person's),
-  `n` / Esc drop the question (Esc with a question up drops only the question; the next Esc
-  leaves the rows), the sessions key clears the cursor and the question and opens the picker,
-  ⏎ on a row starts watching it (AGENTS.md (watching a child)), anything else is swallowed. Ctrl+C, the wheel and PgUp/PgDn are heard above this handler.
-  Esc there is never the turn's stop, the field's clear or the exit arm. **A request is not
-  answerable from the rows:**
-  `childAskNow` is null while the cursor is in them, so a waiting subagent shows as the
-  notice line `⏸ <path> waits for a y/n — Esc to answer`, the guard is told nothing is shown
-  (Esc then arms the block afresh), and every key is noted. The cursor and its question are
-  cleared in the render whenever the rows are not drawn (the cursor's node gone with no
-  other row, a hidden state, the chat folded away or without the keyboard) and when the
-  conversation on screen changes (`adopt`). `/agents` is a command panel (`follow: true`, so
-  its cursor stays on its row id as rows start and end) whose rows are
-  `agentsPanelRows`: live nodes with the time spent and the model a node runs when it is
-  not the conversation's own (`chatModel`; a conversation with no model names them all),
-  then the ended ones; `x` asks in place
-  of the row and `y` stops, as in the rows; ⏎ on a live row closes the panel and starts watching it, on an ended row it says there is nothing to watch. A subagent's
-  block is never drawn under it (the panel hides it), so a subagent's request is not
-  answerable there. The conversation's own request that arrives while the cursor is in the
-  rows or a panel is drawn is armed like one that takes a block's place (`ownArmedAt`): the
+  **The rows are `src/assistant/agent-tree.ts`.** `agentsPanelRows` is `/agents`'s list: the
+  live nodes in tree order, indented two cells per level, each with its state and the time it
+  has spent (`◦ <label> · idle · 1m 12s`; `? <label> · asks its parent`), the model added when
+  a node runs one that is not the conversation's own, and a shell with its own mark and its
+  line count (`○ sh-3 · bun run dev`, `running 4m · 312 lines`); then the last twenty children
+  that ended (`done`, `failed`, `stopped`, …, with the time and the tokens) and the ended
+  shells (`exited 0 · 4m · 312 lines`). `stopQuestion` words the question that stands in a
+  row before a stop. `/agents` is a command panel with `follow: true`: its
+  cursor stays on its row by id while rows start and end under it, and no rule outside the
+  panel keeps it. **The stop question and the cursor live in the panels that list the tree,
+  never in the chat:** `/agents` puts `stop <label> and N below it?` or `kill sh-3?` in place
+  of the row on `x`, and `y` stops that node — `stopSubtree` for a subagent (the stop
+  `/subagent stop` makes, journaled as the person's), `killJob(job, 'person')` for a shell —
+  `n` drops it; an ended row answers `x` with `it has ended — nothing to stop`; ⏎ on a live
+  row closes the panel and watches it (AGENTS.md (watching a child)), while on a shell's
+  row — running or ended — it opens the job's kept output in the pager. A subagent's block is
+  never drawn under it (the panel hides it), so a subagent's request is not answerable
+  there. The conversation's own request that arrives while a panel is drawn is armed like
+  one that takes a block's place (`ownArmedAt`): the
   `y` already on its way to the stop question waits out the 600 ms pause. Its own QUESTION
-  that arrives over the cursor is armed the same way (`questionArmedAt`): every key is
-  swallowed for 600 ms from its appearing, so a ⏎ on its way to the rows picks no option.
+  that arrives over a panel is armed the same way (`questionArmedAt`): every key is
+  swallowed for 600 ms from its appearing, so a ⏎ on its way there picks no option.
+  **The work strip** (`openWork`, docs/usage.md (the work picker)) is the other listing, and
+  the one the hint's door opens: a bottom strip with a Subagents tab and a Shells tab, `↓` on
+  an empty field (no history entry shown, bang level 0, no own question, work in the session),
+  `J` or `/work`. Its rows come from the same walk — `workRows` over the subagents of
+  `tree()` and the jobs the registry holds, running and ended alike (`endedShellJobs`) —
+  and are read at every draw. `⏎` watches a subagent or opens a shell's kept output,
+  `ctrl+d` stops a subagent or kills a shell after the question that names the row, `↑` on
+  the first row closes the strip as Esc does (`upAtTopCloses`), and deeper it only moves. A
+  watch opened from the strip is one-shot: its Esc lands in the field, and there is no row
+  to put the cursor back on.
 - **Watching a child (watching a child)** shows a live node's conversation in the list's
-  place while the chat's conversation stays the session. ⏎ on a tree row (`startWatch`) or on a
+  place while the chat's conversation stays the session. ⏎ on a row of the work strip or on a
   live row of `/agents` starts it; `Watching` (`watchRef`, mirrored in state) holds the node,
   its `path` (labels from the session's child down, `watchPath`; read again at every render
   while the node lives, since a task that ends hands its children up, and kept as stored
-  once it has ended), `ended`, `final` and the tree row to return to.
+  once it has ended), `ended` and `final`.
   **What stays the session's, and why.** `messages`, `streaming`, `drawnRef`,
   `store.chat`, the port, `postHome`, `/export`, `/title` and `/copy` read the session,
   watched or not: the watch has its own names (`watched`, `watchSnap`, `watchFolds`). The
@@ -214,18 +202,18 @@
   flips it, End jumps to the end (`watchToEndRef`), the list follows its end while it rests
   there.
   **Keys.** One branch, after the pager's and before the question, `/context`, own y/n,
-  tree rows, a subagent's y/n, panel and picker: the sessions key ends the watch and opens
-  the picker; a request of the node answers (below); Esc steps back (`endWatch(true)`: the
-  cursor goes back to the node's row when it is still drawn and no y/n waits anywhere in the
-  session's tree, `conv.offered()` being null; with one waiting the cursor stays in the field,
-  so that request's block is drawn at once and armed afresh; the session's end is counted
-  seen) and does not stop the child; the details key and End act on the watched rows; `x`,
+  a subagent's y/n, panel and picker: the sessions key ends the watch and opens
+  the picker; a request of the node answers (below); Esc steps back (`endWatch(true)`, which
+  lands in the field and counts the session's end seen — a request waiting anywhere in the
+  tree takes the field's place at once and is armed afresh; `endWatch` keeps no cursor of the
+  chat's, there being no rows to return to) and does not stop the child; the details key and
+  End act on the watched rows; `x`,
   on a live node, asks `stop <label> and N below it?` in the hint row, `y` calls
   `stopSubtree` on the node, `n` / Esc drop the question; every other key is swallowed, so
   nothing reaches the field, the model or the queue (⇧⇥ does nothing there). Ctrl+C is not
   this branch's but `ctrlKey`'s: while a watch is up it never stops the session's turn, which
   is not what the person is looking at, and goes straight to arming the exit. PgUp/PgDn and
-  the wheel belong to the list. The pager is closed on entering and the tree cursor is cleared.
+  the wheel belong to the list. The pager is closed on entering.
   **What ends a watch:** Esc, the sessions key, the session's own y/n (the settings
   file's included) or parked question, `leave`, `adopt`, `renew` and `resetView`. The own y/n and the own question
   are armed for 600 ms from the moment they end it (`endWatchForOwnAsk`), and the render ends a
