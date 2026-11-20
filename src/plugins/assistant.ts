@@ -65,7 +65,7 @@ import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type Histor
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelCursor, panelDrop, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelRow, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
-import { workRows, type WorkJob, type WorkSub } from '../assistant/work-panel.js';
+import { workRows, type WorkJob, type WorkRow, type WorkSub } from '../assistant/work-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
@@ -1815,9 +1815,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return map;
           };
           // The picker's rows over a conversation's subtree — the subagent tree and the
-          // session's background shells, as `workRows` lays them out. The picker draws
-          // them; the `↓` door asks only whether there are any.
-          const workRowsOf = (asked: Conversation) => {
+          // session's background shells, as `workRows` lays them out — and, from the same
+          // walk, how many of them wait on the PERSON. The picker draws the rows, the `↓`
+          // door asks whether there are any, and the hint's badge counts both: one
+          // predicate, so the badge can never claim a wait the strip's rows do not show.
+          // `asking` is that predicate — `offeredWithin`, which takes a y/n below and an
+          // ask routed to the person, and NOT a question routed to a model (a child of a
+          // subagent asks its parent's chain, not the person).
+          const workRowsOf = (asked: Conversation): { rows: WorkRow[]; waiting: number } => {
             // The subagents: the live tree as rows, with the label path each node sits on
             // (the depth-first walk rebuilds it from the stack) and the state words of its
             // tree row. One that waits on the person — its own y/n or a question put to
@@ -1856,7 +1861,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               state: job.statusText,
               owner: owner.parent ? owner.label : 'this chat',
             }));
-            return workRows(subs, jobs, Date.now());
+            return { rows: workRows(subs, jobs, Date.now()), waiting: subs.filter((s) => s.asking).length };
           };
           const openWork = () => {
             const asked = conv;
@@ -1864,7 +1869,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // subagent and shells to show. `←`/`→` switch between the two, and the cursor
             // lands on the new tab's first row (`PanelKeyDef.reset`).
             type WorkTab = 'subagents' | 'shells';
-            const first = workRowsOf(asked);
+            const first = workRowsOf(asked).rows;
             let tab: WorkTab = first.some((r) => r.group === 'subagents') || !first.length ? 'subagents' : 'shells';
             // The stop question up, naming the row it stands for: a background shell to
             // kill, or a subagent to stop with what it started. `label`/`below` are the
@@ -1889,7 +1894,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // still answered — and finds nothing to stop.
             const rows = (): PanelRow[] => {
               const p = pending;
-              const out: PanelRow[] = workRowsOf(asked).filter((r) => r.group === tab).map((r) => (p && rowId(p) === r.id
+              const out: PanelRow[] = workRowsOf(asked).rows.filter((r) => r.group === tab).map((r) => (p && rowId(p) === r.id
                 ? { id: r.id, text: question(p), tone: 'warn' as const }
                 : { id: r.id, text: r.text, ...(r.detail !== undefined ? { detail: r.detail } : {}), ...(r.tone ? { tone: r.tone } : {}) }));
               if (p && !out.some((r) => r.id === rowId(p))) out.push({ id: rowId(p), text: question(p), tone: 'warn' });
@@ -1900,7 +1905,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             };
             // The tab strip: each tab with what it holds now, the open one current.
             const tabs = () => {
-              const all = workRowsOf(asked);
+              const all = workRowsOf(asked).rows;
               const count = (g: WorkTab) => all.filter((r) => r.group === g).length;
               return [
                 { label: `Subagents (${count('subagents')})`, current: tab === 'subagents' },
@@ -3270,7 +3275,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // key below. The session's own question owns the field's place: the key does
               // nothing until it clears (it goes on to the walk, which opens nothing).
               if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0 && !conv.question) {
-                if (workRowsOf(conv).length) { openWork(); disarmEsc(); return true; }
+                if (workRowsOf(conv).rows.length) { openWork(); disarmEsc(); return true; }
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its rows
@@ -3616,6 +3621,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             asked: !!watchAsk,
             toEnd: watchToEndRef,
           } : null;
+          // The chat's own work, read ONCE for the door's count and for who waits on the
+          // person — the hint's badge and the strip's rows come from the same walk.
+          const chatWork = workRowsOf(conv);
           const chatProps: Record<string, unknown> = {
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -3760,12 +3768,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // left running (`leftRunning`, redrawn by the registry when one ends) and
             // the background shells that run (`shellCount`).
             bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning() + registryRef.current!.shellCount(),
-            // This chat's own work rows — the same predicate the `↓` key opens on
-            // (`workRowsOf`) — and how many of its subagents wait on the person now (a y/n
-            // or a question put to it; a shell waits on no one). The hint's badge counts
-            // the door's rows while the door has work and says who waits.
-            bgDoor: workRowsOf(conv).length,
-            bgWaiting: conv.tree().filter((n) => !n.shell && (n.status === 'waiting' || n.status === 'asks')).length,
+            // This chat's own work — the same walk the `↓` key opens on (`workRowsOf`):
+            // the door's rows, and how many of them wait on the PERSON (the strip's own
+            // `asking` — a question a task put to its parent's chain is not one). The hint's
+            // badge counts the door's rows while the door has work and says who waits.
+            bgDoor: chatWork.rows.length,
+            bgWaiting: chatWork.waiting,
             // The other sessions that wait for an answer or were put away unread: the
             // one on screen never counts itself.
             ...(() => { const o = registryRef.current!.attention(); return { waitingElsewhere: o.waiting, unreadElsewhere: o.done }; })(),

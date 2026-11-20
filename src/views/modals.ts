@@ -1891,10 +1891,11 @@ export function renderChatModal({
   completion?: Completion | null;
   bgCount?: number;
   // This chat's own work rows, the ones the `↓` door opens (`workRowsOf` in the assistant
-  // plugin — the same predicate the key reads), and how many of its live subagents wait on
-  // the person now (`waiting`/`asks`; a shell waits on no one). While the door has rows the
-  // badge counts THEM and names the key: a chat of resting children still has a door, and
-  // the registry-wide `bgCount` would say 0.
+  // plugin — the same walk the key reads), and how many of THOSE ROWS wait on the person:
+  // the strip's own `asking` (`offeredWithin`), so a question a task put to its parent's
+  // chain is not counted, and a shell waits on no one. While the door has rows the badge
+  // counts them and names the key: a chat of resting children still has a door, and the
+  // registry-wide `bgCount` would say 0.
   bgDoor?: number;
   bgWaiting?: number;
   // Other sessions of this host that wait for an answer (`⏸`) and ones put away with an
@@ -2018,10 +2019,11 @@ export function renderChatModal({
         }))
     : null;
   // The background badge of the hint row: the `↓` door and the number of rows it opens
-  // while this chat has work (the same predicate the key reads), the registry-wide count
-  // otherwise, and `· N waiting` while a subagent of this chat waits on the person. The
-  // waiting part is drawn in the warn colour, bright: a thing waiting on a person is not a
-  // hint about a key, and it must not be greyed with the rest of the row.
+  // while this chat has work (the same walk the key reads), the registry-wide count
+  // otherwise, and `· N waiting` while a row of the door waits on the person (`bgWaiting`,
+  // the strip's own `asking`). The waiting part is drawn in the warn colour, bright: a
+  // thing waiting on a person is not a hint about a key, and it must not be greyed with
+  // the rest of the row.
   const bgShown = bgDoor > 0 ? bgDoor : bgCount;
   const bgBadge = bgShown > 0
     ? `${bgDoor > 0 ? `${keyGlyph('down')} ` : ''}${bgShown} in background${bgWaiting > 0 ? ` · ${bgWaiting} waiting` : ''}`

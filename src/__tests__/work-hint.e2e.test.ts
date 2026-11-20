@@ -49,6 +49,29 @@ async function boot() {
   return { ui, child };
 }
 
+// A subagent whose first step starts a task (`beta one`), and that task asks its PARENT —
+// not the person: a `parentAsk` of a task under a subagent goes to the subagent's chain
+// (`parentAskDestination`), and its second turn is held, so the question stays parked
+// there. The same shape `work-picker.e2e.test.ts` builds with its `outer` mark.
+const TASK = 'beta one';
+async function bootNested() {
+  clock.t = 10_000;
+  askClock.now = () => clock.t;
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('ALPHA'));
+  const task = model.when((req) => firstUser(req).includes(TASK));
+  const subScript: Turn[] = [[{ hold: true }, { tool: 'subagent', args: { task: TASK } }], [{ hold: true }]];
+  sub.script(...subScript);
+  const taskScript: Turn[] = [[{ hold: true }, { tool: 'ask_parent', args: { question: 'which one?' } }], [{ text: 'beta settled' }]];
+  task.script(...taskScript);
+  // `backgroundFollowUp` stays on (the default): off, the question is answered with
+  // "no answer" on the spot and never parks at all.
+  const ui = await bootApp(model, 160, 34, undefined, {
+    ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' },
+  }, { toastMs: 10_000 });
+  return { ui, sub, task };
+}
+
 test('the hint badge names the ↓ door and who waits, and the door opens on it', async () => {
   const { ui, child } = await boot();
   await ui.press('F');
@@ -77,5 +100,29 @@ test('the hint badge names the ↓ door and who waits, and the door opens on it'
   await settleUntil(() => !panelUp(ui));
   expect(panelUp(ui)).toBe(false);
   expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 1 in background · 1 waiting`);
+  ui.app.unmount();
+}, 30_000);
+
+test('a question a task put to its parent is not a person waiting in the badge', async () => {
+  const { ui, sub, task } = await bootNested();
+  await ui.press('F');
+  await ask(ui, '/subagent ALPHA go');
+  await settleUntil(() => sub.held);
+  sub.release();
+  await settleUntil(() => task.held);
+  // The task's question parks on the subagent's chain, not on the person: both the
+  // subagent and the task stay under the door, and neither waits for an answer from them.
+  task.release();
+  await settleUntil(() => frameOf(ui).includes('asks its parent'));
+  await settle(6);
+  expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 2 in background`);
+  expect(hintRow(frameOf(ui))).not.toContain('waiting');
+  // The strip says the same thing about the same row: it asks its parent, so no row of it
+  // waits on the person (`? waiting for you` is the person's mark alone).
+  await ui.press('down');
+  await settleUntil(() => panelUp(ui));
+  expect(panelUp(ui)).toBe(true);
+  expect(stripText(ui)).toContain('asking');
+  expect(stripText(ui)).not.toContain('? waiting for you');
   ui.app.unmount();
 }, 30_000);
