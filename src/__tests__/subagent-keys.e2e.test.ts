@@ -1,7 +1,7 @@
 // Which request each key reaches while a subagent the person started is idle or in a later
 // turn (ask-children-spec.md (subagent y/n), (agent tree), (watching a child)): the session's own y/n,
 // the settings-file y/n and the session's question keep their keys; a later turn's y/n is
-// offered like any child's; the tree rows and the watch act on an idle node; a `/subagent
+// offered like any child's; the work strip and the watch act on an idle node; a `/subagent
 // tell` typed while a y/n waits is a command line. The real app on the scripted model; the
 // pause before an answer counts is read from `askClock`, which the tests move.
 import { afterEach, expect, test } from 'bun:test';
@@ -12,7 +12,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
-import { intoRows } from './helpers/work-panel';
+import { closeStrip, openStrip, stripRow, stripUp } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -31,6 +31,7 @@ afterEach(() => {
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
+const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 const pause = () => { clock.t += 700; };
 const BLOCK = 'Confirm write: run_command';
@@ -58,19 +59,18 @@ const touch = (root: string, name: string) => [{ tool: 'run_command', args: { co
 async function startIdle(ui: UI, mark: string, label: string) {
   await ask(ui, `/subagent ${mark} go`);
   await settleUntil(() => frameOf(ui).includes(`◆ ${label} finished:`));
-  await settleUntil(() => frameOf(ui).includes(`◦ ${label} · idle`));
 }
 
-test('the session\'s own y/n over the tree cursor on an idle subagent is armed, then answered by y; the subagent is not touched', async () => {
+test('the session\'s own y/n over the work strip on an idle subagent is armed, then answered by y; the subagent is not touched', async () => {
   const { root, model, children: [a], ui } = await boot([{ mark: 'IDLE-OWN', turns: [[{ text: 'first' }]] }]);
   await startIdle(ui, 'IDLE-OWN', 'idle-own-go');
-  await intoRows(ui); // the cursor goes to the idle subagent's row
+  await openStrip(ui); // the strip lists the idle subagent's row
   model.script([{ hold: true }, ...touch(root, 'own.txt')], [{ text: 'parent done' }]);
-  await ui.press('escape');
+  await closeStrip(ui);
   await ask(ui, 'hello');
   await settleUntil(() => model.held);
-  // The own y/n lands while the cursor is on the subagent's row.
-  await intoRows(ui);
+  // The own y/n lands while the strip is open on the subagent's row.
+  await openStrip(ui);
   model.release();
   await settleUntil(() => frameOf(ui).includes(OWN));
   // A key already on its way when the y/n appeared does not answer it.
@@ -82,13 +82,15 @@ test('the session\'s own y/n over the tree cursor on an idle subagent is armed, 
   await ui.press('y');
   await settleUntil(() => fs.existsSync(path.join(root, 'own.txt')));
   await settleUntil(() => frameOf(ui).includes('parent done'));
-  // The y went to the own y/n only: the idle subagent is still there and was sent nothing.
-  expect(frameOf(ui)).toContain('◦ idle-own-go · idle');
+  // The y went to the own y/n only: the idle subagent is still listed and was sent nothing.
+  expect(stripUp(ui)).toBe(true);
+  const ownRow = rowsOf(ui).find((r) => r.includes('idle-own-go')) ?? '';
+  expect(ownRow).toContain('idle');
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });
 
-test('the settings-file y/n answers by y with an idle subagent in the tree; the subagent stays idle', async () => {
+test('the settings-file y/n answers by y with an idle subagent listed; the subagent stays idle', async () => {
   fs.mkdirSync(hostStateDir(), { recursive: true });
   fs.rmSync(acceptedConfigPath(), { force: true });
   fs.writeFileSync(localConfig(), '{}');
@@ -105,18 +107,18 @@ test('the settings-file y/n answers by y with an idle subagent in the tree; the 
   await ui.press('y');
   await settleUntil(() => frameOf(ui).includes('Configured.'));
   expect(frameOf(ui)).toContain('Applied config.local.json');
-  expect(frameOf(ui)).toContain('◦ idle-cfg-go · idle');
+  expect(await stripRow(ui, 'idle-cfg-go')).toContain('idle');
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });
 
-test('the session\'s own question over the tree cursor on an idle subagent is armed; x and y do not stop the node, Esc dismisses it', async () => {
+test('the session\'s own question over the work strip on an idle subagent is armed; x and y do not stop the node, Esc dismisses it', async () => {
   const { model, children: [a], ui } = await boot([{ mark: 'IDLE-QST', turns: [[{ text: 'first' }]] }]);
   await startIdle(ui, 'IDLE-QST', 'idle-qst-go');
   model.script([{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]);
   await ask(ui, 'which?');
   await settleUntil(() => model.held);
-  await intoRows(ui);
+  await openStrip(ui);
   model.release();
   await settleUntil(() => askUp(frameOf(ui)));
   await ui.press('x');
@@ -129,7 +131,10 @@ test('the session\'s own question over the tree cursor on an idle subagent is ar
   pause();
   await ui.press('escape');
   await settleUntil(() => !askUp(frameOf(ui)));
-  expect(frameOf(ui)).toContain('◦ idle-qst-go · idle');
+  // The strip was never closed: it is back, its row still idle.
+  expect(stripUp(ui)).toBe(true);
+  const qstRow = rowsOf(ui).find((r) => r.includes('idle-qst-go')) ?? '';
+  expect(qstRow).toContain('idle');
   expect(a!.requests).toHaveLength(1);
   ui.app.unmount();
 });
@@ -150,7 +155,9 @@ test('a y/n of a later turn is offered like a first turn\'s: labelled, armed by 
   pause();
   await ui.press('y');
   await settleUntil(() => fs.existsSync(path.join(root, 'later.txt')));
-  await settleUntil(() => frameOf(ui).includes('◦ later-one-go · answered'));
+  // The told turn's answer is unread: the hint counts it, and the strip's row says answered.
+  await settleUntil(() => frameOf(ui).includes('● 1'));
+  expect(await stripRow(ui, 'later-one-go')).toContain('answered');
   expect(a!.requests).toHaveLength(3);
   ui.app.unmount();
 });
@@ -162,26 +169,24 @@ test('an n declines a later turn\'s write', async () => {
   await settleUntil(() => frameOf(ui).includes(BLOCK));
   pause();
   await ui.press('n');
-  await settleUntil(() => frameOf(ui).includes('◦ later-no-go · answered'));
-  expect(frameOf(ui)).toContain('◦ later-no-go · answered');
+  await settleUntil(() => frameOf(ui).includes('● 1'));
+  expect(await stripRow(ui, 'later-no-go')).toContain('answered');
   expect(fs.existsSync(path.join(root, 'no.txt'))).toBe(false);
   ui.app.unmount();
 });
 
-test('the tree rows on an idle node: x then n leaves it, x then y ends it', async () => {
+test('a tell to a stopped node is refused: it has ended', async () => {
   const { children: [a], ui } = await boot([{ mark: 'ROWS-ONE', turns: [[{ text: 'first' }]] }]);
   await startIdle(ui, 'ROWS-ONE', 'rows-one-go');
-  await intoRows(ui);
-  await ui.press('x');
-  await settleUntil(() => /stop|y\/n|yes/i.test(frameOf(ui).split('\n').find((r) => r.includes('rows-one-go') && r.includes('?')) ?? ''));
-  await ui.press('n');
-  await settle(4);
-  expect(frameOf(ui)).toContain('◦ rows-one-go · idle');
-  await ui.press('x');
+  // The strip's own stop, after its question.
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  await ui.backend.press({ name: 'd', ctrl: true });
   await ui.press('y');
-  await settleUntil(() => !frameOf(ui).includes('◦ rows-one-go'));
-  expect(frameOf(ui)).not.toContain('◦ rows-one-go');
+  await settleUntil(() => frameOf(ui).includes('rows-one-go stopped'));
   // It is ended: a tell is refused.
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
   await ask(ui, '/subagent tell rows-one-go anyone?');
   await settleUntil(() => frameOf(ui).includes('has ended'));
   expect(frameOf(ui)).toContain('has ended');
@@ -189,7 +194,7 @@ test('the tree rows on an idle node: x then n leaves it, x then y ends it', asyn
   ui.app.unmount();
 });
 
-test('the watch on an idle node is read-only: typing goes nowhere, nothing is sent, Esc steps back to the rows', async () => {
+test('the watch on an idle node is read-only: typing goes nowhere, nothing is sent, Esc steps back to the field', async () => {
   const { model, children: [a], ui } = await boot([{ mark: 'WATCH-ONE', turns: [[{ text: 'first words' }]] }]);
   await startIdle(ui, 'WATCH-ONE', 'watch-one-go');
   const before = model.requests.length;
@@ -204,8 +209,10 @@ test('the watch on an idle node is read-only: typing goes nowhere, nothing is se
   expect(a!.requests).toHaveLength(1);
   await ui.press('escape');
   await settle(4);
-  // Back in the conversation with the field empty and the cursor on the node's row.
-  expect(frameOf(ui)).toContain('◦ watch-one-go · idle');
+  // Back in the conversation: the field is empty and has the keys, and the badge still
+  // counts the child behind the strip's door.
+  expect(frameOf(ui)).toContain('↑↓ history');
+  expect(frameOf(ui)).toMatch(/↓ 1/);
   expect(frameOf(ui)).not.toContain('hello there');
   ui.app.unmount();
 });

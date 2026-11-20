@@ -213,7 +213,7 @@ test('a background result landing under a short answer is followed, as it always
   // No tree rows: a live task's row takes two rows from the list while the answer is
   // drawn, and gives them back when the result lands, so no answer is both short enough
   // to be followed and long enough to be pushed up by the result.
-  const ui = await bootApp(model, 100, ROWS, undefined, { ui: { agentRows: 0 }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } });
+  const ui = await bootApp(model, 100, ROWS, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } });
   await ui.press('F');
   await ui.type('count the TODOs in the background');
   await ui.press('return');

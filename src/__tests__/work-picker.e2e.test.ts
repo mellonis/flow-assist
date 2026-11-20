@@ -58,7 +58,7 @@ const scriptOf = (kid: Kid, root: string): Turn[] => [[{ hold: true as const }, 
 const TASK_TURN = (root: string): Turn[] => [[{ hold: true as const }, { tool: 'run_command', args: { command: `touch ${path.join(root, 'beta.txt')}` } }], [{ text: 'BETA settled' }]];
 
 interface Rig { ui: UI; children: ScriptedModel[]; kids: Kid[] }
-async function boot(kids: Kid[] = []): Promise<Rig> {
+async function boot(kids: Kid[] = [], opts: { cols?: number; rows?: number } = {}): Promise<Rig> {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-')));
@@ -78,7 +78,7 @@ async function boot(kids: Kid[] = []): Promise<Rig> {
     task.script([{ hold: true as const }, { text: 'QUIET settled' }]);
     children.push(task);
   }
-  const ui = await bootApp(model, 130, 34, undefined, {
+  const ui = await bootApp(model, opts.cols ?? 130, opts.rows ?? 34, undefined, {
     sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workpicker-s-')) },
     shell: { roots: [root] },
     ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false },
@@ -94,11 +94,13 @@ const released = async (rig: Rig, i: number) => {
   await settleUntil(() => rig.children[i]!.requests.length >= 1 && !rig.children[i]!.held);
   await settle(10);
 };
-const shell = async (ui: UI, line: string, row: string) => {
+// A background job's start is the toast: no row of it stands under the field any more, and
+// the strip is where it is read.
+const shell = async (ui: UI, line: string, id: string) => {
   await ui.type('!');
   await ui.type(line);
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes(row));
+  await settleUntil(() => frameOf(ui).includes(`${id} started in the background`));
 };
 // The capital opens the picker wherever the chat does not have the keyboard: Esc Esc
 // closes the chat, and `J` brings it back with the picker up in it.
@@ -143,7 +145,7 @@ test('a down-arrow on an empty field opens the work panel', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
   await rig.ui.press('F');
   await spawn(rig, 0);
-  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'echo up; sleep 60 &', 'sh-1');
   expect(panelUp(rig.ui)).toBe(false);
   // Nothing typed: ↓ is the door.
   await rig.ui.press('down');
@@ -207,11 +209,36 @@ test('a bang step or a recall keeps the down-arrow away from the panel', async (
   rig.ui.app.unmount();
 }, 20_000);
 
+test('a history entry cleared by Esc, and a draft, keep the down-arrow for the field', async () => {
+  const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
+  await rig.ui.press('F');
+  await spawn(rig, 0);
+  // An entry shown by ↑ and cleared by Esc: the history is still where it was, so ↓ is its.
+  await rig.ui.press('up');
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).toContain('/subagent HYN go');
+  await rig.ui.press('escape');
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).not.toContain('/subagent');
+  await rig.ui.press('down');
+  expect(panelUp(rig.ui)).toBe(false);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  expect(panelUp(rig.ui)).toBe(true);
+  await rig.ui.press('escape');
+  await settleUntil(() => !panelUp(rig.ui));
+  // A draft keeps ↓ for the caret: it walks the field's rows, and its text stays whole.
+  await rig.ui.type('draft');
+  await rig.ui.press('down');
+  expect(panelUp(rig.ui)).toBe(false);
+  await rig.ui.type('Z');
+  expect(rowsOf(rig.ui)[fieldRow(rig.ui)]).toContain('draftZ');
+  rig.ui.app.unmount();
+}, 20_000);
+
 test('the picker opens on its key with both tabs and their rows', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
   await rig.ui.press('F');
   await spawn(rig, 0);
-  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'echo up; sleep 60 &', 'sh-1');
   await openByKey(rig.ui);
   const frame = frameOf(rig.ui);
   // The two tabs and their counts, the subagent's row on the one that is open.
@@ -242,7 +269,7 @@ test('the tabs split the work; ←→ switch and the counts follow', async () =>
   await rig.ui.press('F');
   await spawn(rig, 0);
   await spawn(rig, 1);
-  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'echo up; sleep 60 &', 'sh-1');
   await rig.ui.press('down');
   await settleUntil(() => panelUp(rig.ui));
   // Each tab counts its own rows, and the list is the open tab's alone: no group header
@@ -339,7 +366,7 @@ test('the panel is the bottom strip: the tabs under its top border and the hint 
   await rig.ui.press('F');
   await spawn(rig, 0);
   await spawn(rig, 1);
-  await shell(rig.ui, 'sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'sleep 60 &', 'sh-1');
   await rig.ui.press('down');
   await settleUntil(() => panelUp(rig.ui));
   const rows = rowsOf(rig.ui);
@@ -363,23 +390,39 @@ test('the panel is the bottom strip: the tabs under its top border and the hint 
   rig.ui.app.unmount();
 }, 20_000);
 
+test('the strip keeps a long row on one terminal line at a narrow width', async () => {
+  const long = 'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz';
+  const rig = await boot([{ mark: 'NARROW', kind: 'run' }], { cols: 40, rows: 34 });
+  await rig.ui.press('F');
+  await ask(rig.ui, `/subagent NARROW ${long} ${long}`);
+  await settleUntil(() => rig.children[0]!.held);
+  await rig.ui.press('down');
+  await settleUntil(() => panelUp(rig.ui));
+  const strip = stripText(rig.ui).split('\n');
+  const at = strip.findIndex((r) => r.includes('narrow-'));
+  expect(at).toBeGreaterThan(0);
+  // Its label is cut with an ellipsis, once, and no line of the frame runs past the width.
+  expect(strip[at]).toContain('…');
+  expect(strip.filter((r) => r.includes('narrow-'))).toHaveLength(1);
+  for (const line of rowsOf(rig.ui)) expect(line.length).toBeLessThanOrEqual(40);
+  rig.ui.app.unmount();
+}, 20_000);
+
 test('enter opens what is under the cursor', async () => {
   const rig = await boot([{ mark: 'HYN', kind: 'run' }]);
   await rig.ui.press('F');
   await spawn(rig, 0);
-  await shell(rig.ui, 'echo up; sleep 60 &', '○ sh-1');
+  await shell(rig.ui, 'echo up; sleep 60 &', 'sh-1');
   await openByKey(rig.ui);
   // The subagent row (the cursor starts on the first row a key runs): the picker closes
-  // and its watch is on, Esc back to the tree rows under the field and Esc again to the
-  // field, where a command is typed.
+  // and its watch is on; Esc comes back to the field, where a command is typed.
   await rig.ui.press('return');
   await settleUntil(() => !frameOf(rig.ui).includes('Flow Assist · Work'));
   expect(frameOf(rig.ui)).toMatch(/Flow Assist \(scripted\) · hyn-go/);
   await rig.ui.press('escape');
-  await settleUntil(() => frameOf(rig.ui).includes('○ sh-1'));
-  await rig.ui.press('escape');
   await settle(4);
-  // The shell row: its output pager is up over the kept tail.
+  expect(frameOf(rig.ui)).toContain('↑↓ history');
+  // The shell row: the strip's other tab, and its output pager is up over the kept tail.
   await openByCommand(rig.ui);
   await rig.ui.press('right');
   await rig.ui.press('return');
@@ -391,8 +434,8 @@ test('enter opens what is under the cursor', async () => {
 test('ctrl+d kills a shell after its own y/n', async () => {
   const rig = await boot();
   await rig.ui.press('F');
-  await shell(rig.ui, 'sleep 60 &', '○ sh-1');
-  await shell(rig.ui, 'sleep 60 &', '○ sh-2');
+  await shell(rig.ui, 'sleep 60 &', 'sh-1');
+  await shell(rig.ui, 'sleep 60 &', 'sh-2');
   await openByKey(rig.ui);
   // The cursor starts on the first row a key runs — sh-1; ctrl+d asks in its row's place.
   await rig.ui.backend.press({ name: 'd', ctrl: true });
@@ -431,7 +474,7 @@ test('ctrl+d kills a shell after its own y/n', async () => {
 test('a shell that ended under the question is not killed twice', async () => {
   const rig = await boot();
   await rig.ui.press('F');
-  await shell(rig.ui, 'sleep 2 &', '○ sh-1');
+  await shell(rig.ui, 'sleep 2 &', 'sh-1');
   await openByKey(rig.ui);
   // ctrl+d asks for the running job, in its row's place.
   await rig.ui.backend.press({ name: 'd', ctrl: true });

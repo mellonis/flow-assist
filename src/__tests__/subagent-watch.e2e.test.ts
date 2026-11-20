@@ -1,7 +1,7 @@
-// Watching a child (ask-children-spec.md (watching a child)): ⏎ on a subagent's row shows its conversation
-// where the list is, the session's own values stay the session's, and Esc steps back. The
-// real app on the scripted model; a child is held with `{ hold: true as const }` until the test lets
-// it go.
+// Watching a child (ask-children-spec.md (watching a child)): ⏎ on the work strip's row for a
+// subagent shows its conversation where the list is, the session's own values stay the
+// session's, and Esc steps back to the field. The real app on the scripted model; a child is
+// held with `{ hold: true as const }` until the test lets it go.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,6 @@ import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSe
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
-import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -25,8 +24,10 @@ const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const KEYS = '↑↓ move · x stop · Esc back';
-const inRows = (ui: UI) => frameOf(ui).includes(KEYS);
+const stripUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
+// A person-started subagent says it in the chat: no row stands under the field any more, and
+// the work strip is the one door into its watch.
+const started = (ui: UI, label: string) => settleUntil(() => frameOf(ui).includes(`subagent «${label}» started`));
 // The breadcrumb is in the frame's title only while a child is watched.
 const watching = (ui: UI) => frameOf(ui).includes('╭─ ƒ Flow Assist (scripted) · ');
 const PAGE_UP = { name: 'pageup' };
@@ -61,25 +62,25 @@ async function boot(marks: { mark: string; script?: Turn[] }[], opts: { cols?: n
   return { children, ui, model, root, sessions };
 }
 
-// One held child named after `mark`, with the cursor on its row.
+// One held child named after `mark`, listed by the work strip.
 async function oneHeld(mark = 'WATA', opts: Parameters<typeof boot>[1] = {}, script?: Turn[]) {
   const b = await boot([{ mark, script }], opts);
   await ask(b.ui, `/subagent ${mark} do it`);
   await settleUntil(() => b.children[0]!.held);
-  await settleUntil(() => frameOf(b.ui).includes(`⚙ ${mark.toLowerCase()}-do`));
+  await started(b.ui, `${mark.toLowerCase()}-do-it`);
   return b;
 }
 // One held background task the model starts (a task ends after its answer; a subagent the
-// person starts stays), named after `mark`, with the cursor on its row.
+// person starts stays), named after `mark`, listed by the work strip.
 async function oneHeldTask(mark: string, opts: Parameters<typeof boot>[1] = {}, script?: Turn[]) {
   const label = `${mark.toLowerCase()}-do-it`;
   const b = await boot([{ mark, script }], { ...opts, main: [[{ tool: 'subagent', args: { task: `${mark} do it`, label } }], [{ text: 'started' }]] });
   await ask(b.ui, 'run it');
   await settleUntil(() => b.children[0]!.held);
-  await settleUntil(() => frameOf(b.ui).includes(`⚙ ${label}`));
   return b;
 }
-const watchFromRows = async (ui: UI) => { await ui.press('down'); await ui.press('return'); await settle(4); };
+// The strip's first row's watch: `↓` opens it, ⏎ on the row shows the child.
+const watchFromStrip = async (ui: UI) => { await ui.press('down'); await settleUntil(() => stripUp(ui)); await ui.press('return'); await settle(4); };
 
 // The saved session that has an answer (the sessions directory holds one per conversation).
 function answeredSession(dir: string): { answeredAt?: string; seenAt?: string } | null {
@@ -94,15 +95,16 @@ function answeredSession(dir: string): { answeredAt?: string; seenAt?: string } 
 test('⏎ on a row shows the child\'s conversation with the breadcrumb, not the session\'s; its steps appear while watched', async () => {
   const { children: [a], ui } = await oneHeld();
   expect(frameOf(ui)).toContain('/subagent WATA do it');
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   expect(watching(ui)).toBe(true);
   expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · wata-do-it');
   expect(frameOf(ui)).toContain('› WATA do it');
   expect(frameOf(ui)).not.toContain('/subagent WATA do it');
   expect(frameOf(ui)).toMatch(/⚙ \S.*x stop · Esc back/);
-  // Neither the field nor the tree is drawn.
+  // Neither the field nor the strip is drawn.
   expect(frameOf(ui)).not.toContain('↑↓ history');
   expect(frameOf(ui)).not.toContain('Enter send');
+  expect(stripUp(ui)).toBe(false);
   a!.release();
   await settleUntil(() => frameOf(ui).includes('WATA step'));
   expect(frameOf(ui)).toContain('▸ WATA step');
@@ -110,27 +112,29 @@ test('⏎ on a row shows the child\'s conversation with the breadcrumb, not the 
   ui.app.unmount();
 });
 
-test('Esc steps back to the session with its scroll where it was and the cursor on the node\'s row; it does not stop the child', async () => {
+test('Esc steps back to the session with its scroll where it was and the field\'s keys; it does not stop the child', async () => {
   const tall = Array.from({ length: 40 }, (_, i) => `Session line ${i + 1}.`).join('\n\n');
   const { children: [a], ui } = await boot([{ mark: 'WATB' }], { cols: 120, rows: 26, main: [[{ text: tall }]] });
   await ask(ui, 'say lines');
   await settleUntil(() => frameOf(ui).includes('Session line 40.'));
   await ask(ui, '/subagent WATB do it');
   await settleUntil(() => a!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ watb-do'));
+  await started(ui, 'watb-do-it');
   for (let i = 0; i < 2; i++) { ui.backend.press(PAGE_UP); await settle(2); }
   const listOf = () => rowsOf(ui).filter((r) => /Session line \d+\./.test(r)).map((r) => r.match(/Session line \d+\./)![0]);
   const before = listOf();
   expect(before.length).toBeGreaterThan(0);
   expect(before).not.toContain('Session line 40.');
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   expect(frameOf(ui)).not.toContain('Session line');
   await ui.press('escape');
   await settle(4);
   expect(watching(ui)).toBe(false);
   expect(listOf()).toEqual(before);
-  expect(inRows(ui)).toBe(true);
-  expect(frameOf(ui)).toContain('⚙ watb-do');
+  // The field has the keys again; the child still runs and still stands in the strip (the
+  // badge's count is what fits at this width).
+  expect(frameOf(ui)).toContain('↑↓ history');
+  expect(frameOf(ui)).toMatch(/↓ 1/);
   expect(a!.held).toBe(true);
   a!.release();
   ui.app.unmount();
@@ -151,7 +155,9 @@ test('a watch started from /agents (⏎ closes the panel); an ended row says the
   await ui.press('escape');
   await settle(4);
   expect(watching(ui)).toBe(false);
-  expect(inRows(ui)).toBe(false);
+  // The watch came from `/agents`, not the strip: Esc comes back to the field, which has
+  // the keys.
+  expect(frameOf(ui)).toContain('↑↓ history');
   // Let AAA answer and stop it, then ⏎ on its ended row.
   a!.release();
   await settleUntil(() => a!.held);
@@ -172,7 +178,7 @@ test('a watch started from /agents (⏎ closes the panel); an ended row says the
 
 test('in the watch typing, ⏎ and a /command send nothing, and the field is empty after Esc', async () => {
   const { children: [a], ui, model } = await oneHeld();
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   const asked = model.requests.length;
   await ui.type('hello there');
   await ui.press('return');
@@ -196,7 +202,7 @@ test('in the watch typing, ⏎ and a /command send nothing, and the field is emp
 
 test('a subagent that answers while watched stays on screen with its last answer and `idle`; stopped, the watch says `ended: stopped`; the first answer is the session\'s after Esc', async () => {
   const { children: [a], ui } = await oneHeld();
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
@@ -221,7 +227,7 @@ test('a subagent that answers while watched stays on screen with its last answer
 
 test('a task that ends while watched stays on screen with its last answer and `ended: done`; the result is the session\'s after Esc; x does nothing', async () => {
   const { children: [a], ui } = await oneHeldTask('WATT');
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
@@ -242,7 +248,7 @@ test('a task that ends while watched stays on screen with its last answer and `e
 
 test('x asks in the hint row; n and Esc drop the question and the watch stays; y stops the node and the watch stays on it', async () => {
   const { children: [a], ui } = await oneHeld();
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop wata-do-it? y yes · n no');
   await ui.press('n');
@@ -273,8 +279,8 @@ test('a session\'s answer that arrives while watching is not marked seen until E
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ watc-do'));
-  await watchFromRows(ui);
+  await started(ui, 'watc-do-it');
+  await watchFromStrip(ui);
   expect(watching(ui)).toBe(true);
   model.release();
   await settle(12);
@@ -302,8 +308,8 @@ for (const pause of [50, 700]) {
     await settleUntil(() => a!.held);
     await ask(ui, 'main go');
     await settleUntil(() => model.held);
-    await settleUntil(() => frameOf(ui).includes('⚙ watd-do'));
-    await watchFromRows(ui);
+    await started(ui, 'watd-do-it');
+    await watchFromStrip(ui);
     expect(watching(ui)).toBe(true);
     model.release();
     await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
@@ -326,7 +332,7 @@ test('while watching, the chat publishes the session\'s messages and state, not 
   const { children: [a], ui } = await oneHeld();
   a!.release();
   await settleUntil(() => a!.held);
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   expect(frameOf(ui)).toContain('WATA step');
   const chat = host.current.store.chat;
   const text = JSON.stringify(chat.messages);
@@ -343,10 +349,10 @@ test('the details key opens the watched rows and leaves the session\'s folds as 
   await settleUntil(() => frameOf(ui).includes('Session answer.'));
   await ask(ui, '/subagent WATE do it');
   await settleUntil(() => a!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ wate-do'));
+  await started(ui, 'wate-do-it');
   a!.release();
   await settleUntil(() => a!.held);
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   expect(frameOf(ui)).not.toMatch(/→ ok/);
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(4);
@@ -385,13 +391,14 @@ test('a grandchild\'s breadcrumb has two labels', async () => {
 });
 
 // A child with a long prompt overflows the list at once; its last answer arrives later.
+// Typing the 90-word prompt alone takes seconds, so these two tests get a timeout of their
+// own.
 const LONG = Array.from({ length: 90 }, (_, i) => `word${i}`).join(' ');
 async function overflowing() {
   const b = await boot([{ mark: 'WATF', script: [[{ hold: true as const }, { text: 'WATF step', tool: 'datetime', args: {} }], [{ hold: true as const }, { text: 'ARRIVED-LATER' }]] }], { cols: 70, rows: 22 });
   await ask(b.ui, `/subagent WATF ${LONG}`);
   await settleUntil(() => b.children[0]!.held);
-  await settleUntil(() => frameOf(b.ui).includes('⚙ watf-'));
-  await watchFromRows(b.ui);
+  await watchFromStrip(b.ui);
   b.children[0]!.release();
   await settleUntil(() => b.children[0]!.held);
   await settleUntil(() => frameOf(b.ui).includes('WATF step'));
@@ -406,7 +413,7 @@ test('the watched rows follow their end while the list rests there', async () =>
   await settleUntil(() => frameOf(ui).includes('ended: done'));
   expect(frameOf(ui)).toContain('ARRIVED-LATER');
   ui.app.unmount();
-});
+}, 20_000);
 
 test('scrolled up the watched rows stay where they are as rows arrive, and End brings the end back', async () => {
   const { children: [a], ui } = await overflowing();
@@ -420,11 +427,11 @@ test('scrolled up the watched rows stay where they are as rows arrive, and End b
   await settle(4);
   expect(frameOf(ui)).toContain('ARRIVED-LATER');
   ui.app.unmount();
-});
+}, 20_000);
 
 test('the sessions key ends the watch and opens the picker', async () => {
   const { children: [a], ui } = await oneHeld();
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   ui.backend.press({ name: 's', ctrl: true });
   await settle(4);
   expect(frameOf(ui)).toContain('Sessions ·');
@@ -442,8 +449,8 @@ test('a question of the session ends the watch', async () => {
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ wath-do'));
-  await watchFromRows(ui);
+  await started(ui, 'wath-do-it');
+  await watchFromStrip(ui);
   expect(watching(ui)).toBe(true);
   model.release();
   await settleUntil(() => askUp(frameOf(ui)));
@@ -458,13 +465,13 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
   await settleUntil(() => frameOf(ui).includes('Session answer.'));
   await ask(ui, '/subagent WATI do it');
   await settleUntil(() => a!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ wati-do'));
+  await started(ui, 'wati-do-it');
   // The row the session's tool line is on, while the session is drawn.
   const toolAt = rowsOf(ui).findIndex((r) => r.includes('1 tool: datetime'));
   const x = rowsOf(ui)[toolAt]!.indexOf('1 tool');
   a!.release();
   await settleUntil(() => a!.held);
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   const stepAt = rowsOf(ui).findIndex((r) => r.includes('▸ WATI step'));
   expect(stepAt).toBeGreaterThan(0);
   for (const y of [toolAt, stepAt]) {
@@ -485,7 +492,7 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
 const COLLAPSE = { name: '\\', ctrl: true };
 test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on the session', async () => {
   const { children: [a], ui } = await oneHeldTask('WATG', { cols: 160, rows: 40, mode: 'panel' });
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   ui.backend.press(COLLAPSE);
   await settle();
   ui.backend.press(COLLAPSE);
@@ -526,8 +533,8 @@ async function watchedAsker(mark: string, label: string, opts: Parameters<typeof
     await b.ui.press('return');
     await settle(4);
   } else {
-    await settleUntil(() => frameOf(b.ui).includes(`⚙ ${label}`));
-    await watchFromRows(b.ui);
+    await started(b.ui, `${mark.toLowerCase()}-do-it`);
+    await watchFromStrip(b.ui);
   }
   expect(watching(b.ui)).toBe(true);
   return { ...b, file, release: async () => { b.children[0]!.release(); await settleUntil(() => frameOf(b.ui).includes(BLOCK)); } };
@@ -638,7 +645,7 @@ test('a sibling\'s request is one notice line in the watch and no key answers it
   await ui.press('escape');
   await settle(6);
   expect(watching(ui)).toBe(false);
-  // A request waits in the tree: the cursor goes to the field and the block is drawn at once.
+  // A request waits: the field has the keys and the block is drawn at once.
   expect(frameOf(ui)).toContain(BLOCK);
   expect(frameOf(ui)).not.toContain('waits for a y/n');
   clock.t += 50;
@@ -654,7 +661,7 @@ test('a sibling\'s request is one notice line in the watch and no key answers it
   ui.app.unmount();
 });
 
-test('stepping back from a watch begun in the rows, with the node\'s own request waiting: the block is drawn at once and armed afresh', async () => {
+test('stepping back from a watch begun in the strip, with the node\'s own request waiting: the block is drawn at once and armed afresh', async () => {
   const { ui, file, release } = await watchedAsker('WRG', 'wrg-do');
   await release();
   clock.t += 5000;
@@ -663,7 +670,8 @@ test('stepping back from a watch begun in the rows, with the node\'s own request
   expect(watching(ui)).toBe(false);
   expect(frameOf(ui)).toContain(BLOCK);
   expect(frameOf(ui)).not.toContain('waits for a y/n');
-  expect(frameOf(ui)).not.toContain(KEYS);
+  // Nothing holds the keys but the field: the watch and the strip are both gone.
+  expect(frameOf(ui)).toContain('↑↓ history');
   clock.t += 50;
   await ui.press('y');
   await settle(6);
@@ -686,7 +694,7 @@ test('a grandchild\'s request is drawn while its parent is watched, labelled wit
   await ask(ui, '/subagent OUTR go');
   await settleUntil(() => outer!.held);
   await settleUntil(() => frameOf(ui).includes('outr-go'));
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · outr-go');
   outer!.release();
   await settleUntil(() => inner!.held);
@@ -775,39 +783,65 @@ test('where the block would undock the chat, the watch says so in one line and n
   ui.app.unmount();
 });
 
-// ---- the session's own question over a watch or the tree cursor ----
+// ---- the session's own question over a watch or the work strip ----
 
 const QUESTION = [[{ hold: true as const }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]];
 
-for (const where of ['watching', 'the cursor in the rows'] as const) {
-  test(`the session's own question that arrives while ${where} takes no key for the pause, then ⏎ answers it`, async () => {
-    const { children: [a], ui, model } = await boot([{ mark: 'WQA' }], { main: QUESTION });
-    await ask(ui, '/subagent WQA do it');
-    await settleUntil(() => a!.held);
-    await ask(ui, 'main go');
-    await settleUntil(() => model.held);
-    await settleUntil(() => frameOf(ui).includes('⚙ wqa-do'));
-    if (where === 'watching') await watchFromRows(ui);
-    else await intoRows(ui);
-    expect(where === 'watching' ? watching(ui) : inRows(ui)).toBe(true);
-    model.release();
-    await settleUntil(() => askUp(frameOf(ui)));
-    expect(watching(ui)).toBe(false);
-    clock.t += 50;
-    await ui.press('return');
-    await settle(6);
-    // The key came before the pause: the question is still up.
-    expect(askUp(frameOf(ui))).toBe(true);
-    clock.t += 700;
-    await ui.press('return');
-    await settleUntil(() => !askUp(frameOf(ui)));
-    await settleUntil(() => frameOf(ui).includes('Using it.'));
-    a!.release();
-    ui.app.unmount();
-  });
-}
+test('the session\'s own question that arrives while watching takes no key for the pause, then ⏎ answers it', async () => {
+  const { children: [a], ui, model } = await boot([{ mark: 'WQA' }], { main: QUESTION });
+  await ask(ui, '/subagent WQA do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  await started(ui, 'wqa-do-it');
+  await watchFromStrip(ui);
+  expect(watching(ui)).toBe(true);
+  model.release();
+  await settleUntil(() => askUp(frameOf(ui)));
+  expect(watching(ui)).toBe(false);
+  clock.t += 50;
+  await ui.press('return');
+  await settle(6);
+  // The key came before the pause: the question is still up.
+  expect(askUp(frameOf(ui))).toBe(true);
+  clock.t += 700;
+  await ui.press('return');
+  await settleUntil(() => !askUp(frameOf(ui)));
+  await settleUntil(() => frameOf(ui).includes('Using it.'));
+  a!.release();
+  ui.app.unmount();
+});
 
-test('a question with no watch and no cursor takes a key at once', async () => {
+test('a question that arrives over the work strip is answered first, and the strip is back once it is', async () => {
+  const { children: [a], ui, model } = await boot([{ mark: 'WQC' }], { main: QUESTION });
+  await ask(ui, '/subagent WQC do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  await started(ui, 'wqc-do-it');
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  model.release();
+  await settleUntil(() => askUp(frameOf(ui)));
+  // The question takes the field's place, so the strip is not drawn over it.
+  expect(stripUp(ui)).toBe(false);
+  clock.t += 50;
+  await ui.press('return');
+  await settle(6);
+  // The key came before the pause: the question is still up.
+  expect(askUp(frameOf(ui))).toBe(true);
+  clock.t += 700;
+  await ui.press('return');
+  await settleUntil(() => !askUp(frameOf(ui)));
+  await settleUntil(() => frameOf(ui).includes('Using it.'));
+  // The strip was never closed: it is up again, its row intact.
+  expect(stripUp(ui)).toBe(true);
+  expect(frameOf(ui)).toContain('wqc-do-it');
+  a!.release();
+  ui.app.unmount();
+});
+
+test('a question with no watch and no strip takes a key at once', async () => {
   const { ui, model } = await boot([{ mark: 'WQB' }], { main: QUESTION });
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
@@ -849,8 +883,8 @@ test('the settings file\'s y/n ends a watch: a y inside the pause creates the ch
     await settleUntil(() => a!.held);
     await ask(ui, 'main go');
     await settleUntil(() => model.held);
-    await settleUntil(() => frameOf(ui).includes('⚙ pone-do'));
-    await watchFromRows(ui);
+    await started(ui, 'pone-do-it');
+    await watchFromStrip(ui);
     expect(watching(ui)).toBe(true);
     a!.release();
     await settleUntil(() => frameOf(ui).includes(BLOCK));
@@ -882,8 +916,8 @@ test('with the settings file\'s y/n up after a watch, x and y inside the pause s
     await settleUntil(() => a!.held);
     await ask(ui, 'main go');
     await settleUntil(() => model.held);
-    await settleUntil(() => frameOf(ui).includes('⚙ ptwo-do'));
-    await watchFromRows(ui);
+    await started(ui, 'ptwo-do-it');
+    await watchFromStrip(ui);
     expect(watching(ui)).toBe(true);
     clock.t += 5000;
     fs.writeFileSync(settingsFile(), '{"shell":{"autoRun":true}}');
@@ -909,8 +943,12 @@ test('x, y on a watched node that has not begun ends the watch on `ended: stoppe
   for (const m of ['QAA', 'QBB', 'QCC', 'QDD']) await ask(ui, `/subagent ${m} go`);
   await settleUntil(() => children.slice(0, 3).every((c) => c.held));
   await settleUntil(() => frameOf(ui).includes('qdd-go'));
-  expect(frameOf(ui)).toContain('○ qdd-go · queued');
+  // The strip lists all four in the tree's order, the queued one too: its row is the
+  // fourth, and ⏎ on it watches the node.
   for (let i = 0; i < 4; i++) await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  expect(frameOf(ui)).toContain('qdd-go');
+  expect(frameOf(ui)).toContain('queued');
   await ui.press('return');
   await settle(4);
   expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist (scripted) · qdd-go');
@@ -965,8 +1003,8 @@ test('a session\'s answer that arrives while watching counts as seen when its ow
   await settleUntil(() => model.held);
   // Typed while the turn runs: it is queued, and its turn starts when the first one has answered.
   await ask(ui, 'second');
-  await settleUntil(() => frameOf(ui).includes('⚙ wats-do'));
-  await watchFromRows(ui);
+  await started(ui, 'wats-do-it');
+  await watchFromStrip(ui);
   expect(watching(ui)).toBe(true);
   model.release();
   await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
@@ -1004,7 +1042,7 @@ test('a docked chat whose keys are the plugin\'s keeps its watch, and a key the 
 
 test('with the stop question up, y or n with ctrl or meta answers nothing; the question stays and the node runs on', async () => {
   const { children: [a], ui } = await oneHeld('WCM');
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop wcm-do-it? y yes · n no');
   ui.backend.press({ name: 'y', ctrl: true });
@@ -1019,7 +1057,7 @@ test('with the stop question up, y or n with ctrl or meta answers nothing; the q
 
 test('a stop question up when the task ends is gone: the hint row says how it ended', async () => {
   const { children: [a], ui } = await oneHeldTask('WQE');
-  await watchFromRows(ui);
+  await watchFromStrip(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop wqe-do-it? y yes · n no');
   a!.release();
@@ -1057,8 +1095,8 @@ test('Ctrl+C in a watch does not stop the session\'s turn: it arms the exit, and
   await settleUntil(() => a!.held);
   await ask(ui, 'main go');
   await settleUntil(() => model.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ wcc-do'));
-  await watchFromRows(ui);
+  await started(ui, 'wcc-do-it');
+  await watchFromStrip(ui);
   expect(watching(ui)).toBe(true);
   const consumed = ui.backend.press({ name: 'c', ctrl: true });
   await settle(6);

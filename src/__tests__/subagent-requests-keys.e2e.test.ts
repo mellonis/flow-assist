@@ -1,7 +1,7 @@
 // Which request each key reaches when several are up at once: the session's own y/n and
 // question, a subagent's y/n and a subagent's question (ask-children-spec.md (subagent y/n), (agent
-// tree), (watching a child)). A holder of the keys — the tree cursor, a watch, the pager,
-// the `/context` panel, the session picker, a docked plugin panel — keeps them from a
+// tree), (watching a child)). A holder of the keys — a watch, the pager, the `/context`
+// panel, the session picker, a docked plugin panel — keeps them from a
 // subagent's request, which is offered again, armed afresh, once the holder is gone. The
 // real app on the scripted model; the pause before an answer counts is read from
 // `askClock`, which the tests move.
@@ -13,7 +13,7 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
-import { intoRows } from './helpers/work-panel';
+import { openStrip } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 const realNow = askClock.now;
@@ -89,7 +89,6 @@ interface Holder { name: string; open: (rig: Rig) => Promise<void>; close: (rig:
 const escapes = (n: number) => async (rig: Rig) => { for (let i = 0; i < n; i++) await rig.ui.press('escape'); };
 const SEQ = [[{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Counted.' }]];
 const holders: Holder[] = [
-  { name: 'the tree cursor on a row', kids: (k) => [k], open: async (rig) => { await intoRows(rig.ui); }, close: escapes(1) },
   { name: 'the watch of another subagent', kids: (k) => [k, { mark: 'BYST', kind: 'idle' }], open: async (rig) => { await rig.ui.press('down', 'down', 'return'); await settleUntil(() => frameOf(rig.ui).includes('Esc')); }, close: escapes(2) },
   { name: 'the /context panel', kids: (k) => [k], open: async (rig) => { await ask(rig.ui, '/context'); await settleUntil(() => frameOf(rig.ui).includes('on screen')); }, close: escapes(1) },
   { name: 'the session picker', kids: (k) => [k], open: async (rig) => { rig.ui.backend.press({ name: 's', ctrl: true }); await settle(4); }, close: escapes(2) /* the first clears the filter the letters made */ },
@@ -571,12 +570,13 @@ for (const [older, newer] of [['yn', 'ask'], ['ask', 'yn']] as const) {
 
 // ─── the session's own request under a holder of the keys ────────────────────────────
 // The session's own y/n and question are drawn over the picker and the /context panel and
-// take their first key at once (the picker and the panel give way to them); over the tree
-// cursor they are armed: the answer counts after the pause.
+// take their first key at once (the picker and the panel give way to them); over the work
+// strip they are armed: the answer counts after the pause. The strip itself is not drawn
+// while one of them holds the field's place.
 const holdersOfOwn = [
   { name: 'the session picker', armed: false, open: async (rig: Rig) => { rig.ui.backend.press({ name: 's', ctrl: true }); await settle(4); } },
   { name: 'the /context panel', armed: false, open: async (rig: Rig) => { await ask(rig.ui, '/context'); await settle(4); } },
-  { name: 'the tree cursor', armed: true, open: async (rig: Rig) => { await intoRows(rig.ui); } },
+  { name: 'the work strip', armed: true, open: async (rig: Rig) => { await openStrip(rig.ui); } },
 ];
 for (const holder of holdersOfOwn) {
   for (const kind of ['yn', 'ask'] as const) {

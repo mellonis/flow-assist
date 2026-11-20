@@ -1,5 +1,6 @@
-// The background shells in the real app: `!cmd &`, the tree row and its pager, the kill key,
-// the footer's count, and the question when a session with shells running is left.
+// The background shells in the real app: `!cmd &`, the work strip and `/agents` that list
+// them, the pager their output opens in, the kill key, the footer's count, and the question
+// when a session with shells running is left.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,7 +9,6 @@ import { hostStateDir } from '../config/load.ts';
 import { lockPath } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { isSessionFile } from './helpers/session-files';
-import { intoRows } from './helpers/work-panel';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -23,6 +23,10 @@ const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
 const rowWith = (ui: UI, text: string) => rowsOf(ui).find((r) => r.includes(text)) ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
+// A job's start is the toast: no row stands under the field. Its state is read in the work
+// strip (what it runs, whose it is) and in `/agents` (the time, the line count).
+const started = (ui: UI, id: string) => settleUntil(() => frameOf(ui).includes(`${id} started in the background`));
+const stripUp = (ui: UI) => frameOf(ui).includes('Flow Assist · Work');
 
 // The app is unmounted, not exited, so the jobs it still holds are ended here: the host's state
 // file lists the groups this process started.
@@ -45,30 +49,29 @@ async function boot(extraShell: Record<string, unknown> = {}) {
   return { ui, root, model, sessions };
 }
 
-// The tree rows under the field hold the subagents and the shells alike, and a subagent's
-// watch is the door into them: an idle one stands above the shell rows a test acts on, so
-// that a row's own keys (`x` and `⏎`) are reached the way the app reaches them.
-async function rowsKey(ui: UI) {
-  await ask(ui, '/subagent ROWKEY go');
-  await settleUntil(() => frameOf(ui).includes('◆ rowkey-go finished:'));
-  await settleUntil(() => frameOf(ui).includes('◦ rowkey-go · idle'));
-}
-
-test('`!sleep 60 &` runs in the background: no block, the field is free, a tree row and the footer count appear', async () => {
+test('`!cmd &` runs in the background: no block, the field is free, the count appears and the strip lists the job', async () => {
   const { ui } = await boot();
   await ui.type('!');
   await ui.type('echo up; sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · echo up; sleep 60'));
-  const row = rowWith(ui, '○ sh-1 · echo up; sleep 60');
-  expect(row).toMatch(/○ sh-1 · echo up; sleep 60 · running <1m · [01] lines?/);
-  // The output grows in place.
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('1 line'));
-  expect(rowWith(ui, '○ sh-1 ·')).toContain('running <1m · 1 line');
-  expect(frameOf(ui)).toContain('1 in backgro');
-  expect(frameOf(ui)).toContain('sh-1 started in the background');
+  await started(ui, 'sh-1');
+  // The badge says the door and the count; this width cuts the row inside the word.
+  expect(frameOf(ui)).toMatch(/↓ 1 in backg/);
   // Not a waited-for command: no spinner, no console block, and the shell mode is left.
   expect(frameOf(ui)).not.toContain('✓');
+  // The strip is where its row is now: the job, what it does and whose it is.
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  expect(frameOf(ui)).toContain('sh-1 · echo up; sleep 60');
+  expect(frameOf(ui)).toContain('running — this chat');
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
+  // `/agents` reads the same job with its time and line count, and the count follows.
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Agents') && rowWith(ui, '○ sh-1 ·').includes('1 line'));
+  expect(rowWith(ui, '○ sh-1 ·')).toMatch(/○ sh-1 · echo up; sleep 60/);
+  await ui.press('escape');
+  await settleUntil(() => !frameOf(ui).includes('Flow Assist · Agents'));
   await ui.type('hello');
   expect(rowsOf(ui).some((r) => r.includes('› hello'))).toBe(true);
   ui.app.unmount();
@@ -94,7 +97,7 @@ test('↓ opens the strip on Shells and ⏎ opens the row\'s output in the pager
   await ui.type('!');
   await ui.type('echo first; sleep 0.6; echo second; sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · echo first'));
+  await started(ui, 'sh-1');
   await ui.press('down');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ first'));
@@ -108,90 +111,59 @@ test('↓ opens the strip on Shells and ⏎ opens the row\'s output in the pager
   ui.app.unmount();
 });
 
-test('x on the row asks, y kills it (the end is a toast), n and Esc keep it', async () => {
+test('^d on the strip\'s row asks, y kills it (the end is a toast), n and Esc keep it', async () => {
   const { ui } = await boot();
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  await rowsKey(ui);
-  await intoRows(ui);
-  await ui.press('down'); // onto the shell's row
-  expect(frameOf(ui)).toContain('x stop');
-  await ui.press('x');
+  await started(ui, 'sh-1');
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  // The strip opens on the Shells tab: the job's row, its kill the panel's own chord.
+  await ui.backend.press({ name: 'd', ctrl: true });
   expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
   await ui.press('n');
   expect(frameOf(ui)).not.toContain('kill sh-1?');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
-  await ui.press('x');
-  await ui.press('escape');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
-  await ui.press('x');
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60');
+  // The chord that asked drops the question again, and the job is alive.
+  await ui.backend.press({ name: 'd', ctrl: true });
+  await ui.backend.press({ name: 'd', ctrl: true });
+  await settleUntil(() => !frameOf(ui).includes('kill sh-1?'));
+  expect(frameOf(ui)).not.toContain('kill sh-1?');
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60');
+  await ui.backend.press({ name: 'd', ctrl: true });
   await ui.press('y');
-  await settleUntil(() => !frameOf(ui).includes('○ sh-1 · sleep 60'));
-  expect(frameOf(ui)).not.toContain('○ sh-1 · sleep 60');
   await settleUntil(() => frameOf(ui).includes('sh-1 killed (person) after'));
   expect(frameOf(ui)).toContain('sh-1 killed (person) after');
+  // The strip stays up and keeps the row with the words it ended in.
+  expect(stripUp(ui)).toBe(true);
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60');
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
   expect(frameOf(ui)).not.toContain('in backgro');
   ui.app.unmount();
 });
 
-test('a job that ends on its own tells the person and keeps an answered row; opening it reads it and the row goes', async () => {
+test('a job that ends on its own tells the person, and the strip keeps its row with its end', async () => {
   const { ui } = await boot();
   await ui.type('!');
   await ui.type('echo bye; sleep 0.3; exit 5 &');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('sh-1 exited 5 after'));
   expect(frameOf(ui)).toContain('sh-1 exited 5 after');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 5'));
-  expect(rowWith(ui, '○ sh-1 ·')).toMatch(/○ sh-1 · echo bye; sleep 0.3; exit 5 · exited 5 · 1 line/);
+  // The strip lists the ended job with the words it ended in; its output is a keypress away.
   await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  expect(frameOf(ui)).toContain('sh-1 · echo bye; sleep 0.3; exit 5');
+  expect(frameOf(ui)).toContain('exited 5 — this chat');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ bye'));
   expect(frameOf(ui)).toContain('│ bye');
+  // Opened, its output is the chat's own block; the pager closes on its key.
   await ui.press('escape');
-  await settleUntil(() => !rowWith(ui, '○ sh-1 ·').includes('exited 5'));
-  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
-  ui.app.unmount();
-});
-
-test('x on an ended row dismisses it with no question; the job stays in /agents', async () => {
-  const { ui } = await boot();
-  await ui.type('!');
-  await ui.type('echo bye; sleep 0.3; exit 5 &');
-  await ui.press('return');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 5'));
-  await rowsKey(ui);
-  await intoRows(ui);
-  await ui.press('down'); // onto the shell's row
-  await settleUntil(() => frameOf(ui).includes('x dismiss'));
-  expect(frameOf(ui)).toContain('x dismiss');
-  await ui.press('x');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
-  expect(frameOf(ui)).not.toContain('kill sh-1?');
-  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
-  // The cursor is back on the subagent's row now that the shell's row is gone.
-  await ui.press('escape');
-  await ask(ui, '/agents');
-  await settleUntil(() => frameOf(ui).includes('Agents'));
+  await settleUntil(() => !frameOf(ui).includes('PgUp/PgDn or the wheel scroll'));
+  expect(frameOf(ui)).toContain('│ bye');
   expect(frameOf(ui)).toContain('exited 5');
-  ui.app.unmount();
-});
-
-test('x on a running row asks to kill and leaves the row; it does not dismiss', async () => {
-  const { ui } = await boot();
-  await ui.type('!');
-  await ui.type('sleep 60 &');
-  await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  await rowsKey(ui);
-  await intoRows(ui);
-  await ui.press('down'); // onto the shell's row
-  await ui.press('x');
-  await settleUntil(() => frameOf(ui).includes('kill sh-1? y yes · n no'));
-  expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
-  await ui.press('n');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
   ui.app.unmount();
 });
 
@@ -200,7 +172,7 @@ test('/agents lists the shell and kills it with x then y', async () => {
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   await ask(ui, '/agents');
   await settleUntil(() => frameOf(ui).includes('Agents'));
   expect(rowWith(ui, '○ sh-1 · sleep 60')).toContain('running <1m · 0 lines');
@@ -217,13 +189,13 @@ test('!cmd & at the limit shows the running jobs and starts nothing', async () =
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   await ui.type('!');
   await ui.type('sleep 61 &');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('shell.maxBackground'));
   expect(frameOf(ui)).toContain('shell.maxBackground');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  expect(frameOf(ui)).toContain('sh-1 · sleep 60');
   expect(frameOf(ui)).not.toContain('sh-2');
   ui.app.unmount();
 });
@@ -244,7 +216,7 @@ test('/new with a shell running asks stop / keep running: Esc stays, k leaves it
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   // Esc cancels the leave: the same session, the job running.
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
@@ -255,7 +227,6 @@ test('/new with a shell running asks stop / keep running: Esc stays, k leaves it
   await settle(3);
   expect(frameOf(ui)).not.toContain('Background shells are running');
   expect(frameOf(ui)).toContain('A answer.');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
   // Keep running: a new session; the first stays headless, working in the picker.
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
@@ -295,7 +266,7 @@ test('switching to another session from the picker asks the same question; Esc s
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   const pickA = async () => {
     ui.backend.press({ name: 's', ctrl: true });
     await settle(3);
@@ -325,15 +296,12 @@ test('x on an ended shell asks nothing: there is nothing to kill', async () => {
   await ui.type('!');
   await ui.type('echo hi &');
   await ui.press('return');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('exited 0'));
-  await rowsKey(ui);
-  await intoRows(ui);
-  await ui.press('down'); // onto the shell's row
-  // The rows hold the keys: `x` is the tree row's own, and an ended row says `dismiss`.
-  expect(frameOf(ui)).toContain('↑↓ move · x dismiss · Esc back');
+  await settleUntil(() => frameOf(ui).includes('sh-1 exited 0 after'));
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Agents') && frameOf(ui).includes('exited 0'));
   await ui.press('x');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·') === '');
-  expect(rowWith(ui, '○ sh-1 ·')).toBe('');
+  await settleUntil(() => frameOf(ui).includes('nothing to stop'));
+  expect(frameOf(ui)).toContain('nothing to stop');
   expect(frameOf(ui)).not.toContain('kill sh-1?');
   ui.app.unmount();
 });
@@ -366,13 +334,12 @@ test('`!cmd &` while a turn runs starts the job and leaves the turn alone', asyn
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  await started(ui, 'sh-1');
   expect(frameOf(ui)).not.toContain('still running');
   model.release();
   await settleUntil(() => frameOf(ui).includes('slow answer.'));
   expect(frameOf(ui)).toContain('slow answer.');
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  expect(frameOf(ui)).toMatch(/↓ 1 in backg/);
   ui.app.unmount();
 }, 20_000);
 
@@ -387,7 +354,7 @@ test('/resume n with a shell running asks the same question, and k switches', as
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   await ask(ui, '/resume 2');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   expect(frameOf(ui)).toContain('sh-1 · sleep 60 running');
@@ -404,7 +371,7 @@ test('the leave panel survives its jobs ending while it is open: k and s still l
   await ui.type('!');
   await ui.type('sleep 1 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 1'));
+  await started(ui, 'sh-1');
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   await settleUntil(() => frameOf(ui).includes('sh-1 exited 0 after'), 4000);
@@ -427,7 +394,7 @@ test('a switch refused after the question (the session is open in another proces
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   ui.backend.press({ name: 's', ctrl: true });
   await settle(3);
   const rows = frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
@@ -457,7 +424,7 @@ test('/resume n refused after the question leaves the chat as it was: no picker 
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   await ask(ui, '/resume 2');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
@@ -476,27 +443,34 @@ test('/agents keeps the shells that ended: one the person killed and one already
   await ui.type('!');
   await ui.type('echo killed-out; sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => rowWith(ui, '○ sh-1 ·').includes('1 line'));
+  await started(ui, 'sh-1');
   await ui.type('!');
   await ui.type('echo opened-out &');
   await ui.press('return');
-  await settleUntil(() => rowWith(ui, '○ sh-2 ·').includes('exited 0'));
-  // The person kills sh-1 (never unread), and opens sh-2 once (read).
-  await rowsKey(ui);
-  await intoRows(ui);
-  await ui.press('down'); // onto sh-1's row
+  await settleUntil(() => frameOf(ui).includes('sh-2 exited 0 after'));
+  // The person kills sh-1 in the panel (never unread), and opens sh-2 once (read).
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Agents') && rowWith(ui, '○ sh-2 · echo opened-out').includes('exited 0'));
   await ui.press('x');
+  expect(frameOf(ui)).toContain('kill sh-1? y yes · n no');
   await ui.press('y');
-  await settleUntil(() => !rowWith(ui, '○ sh-1 ·'));
+  await settleUntil(() => rowWith(ui, '○ sh-1 · echo killed-out').includes('killed'));
+  expect(rowWith(ui, '○ sh-1 · echo killed-out')).toContain('killed');
+  const openedAt = rowWith(ui, '○ sh-2 · echo opened-out');
+  const openedY = rowsOf(ui).indexOf(openedAt);
+  ui.backend.mouse('down', 12, openedY);
+  ui.backend.mouse('up', 12, openedY);
+  await settle(6);
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ opened-out'));
+  expect(frameOf(ui)).toContain('│ opened-out');
   await ui.press('escape');
-  await settleUntil(() => !rowWith(ui, '○ sh-2 ·'));
+  // Both ended shells stay listed, each with the words it ended in.
   await ask(ui, '/agents');
   await settleUntil(() => frameOf(ui).includes('Agents'));
   expect(rowWith(ui, '○ sh-1 · echo killed-out')).toContain('killed');
   expect(rowWith(ui, '○ sh-2 · echo opened-out')).toContain('exited 0');
-  // The live subagent leads the listing, then the ended shells; sh-1 is the last of them.
+  // The ended shells follow the live rows; sh-1 is among them, and ⏎ opens its output.
   await ui.press('down', 'down');
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('│ killed-out'));
@@ -518,8 +492,7 @@ test('leaving a session whose only running shell belongs to a subagent asks, and
   await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
   await wait(800);
   await ui.press('y');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
-  expect(frameOf(ui)).toContain('○ sh-1 · sleep 60');
+  await started(ui, 'sh-1');
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   expect(frameOf(ui)).toContain('sh-1 · sleep 60 running');
@@ -534,7 +507,7 @@ test('the picker\'s delete refusal of a session kept open for a running shell na
   await ui.type('!');
   await ui.type('sleep 60 &');
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('○ sh-1 · sleep 60'));
+  await started(ui, 'sh-1');
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   await ui.press('k');

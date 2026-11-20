@@ -17,7 +17,6 @@
 import { askRows, askSubmitRows, askTabs, type AskRow, type AskState, type AskSubmitRow, type AskTab } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
-import type { TreeRow } from '../assistant/agent-tree.js';
 import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
 import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
@@ -1627,22 +1626,19 @@ export interface ChatRoomInput {
   // `/diff`: the panel's data (null — closed). Where the split stands is measured from
   // the same numbers the render uses, so the keys cannot act on a panel that is not drawn.
   diffPanel?: DiffPanelView | null;
-  // How many rows the tree draws, as `renderChatModal` had them from `treeBudget`: both
-  // the plan's shape and the split's height give way to them.
-  treeRows?: number;
   // Only the completion list's height is read: its rows sit in the field's place.
   completion?: { list?: { height: number } | null } | null;
 }
 
 // The measures of the chat's column, in one place so what is drawn and what a key may
-// act on cannot disagree. `besides` is everything in the column but the conversation, the
-// plan and the tree — the error, the queue line, the field strip (the field's place and
-// the hint row under it, no gap between them) — each child with the gap above it (the
-// frame's border and padding take 4 rows more); `planFull` is the rows of the whole plan
-// block. `hidden`: a question, a y/n, `/context`, the pager, a watched child, the picker
-// or a command panel takes the column, and the tree is not drawn.
+// act on cannot disagree. `besides` is everything in the column but the conversation and
+// the plan — the error, the queue line, the field strip (the field's place and the hint
+// row under it, no gap between them) — each child with the gap above it (the frame's
+// border and padding take 4 rows more); `planFull` is the rows of the whole plan block.
+// `hidden`: a question, a y/n, `/context`, the pager, a watched child, the picker or a
+// command panel takes the column.
 export function chatRoom(p: ChatRoomInput) {
-  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null, diffPanel = null, treeRows = 0 } = p;
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null, completion = null, diffPanel = null } = p;
   const fullscreen = p.fullscreen ?? false;
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = chatBoxHeight(height, fullscreen);
@@ -1678,36 +1674,15 @@ export function chatRoom(p: ChatRoomInput) {
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
   const hidden = !!(pager || watch || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
-  // The tree's block takes its rows and the gap above them.
-  const treeBlock = treeRows > 0 ? 1 + treeRows : 0;
-  const planShape = planFit(boxH - 4, besides + treeBlock, planFull);
+  const planShape = planFit(boxH - 4, besides, planFull);
   // `/diff`'s split. The rows it may use are the content less the strip that stays full
   // width below it — the error, the hint row, the queue line and the field's place (each
-  // with its gap), and the plan and the tree as they are drawn — less the one gap the
-  // split's own row brings. `fieldRows: 0`: the field is in that strip, not the split's.
-  const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0) + treeBlock;
+  // with its gap), and the plan as it is drawn — less the one gap the split's own row
+  // brings. `fieldRows: 0`: the field is in that strip, not the split's.
+  const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0);
   const split = diffPanel ? diffPanelLayout({ width: boxW - 4, height: Math.max(0, boxH - 4 - stripRows - 1), fieldRows: 0, minChatRows: 4 }) : null;
   return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, planShape, split, hidden };
 }
-
-// The conversation list keeps at least this many rows before any tree row is drawn.
-const TREE_LIST_MIN = 4;
-
-// How many tree rows the column has room for: `min(max, nodes)` reduced until the
-// conversation list keeps four rows with the whole plan block counted — the tree gives way
-// before the plan does. The block's gap above is part of what it reserves; the block has
-// no line of its own besides the rows, the stop question taking the cursor row's place
-// and the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are
-// `chatRoom`'s. The chat draws this many rows, and its keys use the same geometry, with
-// the nodes read at the key (ask-children-spec.md (agent tree)).
-export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
-  if (hidden || max <= 0 || nodes <= 0) return 0;
-  const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;
-  return Math.max(0, Math.min(max, nodes, free - 1));
-}
-
-// The tree as `renderChatModal` draws it (`treeRows`' rows, then the cursor and the question).
-export interface TreeView { rows: TreeRow[]; more: number; cursor: string | null; ask: string | null }
 
 export function renderChatModal({
   width,
@@ -1776,14 +1751,9 @@ export function renderChatModal({
   panel = null,
   diffPanel = null,
   model,
-  tree = null,
   hover = false,
   onPickRow,
 }: {
-  // The live subagents and tasks of the conversation, as rows under the field (null — none).
-  // `cursor` is the key of the row the cursor is on (null — it is in the field), `ask` the
-  // stop question once `x` was pressed. The rows are what `treeBudget` left them.
-  tree?: TreeView | null;
   // The backend reports hover: what a click acts on is underlined under the pointer.
   hover?: boolean;
   // A click on a row of the session picker or a command panel: the cursor goes there,
@@ -1954,13 +1924,7 @@ export function renderChatModal({
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
   const props = { width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion, diffPanel };
   const base = chatRoom(props);
-  // The tree under the field: what budget leaves it, and the rows that block takes with
-  // its gap — the plan gives way to it only after the list's four rows are safe.
-  const treeShown = tree && !base.hidden ? tree.rows.slice(0, treeBudget({ boxH: base.boxH, besides: base.besides, planFull: base.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
-  // One measure with the tree counted: the plan's shape and `/diff`'s split both give way
-  // to its rows.
-  const room = treeShown.length ? chatRoom({ ...props, treeRows: treeShown.length }) : base;
-  const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
+  const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = base;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
   // The field's own text, a token among it drawn as an attachment. Not dim: in the field
@@ -1980,16 +1944,14 @@ export function renderChatModal({
   const ghost = atEnd ? completion?.ghost ?? '' : '';
   const label = atEnd ? completion?.label ?? '' : '';
   const others = atEnd ? completion?.others ?? [] : [];
-  // The cursor is in the rows: the hint row names their keys.
-  const treeKeys = treeShown.length > 0 && tree!.cursor !== null;
-  const planShape = room.planShape;
+  const planShape = base.planShape;
   const oneLine = planShape === 'line' ? planLine(planList) : null;
   // The chat's own name, with the model it runs after it; what is on screen follows
   // after ` · `, and the whole title is cut to the border, never wrapped.
   const chatName = `${ASSISTANT_MARK} Flow Assist${model ? ` (${model})` : ''}`;
   // `/diff`'s split: where the panel stands. A panel the layout gave no rows
   // (`diff.height === 0`) is not drawn — it stays open and comes back when room does.
-  const split = room.split;
+  const split = base.split;
   const diffShown = !!split && (split.mode === 'side' || split.diff.height > 0);
   // Side by side the conversation's rows are laid out at its half, less the list's
   // scrollbar; the field strip below keeps the chat's full width. The panel's rows are
@@ -2015,7 +1977,7 @@ export function renderChatModal({
           palette: m,
           // The body hears PgUp/PgDn and the wheel while the chat has the keyboard and
           // nothing stands in the conversation's place.
-          scroll: { isActive: !!focused && !pager && !watch && !room.hidden },
+          scroll: { isActive: !!focused && !pager && !watch && !base.hidden },
         }))
     : null;
   // The background badge of the hint row: the `↓` door and the number of rows it opens
@@ -2029,8 +1991,8 @@ export function renderChatModal({
     ? `${bgDoor > 0 ? `${keyGlyph('down')} ` : ''}${bgShown} in background${bgWaiting > 0 ? ` · ${bgWaiting} waiting` : ''}`
     : '';
   // The hint row's own keys, the badge appended to them as a span. Said apart from the
-  // badge because the hint can stand for a status instead (`Esc stops`, a notice, the
-  // tree's keys), and none of those ends with the badge.
+  // badge because the hint can stand for a status instead (`Esc stops`, a notice), and
+  // neither of those ends with the badge.
   const hintKeys = [`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
     imagesOn && `${CAP.image} image`, `${CAP.auto} auto`].filter(Boolean).join(' · ');
   // The conversation and whatever stands in its place, in a column of their own: the
@@ -2232,7 +2194,7 @@ export function renderChatModal({
             h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
         h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
         h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-        (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
+        (!escArmed && !armedHint && (streaming || toolLabel))
           // Working: what is happening NOW is the bright part. A tool that is running
           // pulses through the accent colours; with none running the model is either
           // thinking (waiting for its first token, reasoning, working out the next tool
@@ -2255,13 +2217,11 @@ export function renderChatModal({
                     children: `${verb || VERBS[0]}…`,
                   })),
               stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
-          : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint && !treeKeys) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+          : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
           armedHint
             ? armedHint
             : escArmed
             ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
-            : treeKeys
-            ? `${CAP.upDown} move · x ${treeShown.find((r) => r.key === tree!.cursor)?.ended ? 'dismiss' : 'stop'} · ${CAP.esc} back`
             : emptyNotice
                 ? `⚠ ${emptyNotice}`
                 // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
@@ -2299,18 +2259,6 @@ export function renderChatModal({
         autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
         contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null)
       ),
-      // The live subagents and tasks, the last block of the column: one line per row, the
-      // cursor's row inverted as a picker's is, or, once `x` was pressed, replaced by the stop
-      // question in the warn colour. Chrome, not conversation: out of every selection.
-      treeShown.length ? h(Box, { key: 'tree', flexDirection: 'column', width: '100%', flexShrink: 0, selectable: false },
-        treeShown.map((r) => {
-          const at = r.key !== '' && r.key === tree!.cursor;
-          const asking = at && tree!.ask !== null;
-          return h(Text, {
-            key: r.key || 'more', wrap: 'truncate',
-            ...(asking ? { color: m.warn, bold: true } : at ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
-          }, asking ? cutStep(tree!.ask!, wrap) : r.text);
-        })) : null,
       // `/diff` on a terminal too narrow to stand beside the conversation: the panel
       // takes its rows below the field strip, the column above keeps the rest. Its last
       // row is the frame's own bottom, so it is the last child.
