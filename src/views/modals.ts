@@ -613,10 +613,9 @@ interface SteerAnswer { seg: number; step: number }
 
 // The step that answers each steered-in message of the list: the LAST text written
 // after the steered-in row and before either the turn's answer or the person's next
-// message. One mark per steer — the turn's own last text stays the answer and keeps its
-// `ƒ`, so a steer the model answers by ending the turn there is the answer, not a
-// steer's reply. A message of the work (a view, a note) does not end the stretch; the
-// person's next message does, and so does the turn's answer.
+// message. One mark per steer. When that text IS the turn's answer, `ƒ` alone marks it —
+// the stretch has no step of its own to mark. A message of the work (a view, a note) does
+// not end the stretch; the person's next message does, and so does the turn's answer.
 function steerAnswers(drawn: readonly ChatMsg[]): Map<number, SteerAnswer> {
   const out = new Map<number, SteerAnswer>();
   // The last step found in the stretch open now, and where it is; `open` says whether a
@@ -899,11 +898,12 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       // The run that answers a message steered in mid-turn, when this message holds it.
       const steerRun = steer?.seg ?? -1;
       // The one fact the two paths share: a run's text is the person's to read at full
-      // ink. Every step of the run that led into a waiting question qualifies, and the
-      // one step that answers a steered-in message — narration answers nothing and
-      // stays dim.
+      // ink. Every step of the run that led into a waiting question qualifies, and so does
+      // the last step written before a steered-in message's answer — the narration ahead
+      // of it keeps its dim row.
       const forPerson = (run: number, step: number): boolean => run === leadRun || (run === steerRun && step === steer?.step);
-      // A run with a step the person reads is drawn unfolded, so that step is seen.
+      // A run with a step the person reads is drawn unfolded, and a click on it folds
+      // nothing: the run stays unfolded whatever the fold state says while it is lit.
       const litRun = (run: number): boolean => run === leadRun || run === steerRun;
       for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'reasoning') {

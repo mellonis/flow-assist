@@ -1304,16 +1304,12 @@ const leadOpts = (askPending?: boolean): RowOpts => ({
   wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o',
   renderers: {}, now: 0, palette: {}, ...(askPending ? { askPending } : {}),
 });
-// The chat drawn with the question in the field's place, at the ink it uses for a row.
-const leadFrame = async (extra: Record<string, unknown>) => {
+// The chat drawn at 120×30, with the ink each of its rows is drawn at.
+const chatFrame = async (extra: Record<string, unknown>) => {
   const backend = new TestBackend(120, 30);
-  const handle = await render(h(renderChatModal, {
-    ...baseChat, width: 120, height: 30, messages: [leadMsg],
-    pendingQuestion: askStart([{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }]),
-    ...extra,
-  } as never), backend);
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 120, height: 30, ...extra } as never), backend);
   const lines = (backend.lastFrame ?? '').split('\n');
-  const grid = (backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean } } } }).lastBuffer;
+  const grid = backend.lastBuffer!;
   const dimAt = (text: string) => {
     const y = lines.findIndex((l) => l.includes(text));
     return y < 0 ? null : grid.get(lines[y]!.indexOf(text), y).style.dim === true;
@@ -1321,6 +1317,13 @@ const leadFrame = async (extra: Record<string, unknown>) => {
   handle.unmount();
   return { lines, dimAt };
 };
+// The same frame with the question in the field's place — what the rows are read against
+// while the question waits.
+const leadFrame = (extra: Record<string, unknown>) => chatFrame({
+  messages: [leadMsg],
+  pendingQuestion: askStart([{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }]),
+  ...extra,
+});
 
 test('the run before a pending question draws open and lit', async () => {
   // Folded: two chrome rows — one per run — and the thought between them.
@@ -1378,36 +1381,32 @@ test('the lead-in lights under a message drawn after it, and nowhere else', () =
 // either the turn's answer or the person's next message: it draws at full ink and
 // carries `→` in the gutter, under the `› ` of the message it answers. The turn's own
 // answer keeps its one `ƒ`, and the narration before the steer's answer stays dim.
-const steerFrame = async (messages: ChatMsg[]) => {
-  const backend = new TestBackend(120, 30);
-  const handle = await render(h(renderChatModal, { ...baseChat, width: 120, height: 30, messages } as never), backend);
-  const lines = (backend.lastFrame ?? '').split('\n');
-  const grid = (backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean } } } }).lastBuffer;
-  const dimAt = (text: string) => {
-    const y = lines.findIndex((l) => l.includes(text));
-    return y < 0 ? null : grid.get(lines[y]!.indexOf(text), y).style.dim === true;
-  };
-  handle.unmount();
-  return { lines, dimAt };
-};
+// The gutter's own `→`: the arrow stands in the two-cell column under the `› `, never
+// inside a row's text (`▸ read_file → ok`). An answered question's `→` sits in that same
+// cell, for the same reason — none of these builds holds a question.
+const gutterArrows = (lines: string[]) => lines.filter((l) => l.includes('→') && l.indexOf('→') === l.indexOf('│') + 2);
 
 test('a message steered in mid-turn gets the answer mark on the last text before the turn settles', async () => {
-  const { lines, dimAt } = await steerFrame([
-    { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
-    {
-      role: 'assistant', content: 'Итог',
-      parts: [
-        { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
-        { kind: 'text', text: 'Смотрю.' },
-        { kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] },
-        { kind: 'text', text: 'Ответ на вопрос.' },
-      ],
-    },
-  ]);
+  const { lines, dimAt } = await chatFrame({
+    messages: [
+      { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
+      {
+        role: 'assistant', content: 'Итог',
+        parts: [
+          { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
+          { kind: 'text', text: 'Смотрю.' },
+          { kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] },
+          { kind: 'text', text: 'Ответ на вопрос.' },
+        ],
+      },
+    ],
+  });
   // The last text of the stretch is the steer's answer: `→` in the gutter, full ink.
   const answer = lines.find((l) => l.includes('Ответ на вопрос.')) ?? '';
   expect(answer).toContain('→ Ответ на вопрос.');
   expect(dimAt('Ответ на вопрос.')).toBe(false);
+  // One mark per steer — not a second one on any other row.
+  expect(gutterArrows(lines)).toHaveLength(1);
   // The narration before it answers nothing and keeps neither the mark nor the ink.
   const narration = lines.find((l) => l.includes('Смотрю.')) ?? '';
   expect(narration).not.toContain('→');
@@ -1419,36 +1418,63 @@ test('a message steered in mid-turn gets the answer mark on the last text before
 });
 
 test('a steer answered by ending the turn there keeps ƒ and gets no →', async () => {
-  const { lines } = await steerFrame([
-    { role: 'user', content: 'а что с git?', midTurn: true },
-    {
-      role: 'assistant', content: 'Три изменённые строки.',
-      parts: [{ kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] }],
-    },
-  ]);
+  const { lines } = await chatFrame({
+    messages: [
+      { role: 'user', content: 'а что с git?', midTurn: true },
+      {
+        role: 'assistant', content: 'Три изменённые строки.',
+        parts: [{ kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] }],
+      },
+    ],
+  });
   // The text the turn ends on IS the answer: `ƒ`, never `→`.
   const answer = lines.find((l) => l.includes('Три изменённые строки.')) ?? '';
   expect(answer).toMatch(/ƒ Три изменённые строки\./);
-  expect(lines.some((l) => l.includes('→ '))).toBe(false);
+  expect(gutterArrows(lines)).toEqual([]);
+});
+
+test('a steer answered before the turn settles marks the last text it wrote, one per stretch', async () => {
+  // The ruled trade-off: a stretch of narration and calls with no step after it cannot be
+  // told from an answer, so its last text is marked like one — and the turn's own answer
+  // still keeps `ƒ`, with one `→` for the stretch.
+  const { lines } = await chatFrame({
+    messages: [
+      { role: 'user', content: 'а что с git?', midTurn: true },
+      {
+        role: 'assistant', content: 'Итог',
+        parts: [
+          { kind: 'text', text: 'Смотрю.' },
+          { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] },
+        ],
+      },
+    ],
+  });
+  const marks = gutterArrows(lines);
+  expect(marks).toHaveLength(1);
+  expect(marks[0]).toContain('Смотрю.');
+  const settled = lines.find((l) => l.includes('Итог')) ?? '';
+  expect(settled).toMatch(/ƒ Итог/);
 });
 
 test('a dim hostAsk row does not join the steer answer', async () => {
   // The host's own ask after a `!!command` is a dim row of the person's side: it ends
   // the stretch the steered-in row opened, so the text after it is not the steer's
   // answer and carries no `→`.
-  const { lines } = await steerFrame([
-    { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
-    { role: 'user', content: 'The host asks one thing', hostAsk: true },
-    {
-      role: 'assistant', content: 'Итог',
-      parts: [
-        { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
-        { kind: 'text', text: 'Ответ хосту.' },
-      ],
-    },
-  ]);
+  const { lines } = await chatFrame({
+    messages: [
+      { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
+      { role: 'user', content: 'The host asks one thing', hostAsk: true },
+      {
+        role: 'assistant', content: 'Итог',
+        parts: [
+          { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
+          { kind: 'text', text: 'Ответ хосту.' },
+        ],
+      },
+    ],
+  });
   expect(lines.some((l) => l.includes('The host asks one thing'))).toBe(true);
-  expect(lines.some((l) => l.includes('→ '))).toBe(false);
+  expect(gutterArrows(lines)).toEqual([]);
 });
 
 test('the chat title that fits by clusters is not cut', async () => {
