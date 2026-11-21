@@ -3,7 +3,8 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
+import { renderConsole } from '../../assistant/console-view.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
@@ -1262,7 +1263,9 @@ test('a tool-trail line that fits by clusters is not cut', () => {
   const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'tools', runs: [{ name: 'search', outcome: 'ok', args: { q: `${FAMILY}${FAMILY}${FAMILY}` } }] }] };
   const line = `▸ search (${FAMILY}${FAMILY}${FAMILY}) → ok`;
   // The line is cut to the row less one cell, and the row is `wrap` less the gutter.
-  const o: RowOpts = { wrap: stringWidth(line) + 3, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  // `open` notes draw a trail's calls as the lines they are; `step` folds them into a
+  // record a line (`⌁ search · ok`), whose arguments are its body.
+  const o: RowOpts = { wrap: stringWidth(line) + 3, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'open', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
   const rows = chatRows([msg] as never, o).map(rowText);
   expect(rows).toContain(line);
 });
@@ -1512,11 +1515,15 @@ test('a stretch of dim rows collapses to one line counting its tools and thought
   expect(rows.some((r) => r.meta || r.reasonHeader)).toBe(false);
   const folded = await chatFrame({ messages: [msg] });
   expect(folded.lines.some((l) => l.includes('▸ + 2 thoughts, 3 tools'))).toBe(true);
-  // A click opens it: the same line, now `▾`, over the members as they always were.
+  // A click opens it: the same line, now `▾`, over its records — one line per thought
+  // and one per call, each opening to its own body.
   const opened = chatRows([msg] as never, groupOpts({ open: false, except: new Set(['group:0:reasoning:0']) }));
   expect(rowText(opened.find((r) => r.group)!)).toBe('+ 2 thoughts, 3 tools');
-  expect(opened.filter((r) => r.meta)).toHaveLength(3);
-  expect(opened.filter((r) => r.reasonHeader)).toHaveLength(2);
+  expect(opened.filter((r) => r.record?.kind === 'thought').map(rowText)).toEqual(['thought', 'thought']);
+  expect(opened.filter((r) => r.record?.kind === 'tool').map(rowText)).toEqual(['⌁ git_status · ok', '⌁ git_diff · ok', '⌁ git_log · ok']);
+  // The trail heads and the thought headers the records replaced are gone; their bodies
+  // are drawn only when a record is opened.
+  expect(opened.some((r) => r.meta || r.reasonHeader)).toBe(false);
   const shown = await chatFrame({ messages: [msg], folds: { open: false, except: new Set(['group:0:reasoning:0']) } });
   expect(shown.lines.some((l) => l.includes('▾ + 2 thoughts, 3 tools'))).toBe(true);
 });
@@ -1627,6 +1634,110 @@ test('a group counts a run_command as a command, and a finished console block wi
 test('a group counts a lone read without a plural', () => {
   const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] }] };
   expect(rowText(chatRows([msg] as never, groupOpts()).find((r) => r.group)!)).toBe('+ 1 read');
+});
+
+// ─── A record: one line per thought, call and console block ──────────────────
+// Opening a stretch opens it one level: a thought, a call and a console block are one
+// line each (`thought: <title>`, `⌁ <tool> · <status>`, `! <command> · <status>`), and
+// each is a fold of its own — a click opens that record's body in place and nothing
+// else's. The bodies are the rows the renderer already lays out for those blocks.
+const recordMsg = {
+  role: 'assistant', content: '',
+  parts: [
+    { kind: 'reasoning', text: '**Read the log first.**\n\nThe log is long.' },
+    { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }, { name: 'git_diff', outcome: 'ok' }] },
+  ],
+};
+const consoleMsg = {
+  role: 'view', content: '',
+  views: [{ kind: 'console', data: { command: 'echo "hi"', cwd: '~', text: 'hi', exitCode: 1, ms: 300, status: 'exit 1' }, phase: 'done', startedAt: 0 }],
+};
+// The stretch the two messages make, and its own id: the fold id of the row it begins
+// with (the first thought's header).
+const RECORD_GROUP = 'group:0:reasoning:0';
+const recordOpts = (except: string[] = []): RowOpts => ({
+  wrap: 80, folds: { open: false, except: new Set(except) }, viewLines: 20, notes: 'step', detailsKey: '^o',
+  renderers: { console: renderConsole }, now: 0, palette: {},
+});
+const records = (except: string[] = []) => chatRows([recordMsg, consoleMsg] as never, recordOpts([RECORD_GROUP, ...except]));
+
+test('an open group shows one record line per tool call and per thought', async () => {
+  const rows = records();
+  // One line each, in the order the work happened; the console's own state stays on
+  // its line, and the interactive mark rides the marker the block is drawn with.
+  expect(rows.filter((r) => r.record).map((r) => [r.record!.kind, rowText(r)])).toEqual([
+    ['thought', 'thought: Read the log first.'],
+    ['tool', '⌁ git_status · ok'],
+    ['tool', '⌁ git_diff · ok'],
+    ['console', '! echo "hi" · ✗ exit 1 · <1s'],
+  ]);
+  // The bodies are not drawn until a record is opened: no thought text, no output.
+  const text = rows.map(rowText);
+  expect(text).not.toContain('The log is long.');
+  expect(text.some((t) => t.includes('│ hi'))).toBe(false);
+  // Each record is a fold line of its own, inside the group's own id.
+  for (const row of rows.filter((r) => r.record)) {
+    expect(row.foldLine).toBe(true);
+    expect(row.fold).toBe(row.record!.id);
+    expect(row.record!.id.startsWith(`${RECORD_GROUP}:`)).toBe(true);
+  }
+  // On screen: the markers say the line opens, and the ink is quiet — the work, not a
+  // thing the model said.
+  const { lines, dimAt } = await chatFrame({ messages: [recordMsg, consoleMsg], folds: { open: false, except: new Set([RECORD_GROUP]) } });
+  expect(lines.some((l) => l.includes('▸ thought: Read the log first.'))).toBe(true);
+  expect(lines.some((l) => l.includes('▸ ⌁ git_status · ok'))).toBe(true);
+  expect(lines.some((l) => l.includes('▸ ! echo "hi" · ✗ exit 1 · <1s'))).toBe(true);
+  expect(lines.some((l) => l.includes('The log is long.'))).toBe(false);
+  expect(lines.some((l) => l.includes('│ hi'))).toBe(false);
+  expect(dimAt('⌁ git_status')).toBe(true);
+  // An interactive block keeps its `‼` on the record's marker.
+  const interactive = { role: 'view', content: '', views: [{ kind: 'console', data: { command: 'bun test', cwd: '~', text: 'ok', exitCode: 0, ms: 300, interactive: true }, phase: 'done', startedAt: 0 }] };
+  const marked = chatRows([recordMsg, interactive] as never, recordOpts([RECORD_GROUP]));
+  expect(rowText(marked.find((r) => r.record?.kind === 'console')!)).toBe('‼ bun test · interactive · ✓ <1s');
+  // A body opened in the pager names what it is.
+  const row = (kind: string) => rows.find((r) => r.record?.kind === kind)!;
+  expect(pagerTitle([row('thought')], row('thought').record!.id)).toBe('thought');
+  expect(pagerTitle([row('tool')], row('tool').record!.id)).toBe('tool call');
+  expect(pagerTitle([row('console')], row('console').record!.id)).toBe('output');
+});
+
+test('a record expands to its own body and collapses again', async () => {
+  const thoughtId = `${RECORD_GROUP}:1`;
+  const toolId = `${RECORD_GROUP}:2`;
+  const outputId = `${RECORD_GROUP}:4`;
+  // The thought's own body under its line — the calls and the console stay one line each.
+  const thoughtOpen = records([thoughtId]);
+  expect(thoughtOpen.map(rowText)).toContain('The log is long.');
+  expect(thoughtOpen.filter((r) => r.record).map(rowText)).toEqual([
+    'thought: Read the log first.', '⌁ git_status · ok', '⌁ git_diff · ok', '! echo "hi" · ✗ exit 1 · <1s',
+  ]);
+  expect(thoughtOpen.map(rowText).some((t) => t.includes('→ ok'))).toBe(false);
+  // On screen the open record is `▾`, and the body sits in the record's own block.
+  const shown = await chatFrame({ messages: [recordMsg, consoleMsg], folds: { open: false, except: new Set([RECORD_GROUP, thoughtId]) } });
+  expect(shown.lines.some((l) => l.includes('▾ thought: Read the log first.'))).toBe(true);
+  expect(shown.lines.some((l) => l.includes('The log is long.'))).toBe(true);
+  // A call opens to what it was given and what it answered; the console to its output.
+  const toolOpen = records([toolId, outputId]);
+  const toolText = toolOpen.map(rowText);
+  expect(toolText).toContain('→ ok');
+  expect(toolText.some((t) => t.includes('│ hi'))).toBe(true);
+  expect(toolText).not.toContain('The log is long.');
+  // The click path is the folds' own: the record row carries its id, and the same
+  // toggle the chat applies to a click takes the body away again.
+  const row = thoughtOpen.find((r) => r.record?.kind === 'thought')!;
+  expect(row.fold).toBe(thoughtId);
+  const closed = chatRows([recordMsg, consoleMsg] as never, recordOpts());
+  expect(closed.map(rowText)).not.toContain('The log is long.');
+  // `^o` opens one level at a time: the stretches first — a record a line each — then
+  // every record's body, then it closes everything.
+  const level1 = nextFoldLevel({ open: false, except: new Set() }, closed);
+  expect(level1.open).toBe(true);
+  const atLevel1 = chatRows([recordMsg, consoleMsg] as never, { ...recordOpts(), folds: level1 });
+  const level2 = nextFoldLevel(level1, atLevel1);
+  const atLevel2 = chatRows([recordMsg, consoleMsg] as never, { ...recordOpts(), folds: level2 });
+  expect(atLevel2.map(rowText)).toContain('The log is long.');
+  expect(atLevel2.map(rowText)).toContain('→ ok');
+  expect(nextFoldLevel(level2, atLevel2).open).toBe(false);
 });
 
 test('the chat title that fits by clusters is not cut', async () => {

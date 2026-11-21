@@ -85,12 +85,15 @@ test('OpenAI wire: the text goes in the tool message and the images follow in a 
     { type: 'image_url', image_url: { url: url(B) } },
   ] });
   expect(after).toBe(r1.messages.at(-1)!); // nothing after it: no screen tail with no plugin context
-  // The chat: the answer, and under the opened trail one row per image — never the image.
+  // The chat: the answer, and under the opened record one row per image — never the image.
   expect(ui.backend.lastFrame).toContain('Two shots.');
   expect(ui.backend.lastFrame).not.toContain('▣');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
-  expect(ui.backend.lastFrame).toContain('▸ get_shots → ok');
+  expect(ui.backend.lastFrame).toContain('▸ ⌁ get_shots · ok');
+  // A level down: the record's body, where the image marks are.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
   expect(ui.backend.lastFrame).toContain('▣ a.png · 400×300');
   expect(ui.backend.lastFrame).toContain('▣ b.png · 640×480');
   ui.backend.press({ name: 'o', ctrl: true });
@@ -164,6 +167,8 @@ test('size and count limits refuse with a note in the result text, never shrink,
   expect(req(big, 1).messages.at(-1)!.role).toBe('tool');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
   expect(ui.backend.lastFrame).not.toContain('▣');
   ui.app.unmount();
 
@@ -175,6 +180,9 @@ test('size and count limits refuse with a note in the result text, never shrink,
   expect(req(many, 1).messages.find((m) => m.role === 'tool')!.content).toBe('OK: Issue #7 has 2 screenshots\n[image b.png not sent: over 1 image per result (ai.images.maxPerMessage)]');
   expect(imageUrls(req(many, 1))).toEqual([url(A)]);
   expect(textOf(req(many, 1).messages.at(-1)!.content)).toBe('[image returned by get_shots — from the app, not a message from the person]');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
+  // A level down: the record's own body, where the image marks are.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
   expect(ui.backend.lastFrame).toContain('▣ a.png · 400×300');

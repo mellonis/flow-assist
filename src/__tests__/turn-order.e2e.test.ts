@@ -335,7 +335,7 @@ test('calls no step made stand between the runs, in order; a click opens one, ^o
   expect(rowOf(ui, '+ 5 tools')).toBeGreaterThan(-1);
   await click(ui, rowOf(ui, '+ 5 tools'));
   const run = rowOf(ui, '▸ Then I look again.  (2 steps)');
-  const reads = rowOf(ui, '▸ 2 tools: config_schema ×2');
+  const reads = rows(ui).findIndex((r) => r.includes('⌁ config_schema · ok'));
   const change = rowOf(ui, '▸ Now I change it.');
   expect(run).toBeGreaterThan(-1);
   expect(reads).toBeGreaterThan(run);
@@ -343,24 +343,27 @@ test('calls no step made stand between the runs, in order; a click opens one, ^o
   expect(rowOf(ui, '✎ clone/app.ts')).toBeGreaterThan(change);
   expect(rowOf(ui, 'Done.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
   // The trail sits where the call was made, never under the answer.
-  expect(times(ui.backend.lastFrame, 'tools:')).toBe(1);
+  expect(times(ui.backend.lastFrame, '⌁ config_schema · ok')).toBe(2);
 
-  // A click on the calls opens them alone.
+  // A click on a call opens that record alone: what it answered, under it, and no
+  // other body out.
   await click(ui, reads);
-  expect(ui.backend.lastFrame).toMatch(/▸ config_schema ×2 → ok/);
+  expect(times(ui.backend.lastFrame, '→ ok')).toBe(1);
   expect(ui.backend.lastFrame).toContain('(2 steps)');
-  expect(ui.backend.lastFrame).not.toMatch(/▸ datetime → ok/);
-  await click(ui, rowOf(ui, 'config_schema ×2 → ok'));
-  expect(ui.backend.lastFrame).not.toMatch(/config_schema ×2 → ok/);
+  await click(ui, rowOf(ui, '⌁ config_schema · ok'));
+  expect(ui.backend.lastFrame).not.toMatch(/→ ok/);
 
-  // ^o: every run with its steps' own calls, and every trail.
+  // ^o: every record's line, then every record's body — the runs' own calls included.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   const all = ui.backend.lastFrame;
-  expect(all).toMatch(/▸ config_schema ×2 → ok/);
-  expect(times(all, 'datetime → ok')).toBe(2);
-  expect(rowOf(ui, 'First I look.')).toBeLessThan(rowOf(ui, 'config_schema ×2 → ok'));
-  expect(rowOf(ui, 'edit_app')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
+  expect(times(all, '⌁ datetime · ok')).toBe(2);
+  expect(rowOf(ui, 'First I look.')).toBeLessThan(rowOf(ui, '⌁ config_schema · ok'));
+  expect(rowOf(ui, '⌁ edit_app · ok')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(times(ui.backend.lastFrame, '→ ok')).toBe(5);
+  expect(ui.backend.lastFrame).toContain('→ ok — edited');
   ui.app.unmount();
 });
 
@@ -571,7 +574,7 @@ test('a session saved before the time order still renders — and a malformed me
   expect(step3).toBeGreaterThan(third);
   await click(ui, step3);
   const run3 = rowOf(ui, '▸ Third step.');
-  const trail3 = rowOf(ui, '▸ 1 tool: list_dir');
+  const trail3 = rowOf(ui, '⌁ list_dir · ok');
   expect(run3).toBeGreaterThan(-1);
   expect(trail3).toBeGreaterThan(run3);
   expect(rowOf(ui, 'Third answer.')).toBeGreaterThan(trail3);

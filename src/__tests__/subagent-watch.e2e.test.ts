@@ -106,8 +106,12 @@ test('⏎ on a row shows the child\'s conversation with the breadcrumb, not the 
   expect(frameOf(ui)).not.toContain('Enter send');
   expect(stripUp(ui)).toBe(false);
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('WATA step'));
-  expect(frameOf(ui)).toContain('▸ WATA step');
+  await settleUntil(() => frameOf(ui).includes('+ 1 tool'));
+  // The child's work lands as its stretch's one line; opened, its step is there, read.
+  expect(frameOf(ui)).toContain('▸ + 1 tool');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(frameOf(ui)).toContain('WATA step');
   a!.release();
   ui.app.unmount();
 });
@@ -333,7 +337,7 @@ test('while watching, the chat publishes the session\'s messages and state, not 
   a!.release();
   await settleUntil(() => a!.held);
   await watchFromStrip(ui);
-  expect(frameOf(ui)).toContain('WATA step');
+  expect(frameOf(ui)).toContain('+ 1 tool');
   const chat = host.current.store.chat;
   const text = JSON.stringify(chat.messages);
   expect(text).toContain('/subagent WATA do it');
@@ -354,14 +358,19 @@ test('the details key opens the watched rows and leaves the session\'s folds as 
   await settleUntil(() => a!.held);
   await watchFromStrip(ui);
   expect(frameOf(ui)).not.toMatch(/→ ok/);
+  // The key is a level at a time: the stretch first — the call one line — then the body.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(4);
+  expect(frameOf(ui)).toContain('⌁ datetime · ok');
+  expect(frameOf(ui)).not.toMatch(/→ ok/);
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(4);
   expect(frameOf(ui)).toMatch(/→ ok/);
   expect(watching(ui)).toBe(true);
   await ui.press('escape');
   await settle(4);
-  expect(frameOf(ui)).toContain('1 tool: datetime');
-  expect(frameOf(ui)).not.toMatch(/→ ok/);
+  expect(frameOf(ui)).toContain('+ 1 tool');
+  expect(frameOf(ui)).not.toMatch(/⌁ datetime|→ ok/);
   a!.release();
   ui.app.unmount();
 });
@@ -401,14 +410,14 @@ async function overflowing() {
   await watchFromStrip(b.ui);
   b.children[0]!.release();
   await settleUntil(() => b.children[0]!.held);
-  await settleUntil(() => frameOf(b.ui).includes('WATF step'));
+  await settleUntil(() => frameOf(b.ui).includes('+ 1 tool'));
   return b;
 }
 
 test('the watched rows follow their end while the list rests there', async () => {
   const { children: [a], ui } = await overflowing();
   expect(frameOf(ui)).not.toContain('word0 ');
-  expect(frameOf(ui)).toContain('WATF step');
+  expect(frameOf(ui)).toContain('▸ + 1 tool');
   a!.release();
   await settleUntil(() => frameOf(ui).includes('ended: done'));
   expect(frameOf(ui)).toContain('ARRIVED-LATER');
@@ -467,24 +476,24 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
   await settleUntil(() => a!.held);
   await started(ui, 'wati-do-it');
   // The row the session's tool line is on, while the session is drawn.
-  const toolAt = rowsOf(ui).findIndex((r) => r.includes('1 tool: datetime'));
-  const x = rowsOf(ui)[toolAt]!.indexOf('1 tool');
+  const toolAt = rowsOf(ui).findIndex((r) => r.includes('+ 1 tool'));
+  const x = rowsOf(ui)[toolAt]!.indexOf('+ 1 tool');
   a!.release();
   await settleUntil(() => a!.held);
   await watchFromStrip(ui);
-  const stepAt = rowsOf(ui).findIndex((r) => r.includes('▸ WATI step'));
+  const stepAt = rowsOf(ui).findIndex((r) => r.includes('▸ + 1 tool'));
   expect(stepAt).toBeGreaterThan(0);
   for (const y of [toolAt, stepAt]) {
     ui.backend.mouse('down', x, y);
     ui.backend.mouse('up', x, y);
     await settle(6);
   }
-  expect(frameOf(ui)).toContain('▸ WATI step');
+  expect(frameOf(ui)).toContain('▸ + 1 tool');
   expect(watching(ui)).toBe(true);
   await ui.press('escape');
   await settle(4);
-  expect(frameOf(ui)).toContain('1 tool: datetime');
-  expect(frameOf(ui)).not.toMatch(/→ ok/);
+  expect(frameOf(ui)).toContain('+ 1 tool');
+  expect(frameOf(ui)).not.toMatch(/⌁ datetime|→ ok/);
   a!.release();
   ui.app.unmount();
 });

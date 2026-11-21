@@ -92,10 +92,20 @@ export function groupHeadText(recs: ViewRecord[], now: number): { text: string; 
     : [{ text: `Ran ${n} commands · ` }, { text: '✓', color: 'ok' }, { text: ` ${formatDuration(total)}` }]);
 }
 
+// The records a member's stretch opens into, by id: `<group id>:<n>`, where the stretch
+// is `group:` and the member's own first row's fold. Only the ones a click has opened
+// count — an open record is the member being read one level down.
+const memberRecords = (folds: FoldState, at: number): string[] => {
+  const prefix = `group:${foldId(at, 'view', 0)}:`;
+  return [...folds.except].filter((id) => id.startsWith(prefix) && clickedOpen(folds, id));
+};
+
 // Open when its own id says so, or when the person opened one of its members with a
-// click before the group formed around it. Derived, never stored.
+// click before the group formed around it — or opened a record inside one of them,
+// which is the member being read one level down. Derived, never stored.
 export function groupOpen(folds: FoldState, g: ViewGroup): boolean {
-  return isOpen(folds, foldId(g.head, 'group')) || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)));
+  return isOpen(folds, foldId(g.head, 'group'))
+    || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)) || memberRecords(folds, at).length > 0);
 }
 
 // A head click's effect on the WHOLE group — never a plain `toggleFold` on the
@@ -113,7 +123,10 @@ export function toggleGroup(folds: FoldState, g: ViewGroup): FoldState {
   // Add or remove `id` from the exception set so `isOpen` reads it as `open`.
   const setId = (id: string, open: boolean) => { if (open === folds.open) except.delete(id); else except.add(id); };
   if (groupOpen(folds, g)) {
-    for (const at of g.members) except.delete(foldId(at, 'view', 0));
+    for (const at of g.members) {
+      except.delete(foldId(at, 'view', 0));
+      for (const id of memberRecords(folds, at)) except.delete(id);
+    }
     setId(groupId, false);
   } else {
     setId(groupId, true);
