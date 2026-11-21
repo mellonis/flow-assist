@@ -635,33 +635,45 @@ there is no `/fullscreen`.
   reasoning, the narration, every tool call of every turn and every capped command
   block at once, so reading ONE command's output would mean unfolding the whole
   conversation and folding it back. Instead each command block folds to ONE line
-  whatever it printed — see the `run_command` bullet above. The model, so
+  whatever it printed — see the `run_command` bullet above — and the work around it
+  folds to ONE line per stretch: consecutive dim rows — calls, thoughts, the steps of a
+  run, a command's block — counted by kind and opened into one line per record, each of
+  those opening to its own body (`groupedRows` / `recordRows`, `src/views/modals.ts`;
+  `docs/usage.md` says how the line reads). The model, so
   that a click and the key cannot disagree:
   - **ONE global state** — everything folded (where a conversation starts) or
     everything open — plus the blocks a CLICK has made an exception of. A click
     toggles that block alone: opening one command's output must not become a sticky
     "expand mode", which is the verbosity this is meant to remove.
-  - **`details` is the master switch and clears the exceptions**: with anything folded
-    it opens everything, pressed again it closes everything. After it the screen is
-    uniformly one or the other — there is always a way back to a state a person can
-    describe. It is `^o` (`^r` kept as an alias) and a BOUND action, so
-    `config.keys.details` moves it and every hint draws from the binding.
+  - **`details` is the master switch, and it works one LEVEL at a time**: with anything
+    folded it opens the next level — every stretch, each into one line per record — the
+    press after that opens every record's own body, and the press after that closes it
+    all. Opening the stretches clears the exceptions (a fresh set, as the key always
+    did); opening the records adds theirs, keeping what the level above needed. So
+    there is always a way back to a state a person can describe. It is `^o` (`^r` kept
+    as an alias) and a BOUND action, so `config.keys.details` moves it and every hint
+    draws from the binding.
   - **A block that did not exist yet follows the global state**: with everything open,
     the next turn's tool calls and command output arrive open. `/clear` and `/resume`
     both go back to everything folded with no exceptions — the state
     is the CONVERSATION's and is never saved.
-  - One block does NOT follow it (`isClicked`): the **cap on an open tool trail**. A
-    key meaning "open everything" is asking for the trail, not for sixty rows of it,
-    and the cap is what keeps an open trail readable.
-  - A group's open state is DERIVED: open when its own id says so, or when a member
-    was clicked open before the group formed around it, so a group never folds away
-    what the person opened.
+  - One block does NOT follow it (`isClicked`): the **cap on an open tool trail** and a
+    **record's own body**. A key meaning "open everything" is asking for the trail, not
+    for sixty rows of it, and the cap is what keeps an open trail readable; a record is
+    a level below the stretch the key has just opened.
+  - A stretch's open state is its own fold id, derived from its first member row's fold
+    (`group:<fold>`), so it does not move as the stretch grows. Closing a stretch keeps
+    its records' exceptions, so reopening it brings back exactly the bodies that were
+    open — the retired `ƒ Ran N commands` head's forget-on-close rule (`toggleGroup`,
+    `src/assistant/view-groups.ts`) goes with the head, and no drawn row carries a
+    `…:group` id any more.
   - The kinds (`FoldKind`): `thinking` (a message's aggregate reasoning, what a session
     with no reasoning parts holds), `reasoning` (one thought, numbered — a message may
     hold several), `steps` (one run of
     steps — a message may hold several, numbered), `tools` / `calls` (one stretch of
     calls and its trail's cap, numbered together), `view` (a command's block,
-    numbered), `group` (a group's head), `summary` (what /compact's note folds under its
+    numbered), `group` (the withdrawn `ƒ Ran N commands` head's own id — no drawn row
+    carries one), `summary` (what /compact's note folds under its
     separator row).
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
@@ -676,10 +688,12 @@ there is no `/fullscreen`.
   copy-on-select is untouched. A click on a fold line opens THAT block, a click on any
   row of an OPEN block closes it, and a click on anything else does nothing — in
   particular it must not dismiss the reminder, close the log or answer a y/n (there
-  are tests for each). A click on a group's own head (`Ran N commands`) folds or
-  reopens the WHOLE group, not just its own exception — closing it also forgets any
-  member the person had opened, so the group reopens folded (`toggleGroup`,
-  `src/assistant/view-groups.ts`). Mapping a click to a row: every `ChatRow` is one
+  are tests for each). A click on a stretch's summary line opens or closes the WHOLE
+  stretch — every record under it, the bodies a person had opened included — while a
+  click on a record's own line opens that record's body alone (`row.record`), and a
+  record's body closes on a click anywhere in it. The retired head's `toggleGroup` path
+  (`src/assistant/view-groups.ts`) is unreachable while no drawn row carries a
+  `…:group` id. Mapping a click to a row: every `ChatRow` is one
   terminal line, the conversation reports its rect (`onLayout`) and its scroll
   (`onMetrics`) through `onViewport`, and the chat asks `chatRows(...)` — cached per
   message — which row carries which `fold` id. The pinned question is painted over
@@ -733,9 +747,11 @@ there is no `/fullscreen`.
     many or fewer → inline, a view capped to its tail. So a view whose whole kept text
     does not fit opens in the pager even when its 20-line tail would have. A run of
     `steps` always opens inline, however tall: it is the conversation's own flow, read
-    beside what came before and after it. A group's
-    head and a trail's `… N earlier calls` line always open inline (the first opens
-    into one-line blocks, the second belongs to a trail that fitted). A ✎ diff never
+    beside what came before and after it. A stretch's summary always opens inline — it
+    opens into one line per record — and a record's own click may go to the pager, its
+    kind (`thought`, `tool`, `console`) and in the end its body's height deciding
+    (`pageable` with `row.record.kind`); a trail's `… N earlier calls` line belongs to a
+    trail that fitted, so it always opens inline. A ✎ diff never
     folds, so it never reaches the pager. **Only a click opens one**: `^o` opens
     everything inline, the tall blocks included — the pager is for reading ONE block.
     **A y/n or a question comes first**: one arriving closes the pager (where the

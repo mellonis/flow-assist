@@ -760,7 +760,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (id == null) return false;
             // A group's head is never a plain toggle: whether it reads open depends
             // on its members too (src/assistant/view-groups.ts), so `toggleGroup`
-            // decides the whole group's next state, not `id` alone.
+            // decides the whole group's next state, not `id` alone. Unreachable while no
+            // drawn row carries a `…:group` id — the chat draws a stretch as its activity
+            // group — and kept because the plan keeps `viewGroups`.
             if (id.endsWith(':group')) {
               const g = viewGroupFor(drawn(), rowOpts(foldsRef.current), id);
               if (!g) return false;

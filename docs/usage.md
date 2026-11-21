@@ -723,20 +723,25 @@ works too).
 ## How a turn reads, and `/notes`
 
 A turn reads in the order it happened: what the assistant said, the diff of the
-file it changed, what it said next, the answer. Its text stays where it was written —
-dim, with a spinner beside it, until it is known to be the answer, which then gets the
-`ƒ`. The work between two of your own rows or two answers — tool calls, what the
-assistant said on the way, a command's block — is one quiet line where that stretch
-began, counting what is inside it by kind: `▸ + 3 commands, 2 thoughts, 1 read · 12s`,
-with `✗` for a failure, `✎` for a write that showed no diff, `‼` for a command that
-asked you something, and `Running command…` while one of them still runs. A click opens
-the stretch one level — a line per thought, call and command (`thought: Now the tests.`,
-`⌁ read_file · ok`, `! bun test · ✓ 4s`) — and a click on one of those opens its own
-body: the thought's text, the call's arguments and result, the command's output. `^o`
-opens the stretches first, their records a line each, then every record's own body, and
-folds it all back on the press after that. A bright row ends the stretch before it:
-your `›`, the answer's `ƒ`, a steer's `→`, a background result's `◆`, a change's `✎`
-title — nothing of yours, and nothing waiting on you, is ever hidden inside a fold.
+file it changed, what it said next, the answer. A round being written stays dim, with a
+spinner beside it, until it is known to be the answer, which then gets the `ƒ`. The work
+between two of your own rows or two answers — tool calls, a command's block, and what the
+assistant said on the way — is one quiet line where that stretch began, folded away with
+everything in it: `▸ + 3 commands, 2 thoughts, 1 read · 12s`. The line counts what is
+inside by kind (a `run_command` and a command's block are `commands`, a thought is
+`thoughts`, `read_file` and `list_dir` are `reads`, the rest `tools`), carries `✗` for a
+failure, `✎` for a write that showed no diff and `‼` for a command that asked you
+something, and says `Running command…` while one of them still runs. `· 12s` is what the
+commands took, summed — never the stretch's own wall-clock time. What the assistant said
+on the way is not counted, and is folded away with the rest while the stretch is closed:
+opened, it reads dim where it was written. A click opens the stretch one level — a line
+per thought, call and command (`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`,
+`▸ ! bun test · ✓ 4s`) — and a click on one of those opens its own body: the thought's
+text, the call's arguments and result, the command's output. `^o` opens the stretches
+first, their records a line each, then every record's own body, and folds it all back on
+the press after that. A bright row ends the stretch before it: your `›`, the answer's
+`ƒ`, a steer's `→`, a background result's `◆`, a change's `✎` title — nothing of yours,
+and nothing waiting on you, is ever hidden inside a fold.
 `/notes open` leaves every step on screen in the normal colour — for the current
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.

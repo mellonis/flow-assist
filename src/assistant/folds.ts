@@ -63,7 +63,9 @@ export function isClicked(state: FoldState, id: string): boolean {
 }
 
 // A block the person OPENED with a click — not merely one that is open because
-// everything is. A group that forms around it must not fold it away.
+// everything is. `view-groups.ts` reads it so a group that formed around a member the
+// person had opened folds nothing of theirs away; no drawn row carries that group's id
+// any more, so the rule stands with the retired head.
 export function clickedOpen(state: FoldState, id: string): boolean {
   return state.except.has(id) && isOpen(state, id);
 }
@@ -71,8 +73,8 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // The blocks a click may open in the chat's pager rather than into the conversation,
 // when the block is taller than the rows the conversation has for it. A run of steps is
 // part of the conversation's flow, read beside what came before and after it, so it
-// always opens where it is, however tall. A group's head opens into one-line blocks of
-// its own, and the earlier calls of a trail belong to a trail that already fitted, so
+// always opens where it is, however tall. A stretch's summary opens into records, one
+// line each, and the earlier calls of a trail belong to a trail that already fitted, so
 // both always open where they are too.
 const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'reasoning', 'summary']);
 // A record's own kind decides whether it may page — the id names the STRETCH's first
@@ -85,7 +87,7 @@ export function pageable(id: string, recordKind?: string): boolean {
   return PAGEABLE.has(id.split(':')[1] ?? '');
 }
 
-// Whether an id names a record a stretch's head opens into, rather than a block that
+// Whether an id names a record a stretch's summary opens into, rather than a block that
 // follows the global fold state. A record is clicked-only: it is open when its id is one
 // of the exceptions, never merely because everything else is.
 export function isRecordId(id: string): boolean {
@@ -111,9 +113,9 @@ export function openInFull(state: FoldState, id: string): FoldState {
 // several runs, `n` says which), `tools` one stretch of the calls it made, behind its
 // one-line summary (numbered the same way), `calls` the earlier calls that stretch's
 // open trail caps away (numbered with it), `view` a command's output
-// capped to its last lines, `group` the head consecutive commands fold under
-// (src/assistant/view-groups.ts), `summary` what /compact's note holds under its one
-// separator row.
+// capped to its last lines, `group` the withdrawn `ƒ Ran N commands` head's own fold id
+// (src/assistant/view-groups.ts), which no drawn row carries any more, `summary` what
+// /compact's note holds under its one separator row.
 export type FoldKind = 'thinking' | 'reasoning' | 'steps' | 'tools' | 'calls' | 'view' | 'group' | 'summary';
 
 // A block's id. It names the message by its place in the conversation rather than by

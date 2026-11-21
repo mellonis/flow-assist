@@ -91,16 +91,22 @@
   is how much the MODEL is given — unless the whole block is taller than the
   conversation's rows, when the click opens it in the pager instead (see "A block
   taller than the conversation opens in the pager" under The chat); `^o` opens every
-  block in full inline (`VIEW_CAPS.lines`, everything the view kept), which is what
-  makes `^o for all` true rather than a second, still-capped state. Consecutive commands of a turn (no other call between them) fold under one
-  `ƒ Ran N commands · ✓ 34s` head — `Running N commands · ! cmd · 4s` while one runs —
-  which also takes in the rounds between them that said nothing but their plan (a
-  step that is only its `Next:` line, `isPlanOnly`: the head says what ran, which is
-  what the plan said would). Opened, they are the commands alone, each its own block
-  (`src/assistant/view-groups.ts`). Groups form only in the `step` notes mode, and a
-  message that says more — a step of its own, a call, a change, reasoning — is never
-  folded into one. A call that left a view is shown by its view and never a second
-  time as a trail line.
+  block in full inline (`VIEW_CAPS.lines`, everything the view kept) — a stretch's
+  block included, one press for the stretch and one for its records — which is what
+  makes `^o for all` true rather than a second, still-capped state.
+  Consecutive commands of a turn (no other call between them) are part of ONE
+  stretch's line — `+ N commands · 34s` among whatever else the stretch holds,
+  `Running command…` while one of them runs — which also takes in the rounds between
+  them that said nothing but their plan (a step that is only its `Next:` line,
+  `isPlanOnly`: those rounds draw no rows, since the plan only repeated what the
+  command did; `src/assistant/view-groups.ts`). The line's seconds are the commands'
+  own, summed. Opened, each command is a record line of its own (`! cmd · ✓ 4s`) and
+  opens to its block. The `ƒ Ran N commands · ✓ 34s` head over them is gone: the
+  stretch's count is that fact, and the summary carries the `✗`/`✎`/`‼` the head
+  showed (`docs/usage.md` has the grammar). Consecutive commands group only in the
+  `step` notes mode, and a message that says more — a step of its own, a call, a
+  change, reasoning — is never folded into the same stretch's line. A call that left a
+  view is shown by its view and never a second time as a trail line.
 - **A background shell is a job beside the children** (`src/assistant/shell-job.ts`; the
   tools in `src/loader/tools-shell.ts`). `run_command({command, background: true})` starts a
   `ShellJob` — a record beside the owning conversation's `children`, not a degenerate

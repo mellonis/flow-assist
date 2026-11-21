@@ -1665,9 +1665,8 @@ test('a group counts a lone read without a plural', () => {
   expect(rowText(chatRows([msg] as never, groupOpts()).find((r) => r.group)!)).toBe('+ 1 read');
 });
 
-// Two console blocks of one turn are the stretch the group counts: the `ƒ Ran N
-// commands` head that stood over them is not drawn, and the summary carries the
-// failure's `✗` the head used to show.
+// Two console blocks of one turn are the stretch the group counts: no `ƒ Ran N
+// commands` head stands over them, and the summary carries the failure's `✗`.
 test('two console blocks fold into the group, and no Ran head stands over them', async () => {
   const block = (command: string, seq: number, exitCode: number, ms: number) => ({
     role: 'view', content: '',
@@ -1678,7 +1677,7 @@ test('two console blocks fold into the group, and no Ran head stands over them',
   expect(rows.map(rowText)).toEqual(['+ 2 commands · 1s ✗']);
   expect(rows.find((r) => r.group)!.group!.marks).toBe('✗');
   const { lines } = await chatFrame({ messages: blocks });
-  expect(lines.some((l) => l.includes('Ran '))).toBe(false);
+  expect(lines.filter((l) => /(Ran|Running) \d+ commands/.test(l))).toEqual([]);
   expect(lines.some((l) => /\+ 2 commands .*✗/.test(l))).toBe(true);
 });
 

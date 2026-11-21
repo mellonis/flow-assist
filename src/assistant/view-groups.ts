@@ -5,12 +5,12 @@
 // the plan of the next command (a round whose only text was its `Next:` line) are taken
 // in too. The chat draws that stretch as its activity group — `+ 3 commands · 12s` — and
 // the head this module spells, `ƒ Ran 3 commands · ✓ 34 s`, is no longer drawn: a second
-// fold over one stretch would put a second `ƒ` down the gutter. What stays here is the
-// grouping itself: the members and the rounds it takes in, the head's own words
-// (`groupHeadText`), and the ids a group's block rows and its click path read
-// (`blockRows`, `pagerTitle`, `groupOpen`, `toggleGroup`). Groups form only in the
-// `step` notes mode, and a message that says more — a step of its own, a call, a change,
-// reasoning — is never folded into one.
+// fold over one stretch would put a second `ƒ` down the gutter. What reads this module
+// today is the rounds a stretch takes in (`hidden`, drawn nowhere) and the module's own
+// unit tests; nothing else does, and the `…:group` click branch is unreachable until a
+// drawn row carries that id shape again. Groups form only in the `step` notes mode, and
+// a message that says more — a step of its own, a call, a change, reasoning — is never
+// folded into one.
 //
 // Pure: works on the DRAWN messages (the system prompt is not one), by index — the
 // same `at` fold ids are built from.
@@ -106,7 +106,9 @@ const memberRecords = (folds: FoldState, at: number): string[] => {
 
 // Open when its own id says so, or when the person opened one of its members with a
 // click before the group formed around it — or opened a record inside one of them,
-// which is the member being read one level down. Derived, never stored.
+// which is the member being read one level down. Derived, never stored. Unreachable
+// while no drawn row carries a `…:group` id — the chat draws a stretch as its activity
+// group — and kept because the plan keeps `viewGroups`.
 export function groupOpen(folds: FoldState, g: ViewGroup): boolean {
   return isOpen(folds, foldId(g.head, 'group'))
     || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)) || memberRecords(folds, at).length > 0);
@@ -116,11 +118,13 @@ export function groupOpen(folds: FoldState, g: ViewGroup): boolean {
 // group's own id alone, which cannot see a member's own exception and so cannot
 // reliably flip what `groupOpen` reads (the same `FoldState` is reachable by two
 // click orders that need opposite answers; only the group's own current reading,
-// not a fold id in isolation, can decide which way this click goes). Closing drops
-// every member's own exception too — a reopened group starts folded, not reopening
-// whatever a person had individually clicked before it closed. Only the group's own
-// id and its members' view ids are ever touched; every other block's exception
-// stands exactly as it was.
+// not a fold id in isolation, can decide which way this click goes). It closes by
+// dropping every member's own exception, so a reopened group starts folded. That
+// forget-on-close rule is the retired head's: the chat's stretch keeps its record
+// exceptions and reopens with the bodies that were open. Only the group's own id and
+// its members' view ids are ever touched; every other block's exception stands
+// exactly as it was. Unreachable while no drawn row carries a `…:group` id, and kept
+// because the plan keeps `viewGroups`.
 export function toggleGroup(folds: FoldState, g: ViewGroup): FoldState {
   const except = new Set(folds.except);
   const groupId = foldId(g.head, 'group');

@@ -736,8 +736,10 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   // rows at all. The stretch's head (`ƒ Ran N commands · ✓ 34s`) is not drawn either:
   // the activity group counts the same blocks (`+ N commands`) and opens into their
   // records, and a second fold over one stretch would put a second `ƒ` down the gutter.
-  // The grouping stays in `viewGroups` for the pager's block ids and its own unit tests;
-  // the chat's own way into a stretch is the group's summary line.
+  // The grouping stays in `viewGroups` for the rounds it takes in (`hidden`) and the
+  // module's unit tests; no drawn row carries a group id any more, so the plugin's
+  // `…:group` click branch is unreachable today. The chat's own way into a stretch is
+  // the group's summary line.
   const takenIn = new Set<number>();
   for (const g of viewGroups(drawn as GroupMsg[], o.notes)) for (const at of g.hidden) takenIn.add(at);
   const per = drawn.map((_m, at) => (takenIn.has(at) ? [] : layout(at, o.folds)));
@@ -1017,7 +1019,9 @@ function recordBody(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, i
 // A stretch's members as the levelled list: one record line per thought, call and
 // console block, each with its body under it only while its own fold is open. The gaps
 // between the members go — a list of records is read a line at a time, not a block at a
-// time — and a row that is not a record (narration) stays where it was, dim.
+// time — and a row that is not a record (narration) stays where it was, dim. A record's
+// own fold is a click's exception only: closing the stretch keeps it, so reopening the
+// stretch brings back exactly the bodies that were open.
 function recordRows(covered: readonly { at: number; row: ChatRow }[], groupId: string, o: RowOpts, layout: (at: number, folds: FoldState) => ChatRow[]): { at: number; row: ChatRow }[] {
   const out: { at: number; row: ChatRow }[] = [];
   let n = 0;
@@ -1109,7 +1113,9 @@ function groupedRows(per: ChatRow[][], drawn: readonly ChatMsg[], o: RowOpts, la
 // `rowsPerDrawn` makes (the drawn messages, the current notes mode), so the click
 // handler that resolves a head's id and the render that drew it can never disagree
 // about which members that click folds. `undefined` for anything else, group ids
-// that no longer form one included (a message arriving mid-click, say).
+// that no longer form one included (a message arriving mid-click, say). Unreachable
+// while no drawn row carries a `…:group` id — the chat draws a stretch as its activity
+// group — and kept because the plan keeps `viewGroups`.
 export function viewGroupFor(messages: ChatMsg[], o: RowOpts, id: string): ViewGroup | undefined {
   const m = /^(\d+):group$/.exec(id);
   if (!m) return undefined;
@@ -1139,8 +1145,8 @@ function recordBlockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[]
     const rows = groupedRows(per, drawn, { ...o, folds }, layout).flat();
     const own = rows.filter((r) => r.fold === id);
     if (own.length) return own;
-    // The stretch's head has appeared and the message just added holds nothing that can
-    // extend it: no later message can carry the record, so the id is stale.
+    // The stretch's summary has appeared and the message just added holds nothing that
+    // can extend it: no later message can carry the record, so the id is stale.
     if (rows.some((r) => r.group?.id === groupId) && !per[to]!.some((r) => !r.gap && groupableRow(r))) return [];
   }
   return [];

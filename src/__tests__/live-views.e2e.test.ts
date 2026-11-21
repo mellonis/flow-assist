@@ -139,10 +139,10 @@ test('two run_command calls in one turn never collide, even when the provider\'s
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   expect(ui.backend.lastFrame).toContain('Done.');
-  // Two consecutive commands are one stretched line — one level down, both blocks stand:
-  // the second round's call never overwrote the first's.
+  // Two consecutive commands are the stretch's one line — one level down, both blocks
+  // stand: the second round's call never overwrote the first's.
   expect(ui.backend.lastFrame).toMatch(/\+ 2 commands/);
-  expect(ui.backend.lastFrame).not.toContain('Ran ');
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
   await openStretch(ui);
   await settleUntil(() => /echo AAA-first · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo AAA-first · ✓/);
@@ -220,7 +220,7 @@ test('three commands in a row fold into one line, and open into their own record
   await settleUntil(() => ui.backend.lastFrame.includes('All set.'));
   expect(ui.backend.lastFrame).toContain('All set.');
   expect(ui.backend.lastFrame).toMatch(/\+ 3 commands/);
-  expect(ui.backend.lastFrame).not.toContain('Ran ');
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
   expect(ui.backend.lastFrame).not.toContain('echo two ·');
   // The stretch's line takes the place of every step line, the first one included.
   for (const step of ['one.', 'two.', 'three.']) expect(ui.backend.lastFrame).not.toContain(step);
@@ -307,8 +307,9 @@ test('the stretch of commands closes whole from its own line, and a second click
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
   // Open the stretch, then the lone command's record: its body is on the screen before
-  // the second command arrives. The stretch's id is its first record's own, so the line
-  // the person opened is the line that stands when the stretch grows.
+  // the second command arrives. The stretch's id is derived from its first member's fold,
+  // so it does not move when the stretch grows: the line the person opened is the line
+  // that stands.
   await openStretch(ui);
   await settleUntil(() => /echo left-out · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo left-out · ✓/);
@@ -322,7 +323,7 @@ test('the stretch of commands closes whole from its own line, and a second click
   await settleUntil(() => ui.backend.lastFrame.includes('Both ran.'));
   expect(ui.backend.lastFrame).toContain('Both ran.');
   expect(ui.backend.lastFrame).toMatch(/\+ 2 commands/);
-  expect(ui.backend.lastFrame).not.toContain('Ran ');
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
   expect(ui.backend.lastFrame).toContain('│ left-out');
   // The line closes the WHOLE stretch — every record under it, the body that was open
   // included — and a second click brings them all back.
