@@ -778,7 +778,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // question is whether it fits THERE — opens in the pager and stays folded
             // here. Below that it opens inline. Never while a y/n or a question waits:
             // that is answered in the conversation, and a pager would cover it.
-            if (opening && pageable(id) && !conv.confirm && !conv.question) {
+            if (opening && pageable(id, row?.record?.kind) && !conv.confirm && !conv.question) {
               const v = viewportRef.current;
               const whole = blockRows(drawn(), { ...rowOpts(openInFull(foldsRef.current, id)), viewLines: VIEW_CAPS.lines }, id).length;
               if (v && whole > roomForBlock(v.height)) { setPager(id); host.notify(); return true; }

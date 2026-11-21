@@ -164,6 +164,33 @@ test('^o opens everything inline, the tall block included — the pager is for o
   ui.app.unmount();
 });
 
+test('a stretch that opens on a step run still pages its tall command record', async () => {
+  const model = new ScriptedModel();
+  // The stretch begins with a run of steps (its head names `steps`), and a 300-line
+  // command's console lands inside it: the record's OWN kind decides the pager, not the
+  // first member's.
+  model.script(
+    [{ text: 'Look at the tree first.' }, { tool: 'datetime', args: {} }],
+    [{ tool: 'run_command', args: { command: 'seq 1 300' } }],
+    [{ text: 'Done counting.' }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('look then count');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
+  await settle(8);
+  for (let i = 0; i < 8 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, '+ 1 command'));
+  await click(ui, rowOf(ui, 'seq 1 300 ·'));
+  expect(pagerUp(ui)).toBe(true);
+  expect(ui.backend.lastFrame).toContain('│ 101');
+  expect(ui.backend.lastFrame).not.toContain('│ 300');
+  ui.app.unmount();
+}, 15_000);
+
 // The pager is drawn inside the chat's own frame, in the conversation's place: docked,
 // the plugin's screen stays in view beside it — on the right from 120 columns, at the
 // bottom below that.
@@ -257,10 +284,10 @@ test('with the chat taking the whole terminal, the pager fills it — the chat\'
   ui.app.unmount();
 });
 
-test('a turn of dozens of calls opens into one record per call — the stretch is its own cap', async () => {
+test('a turn of dozens of calls opens into one record per call, many at once', async () => {
   const model = new ScriptedModel();
-  // One round of 36 calls: twelve of one tool, then two alternating — 24 lines
-  // condensed, taller than the conversation's rows at this size.
+  // One round of 36 calls: twelve of one tool, then twenty-four alternating. The stretch
+  // is one line folded; opened, it is one record per call, more than a screenful of them.
   model.script([
     ...Array.from({ length: 12 }, () => ({ tool: 'datetime', args: {} })),
     ...Array.from({ length: 24 }, (_, i) => ({ tool: i % 2 ? 'config_schema' : 'datetime', args: {} })),
@@ -271,12 +298,14 @@ test('a turn of dozens of calls opens into one record per call — the stretch i
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
-  // Folded, one stretch line. Opened, it is one record per call: the stretch's own line
-  // IS the cap now — there is no tall block left for a pager to stand in for.
+  // Folded, one stretch line that says how many calls there are. Opened, every call is a
+  // record: the stretch's own line is the cap now, and no tall single block is left for a
+  // pager, so the records are read in place.
   expect(ui.backend.lastFrame).toContain('▸ + 36 tools');
   await click(ui, rowOf(ui, '+ 36 tools'));
   expect(pagerUp(ui)).toBe(false);
   const records = () => ui.backend.lastFrame.split('\n').filter((r) => /▸ ⌁ (datetime|config_schema) · ok/.test(r));
+  // More than a dozen records are on screen at once; the rest are below the fold.
   expect(records().length).toBeGreaterThan(12);
   expect(ui.backend.lastFrame).not.toContain('earlier calls');
   expect(ui.backend.lastFrame).not.toMatch(/▸ .*×\d/);

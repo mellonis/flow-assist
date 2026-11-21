@@ -979,9 +979,11 @@ function recordLine(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, i
   const tone = trailTone(trail.length ? trail : [call]);
   const wrote = (call as { write?: boolean }).write === true && call.outcome === 'applied';
   // A command is read by what it ran, not by the tool that ran it: `run_command · ok`
-  // hides the one fact the line exists for.
+  // hides the one fact the line exists for. A command can carry line breaks (a short
+  // string arg is kept verbatim), and this is ONE row: flatten them here, as the
+  // console's own folded line does, or the row count and the screen drift apart.
   const command = call.args ? (call.args as Record<string, unknown>).command : undefined;
-  const label = toolKind(call) === 'command' && command ? String(command) : call.name;
+  const label = toolKind(call) === 'command' && command ? String(command).replace(/\n+/g, ' ') : call.name;
   return {
     role: head.role, fold: id, foldLine: true, open,
     record: record(label, call.outcome, [tone !== 'ok' ? '✗' : '', wrote ? '✎' : ''].filter(Boolean).join(' ')),
@@ -1130,14 +1132,43 @@ export function viewGroupFor(messages: ChatMsg[], o: RowOpts, id: string): ViewG
   return viewGroups(drawn as GroupMsg[], o.notes).find((g) => g.head === at);
 }
 
+// One record's rows for the pager: the record's line and its body, and only those. A
+// stretch starts in one message and can take in the messages after it (a call's output is
+// a message of its own), so the messages are laid out from the stretch's start, one more
+// at a time, until the record is among them — never the conversation after the stretch.
+function recordBlockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[] {
+  const drawn = messages.filter((msg) => msg.role !== 'system');
+  const from = Number(id.split(':')[1]);
+  if (!Number.isInteger(from) || from < 0 || from >= drawn.length) return [];
+  const folds = openInFull(o.folds, id);
+  const groupId = id.slice(0, id.lastIndexOf(':'));
+  const lastAssistant = drawn.reduce((n, m, i) => (m.role === 'assistant' ? i : n), -1);
+  const steerAt = steerAnswers(drawn);
+  const layout = (at: number, f: FoldState): ChatRow[] =>
+    messageRows(drawn[at]!, at, at === drawn.length - 1, { ...o, folds: f }, at === lastAssistant, steerAt.get(at));
+  // The window the stretch has taken in so far, by message index; the rest stays holes.
+  const per: ChatRow[][] = new Array(drawn.length);
+  for (let to = from; to < drawn.length; to++) {
+    per[to] = layout(to, folds);
+    const rows = groupedRows(per, drawn, { ...o, folds }, layout).flat();
+    const own = rows.filter((r) => r.fold === id);
+    if (own.length) return own;
+    // The stretch's head has appeared and the message just added holds nothing that can
+    // extend it: no later message can carry the record, so the id is stale.
+    if (rows.some((r) => r.group?.id === groupId) && !per[to]!.some((r) => !r.gap && groupableRow(r))) return [];
+  }
+  return [];
+}
+
 // The rows of ONE block, laid out on their own — what the pager shows, and how tall
-// a block is measured to be before it opens. Only the message that owns the block is
+// a block is measured to be before it opens. Only the messages that carry the block are
 // laid out (a whole conversation laid out again at another width would cost what the
-// row cache saves), and only the rows that carry the block's id are kept.
+// row cache saves): the one that owns the block, or for a stretch's record the stretch's
+// messages up to the one that owns the record. Only the rows with the block's id are kept.
 export function blockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[] {
-  // A record of a stretch is a fold of its own inside it: the pager reads the line and
-  // the body the group would lay out under it, one level down, and only those rows.
-  if (isRecordId(id)) return chatRows(messages, { ...o, folds: openInFull(o.folds, id) }).filter((r) => r.fold === id);
+  // A record of a stretch is a fold of its own inside it, laid out by the group that
+  // draws it; the pager reads the line and the body under it, one level down.
+  if (isRecordId(id)) return recordBlockRows(messages, o, id);
   const at = Number(id.split(':')[0]);
   const m = messages.filter((msg) => msg.role !== 'system')[at];
   if (!Number.isInteger(at) || !m) return [];

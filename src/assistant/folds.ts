@@ -75,14 +75,14 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // its own, and the earlier calls of a trail belong to a trail that already fitted, so
 // both always open where they are too.
 const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'reasoning', 'summary']);
-export function pageable(id: string): boolean {
-  const parts = id.split(':');
-  // A record of a stretch is a fold of its own INSIDE it — `group:<at>:<kind>:<n>:<m>` —
-  // and it stands for a member of that kind: a record of a view or a trail opens in the
-  // pager exactly as the block itself did. The stretch's own head has one segment fewer
-  // and keeps opening into its records where it is.
-  if (parts[0] === 'group' && parts.length >= 5) return PAGEABLE.has(parts[2] ?? '');
-  return PAGEABLE.has(parts[1] ?? '');
+// A record's own kind decides whether it may page — the id names the STRETCH's first
+// member, which says nothing about the record under it (a step run can open a stretch
+// with a tall console block inside it). Height still decides in the end: a one-line
+// record's body is measured and opens inline.
+const PAGEABLE_RECORD: ReadonlySet<string> = new Set(['thought', 'tool', 'console']);
+export function pageable(id: string, recordKind?: string): boolean {
+  if (isRecordId(id)) return PAGEABLE_RECORD.has(recordKind ?? '');
+  return PAGEABLE.has(id.split(':')[1] ?? '');
 }
 
 // Whether an id names a record a stretch's head opens into, rather than a block that

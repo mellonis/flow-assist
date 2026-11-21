@@ -1784,6 +1784,20 @@ test('a command record line shows the command, and a landed write keeps its ✎'
   expect(wrote).toContain('✎');
 });
 
+// A command can carry a line break (a short string arg is kept verbatim) and a
+// view-less `run_command` is a trail record: its line is still ONE row, or the rows the
+// conversation counts and the rows on screen drift apart.
+test('a command record line is one row, whatever line breaks the command carried', async () => {
+  const msg = { role: 'assistant', content: '', parts: [{ kind: 'tools', runs: [{ name: 'run_command', args: { command: 'cd /tmp\nls' }, outcome: 'declined' }] }] };
+  const group = chatRows([msg] as never, groupOpts()).find((r) => r.group)!;
+  const opened = groupOpts({ open: false, except: new Set([group.group!.id]) });
+  const recordRow = chatRows([msg] as never, opened).find((r) => r.record?.kind === 'tool')!;
+  expect(rowText(recordRow)).toBe('⌁ cd /tmp ls · declined ✗');
+  expect(rowText(recordRow)).not.toContain('\n');
+  const frame = await chatFrame({ messages: [msg], folds: opened.folds });
+  expect(frame.lines.filter((l) => l.includes('⌁ cd /tmp'))).toHaveLength(1);
+});
+
 test('the chat title that fits by clusters is not cut', async () => {
   // 46 cells by clusters, 106 summed per code point; the title has 72.
   const subject = FAMILY.repeat(15);
