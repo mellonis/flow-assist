@@ -292,6 +292,35 @@ test("a group line marks a failure in the trail's tone, and a write that showed 
   expect(wrote.wrote).toBe('green');
 });
 
+// A record's tone is the trail's, read FORWARD from its own call: a failure a later call
+// of the same tool recovered is yellow, not red — the record and the group head above it
+// say the same thing, since a red ✗ under a yellow head would contradict itself.
+test("a record line takes the trail's tone, a recovered failure included", async () => {
+  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const msg = {
+    role: 'assistant', content: 'done',
+    parts: [{ kind: 'tools', runs: [{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }] }],
+  };
+  const group = chatRows([msg] as never, groupOpts()).find((r) => r.group)!;
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, theme, messages: [msg],
+    folds: { open: false, except: new Set([group.group!.id]) },
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const fgOf = (needle: string, glyph: string) => {
+    const y = rows.findIndex((r) => r.includes(needle));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const at = rows[y]!.indexOf(glyph);
+    expect(at).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(at, y).style.fg;
+  };
+  // The head and the recovered call's record line are both the trail's yellow.
+  expect(fgOf('+ 2 tools', '✗')).toBe('yellow');
+  expect(fgOf('⌁ a · error', '✗')).toBe('yellow');
+  handle.unmount();
+});
+
 test('a window paints its own ink on its own ground, not the terminal foreground', async () => {
   // On a light terminal theme the default foreground is black: text with no colour of
   // its own drew black on the black window. The window's `text` reaches it now.
@@ -1738,6 +1767,21 @@ test('a record expands to its own body and collapses again', async () => {
   expect(atLevel2.map(rowText)).toContain('The log is long.');
   expect(atLevel2.map(rowText)).toContain('→ ok');
   expect(nextFoldLevel(level2, atLevel2).open).toBe(false);
+});
+
+// A command is read by the command it ran — `⌁ run_command · ok` would hide the one fact
+// the line exists for — and a write that landed still says so on its record line.
+test('a command record line shows the command, and a landed write keeps its ✎', () => {
+  const recordOf = (run: Record<string, unknown>) => {
+    const msg = { role: 'assistant', content: '', parts: [{ kind: 'tools', runs: [run] }] };
+    const group = chatRows([msg] as never, groupOpts()).find((r) => r.group)!;
+    const opened = groupOpts({ open: false, except: new Set([group.group!.id]) });
+    return chatRows([msg] as never, opened).find((r) => r.record?.kind === 'tool')!;
+  };
+  expect(rowText(recordOf({ name: 'run_command', args: { command: 'bun test' }, outcome: 'ok' }))).toBe('⌁ bun test · ok');
+  const wrote = rowText(recordOf({ name: 'write', args: {}, write: true, outcome: 'applied' }));
+  expect(wrote).toContain('applied');
+  expect(wrote).toContain('✎');
 });
 
 test('the chat title that fits by clusters is not cut', async () => {

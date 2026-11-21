@@ -20,7 +20,7 @@ import { VERBS } from '../assistant/verbs.js';
 import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
 import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode, type TrailTone } from '../assistant/step.js';
-import { isClicked, isOpen, foldId, openInFull, toggleFold, type FoldState } from '../assistant/folds.js';
+import { isClicked, isOpen, isRecordId, foldId, openInFull, toggleFold, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
 import { changeCounts, changeMarkdown, diffRows, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
@@ -951,9 +951,11 @@ function recordCovers(kind: RecordKind, head: ChatRow, row: ChatRow): boolean {
 
 // The ONE line a record is. `head` is the member row it was read off — a thought's
 // header (its own label, `thought: <title>`), a console block's folded line — and `run`
-// the call when the record is one. The console's marker (`! `/`‼ `) is a span of its own
-// so the renderer can keep `consoleMark`'s state colour and its pulse.
-function recordLine(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, id: string, open: boolean, wrap: number): ChatRow {
+// the call when the record is one. `trail` is the rest of the trail from this call on,
+// which is how the tone is read: recovery looks forward only. The console's marker
+// (`! `/`‼ `) is a span of its own so the renderer can keep `consoleMark`'s state colour
+// and its pulse.
+function recordLine(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, id: string, open: boolean, wrap: number, trail: readonly ToolRun[] = []): ChatRow {
   const room = Math.max(10, wrap - GUTTER - 2);
   const record = (title: string, status?: string, marks?: string): ChatRow['record'] =>
     ({ id, kind, title: cutStep(title, room), ...(status ? { status } : {}), ...(marks ? { marks } : {}) });
@@ -971,14 +973,21 @@ function recordLine(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, i
     };
   }
   const call = run ?? { name: 'tool', outcome: 'ok' };
-  const tone = trailTone([call]);
+  // The trail's tone, read from this call forward: a failure a later call of the same
+  // tool recovered is the trail's yellow, not a red of its own, so the record agrees with
+  // the group head it sits under. A failure still waiting on its recovery stays red.
+  const tone = trailTone(trail.length ? trail : [call]);
   const wrote = (call as { write?: boolean }).write === true && call.outcome === 'applied';
+  // A command is read by what it ran, not by the tool that ran it: `run_command · ok`
+  // hides the one fact the line exists for.
+  const command = call.args ? (call.args as Record<string, unknown>).command : undefined;
+  const label = toolKind(call) === 'command' && command ? String(command) : call.name;
   return {
     role: head.role, fold: id, foldLine: true, open,
-    record: record(call.name, call.outcome, [tone !== 'ok' ? '✗' : '', wrote ? '✎' : ''].filter(Boolean).join(' ')),
+    record: record(label, call.outcome, [tone !== 'ok' ? '✗' : '', wrote ? '✎' : ''].filter(Boolean).join(' ')),
     spans: [
       { text: '⌁ ' },
-      { text: cutStep(`${call.name} · ${call.outcome}`, room - 2) },
+      { text: cutStep(`${label} · ${call.outcome}`, room - 2) },
       ...(tone !== 'ok' ? [{ text: ' ✗', mark: tone }] : []),
       ...(wrote ? [{ text: ' ✎', mark: tone }] : []),
     ],
@@ -1045,11 +1054,14 @@ function recordRows(covered: readonly { at: number; row: ChatRow }[], groupId: s
       if (nextRow.gap || !recordCovers(recs[0]!.kind, row, nextRow)) break;
       end++;
     }
-    for (const rec of recs) {
+    for (let j = 0; j < recs.length; j++) {
+      const rec = recs[j]!;
       const id = `${groupId}:${++n}`;
       const open = isClicked(o.folds, id);
       const head = rec.kind === 'console' ? consoleHead(row, at) : row;
-      out.push({ at, row: recordLine(rec.kind, rec.run, head, id, open, o.wrap) });
+      // The tone reads the trail from this call on, so a recovered failure is yellow here
+      // exactly as it is on the group's own line.
+      out.push({ at, row: recordLine(rec.kind, rec.run, head, id, open, o.wrap, (row.runs ?? []).slice(j)) });
       if (open) for (const body of recordBody(rec.kind, rec.run, head, id, at, o, layout)) out.push({ at, row: body });
     }
     i = end - 1;
@@ -1123,6 +1135,9 @@ export function viewGroupFor(messages: ChatMsg[], o: RowOpts, id: string): ViewG
 // laid out (a whole conversation laid out again at another width would cost what the
 // row cache saves), and only the rows that carry the block's id are kept.
 export function blockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[] {
+  // A record of a stretch is a fold of its own inside it: the pager reads the line and
+  // the body the group would lay out under it, one level down, and only those rows.
+  if (isRecordId(id)) return chatRows(messages, { ...o, folds: openInFull(o.folds, id) }).filter((r) => r.fold === id);
   const at = Number(id.split(':')[0]);
   const m = messages.filter((msg) => msg.role !== 'system')[at];
   if (!Number.isInteger(at) || !m) return [];

@@ -68,7 +68,10 @@ async function commandThenTalk(command: string, cols = 100, rows = 24) {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Remark number 12.'));
   await settle(8);
-  // Up to the block: PgUp is the conversation's own key.
+  // Up to the stretch: the command's line is one record inside it now, so the group is
+  // opened first, and the record's line is where the click lands.
+  for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, '+ 1 command'));
   for (let i = 0; i < 6 && !ui.backend.lastFrame.includes(`${command} ·`); i++) await ui.press('pageup');
   return { ui, model };
 }
@@ -176,17 +179,21 @@ for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as co
     await ui.press('y');
     await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
     await settle(8);
+    // Open the stretch first: the command's line is one record inside it.
+    for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+    const groupY = rowOf(ui, '+ 1 command');
+    await click(ui, groupY, ui.backend.lastFrame.split('\n')[groupY]!.indexOf('+ 1 command') + 2);
     const before = ui.backend.lastFrame;
     const panel = corner(before);
     const y = rowOf(ui, 'seq 1 300 ·');
     const x = before.split('\n')[y]!.indexOf('seq 1 300');
     await click(ui, y, x + 2);
     expect(pagerUp(ui)).toBe(true);
-    // The chat's own frame, where the panel was, titled by the block — and the field
-    // not drawn while the pager is up.
+    // The chat's own frame, where the panel was, titled by the record's kind — and the
+    // field not drawn while the pager is up.
     const frame = ui.backend.lastFrame;
     expect(corner(frame)).toEqual(panel);
-    expect(frame.split('\n')[panel.row]).toContain('Flow Assist (scripted) · seq 1 300');
+    expect(frame.split('\n')[panel.row]).toContain('Flow Assist (scripted) · output');
     expect(frame).toContain('│ 101');
     expect(frame).not.toContain('Done counting.');
     expect(before).toContain('new line');
@@ -235,18 +242,22 @@ test('with the chat taking the whole terminal, the pager fills it — the chat\'
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
   await settle(8);
+  // The stretch first, then the record's line — the click opens what the block did.
+  for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, '+ 1 command'));
   const before = ui.backend.lastFrame;
-  await click(ui, rowOf(ui, 'seq 1 300 ·'), before.split('\n')[rowOf(ui, 'seq 1 300 ·')]!.indexOf('seq 1 300') + 2);
+  const recordY = rowOf(ui, 'seq 1 300 ·');
+  await click(ui, recordY, before.split('\n')[recordY]!.indexOf('seq 1 300') + 2);
   expect(pagerUp(ui)).toBe(true);
   const lines = ui.backend.lastFrame.split('\n');
-  expect(lines[0]!.startsWith('╭─ ƒ Flow Assist (scripted) · seq 1 300')).toBe(true);
+  expect(lines[0]!.startsWith('╭─ ƒ Flow Assist (scripted) · output')).toBe(true);
   expect(lines[0]!.trimEnd()).toHaveLength(cols);
   await ui.press('escape');
   expect(ui.backend.lastFrame).toBe(before);
   ui.app.unmount();
 });
 
-test('a turn of dozens of calls opens in the pager with every call, the trail\'s cap lifted', async () => {
+test('a turn of dozens of calls opens into one record per call — the stretch is its own cap', async () => {
   const model = new ScriptedModel();
   // One round of 36 calls: twelve of one tool, then two alternating — 24 lines
   // condensed, taller than the conversation's rows at this size.
@@ -260,14 +271,19 @@ test('a turn of dozens of calls opens in the pager with every call, the trail\'s
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
-  await click(ui, rowOf(ui, '36 tools:'));
-  expect(pagerUp(ui)).toBe(true);
-  expect(ui.backend.lastFrame).toContain('36 tool calls');
+  // Folded, one stretch line. Opened, it is one record per call: the stretch's own line
+  // IS the cap now — there is no tall block left for a pager to stand in for.
+  expect(ui.backend.lastFrame).toContain('▸ + 36 tools');
+  await click(ui, rowOf(ui, '+ 36 tools'));
+  expect(pagerUp(ui)).toBe(false);
+  const records = () => ui.backend.lastFrame.split('\n').filter((r) => /▸ ⌁ (datetime|config_schema) · ok/.test(r));
+  expect(records().length).toBeGreaterThan(12);
   expect(ui.backend.lastFrame).not.toContain('earlier calls');
-  for (let i = 0; i < 6; i++) await ui.press('pagedown');
-  expect(ui.backend.lastFrame.split('\n').filter((r) => /▸ (datetime|config_schema)/.test(r)).length).toBeGreaterThan(12);
-  await ui.press('escape');
-  expect(ui.backend.lastFrame).toContain('▸ 36 tools:');
+  expect(ui.backend.lastFrame).not.toMatch(/▸ .*×\d/);
+  // A single call's line opens inline, one level down: it is a record, not a block.
+  await click(ui, rowOf(ui, '⌁ datetime · ok'));
+  expect(pagerUp(ui)).toBe(false);
+  expect(ui.backend.lastFrame).toContain('→ ok');
   ui.app.unmount();
 });
 
@@ -289,7 +305,9 @@ test('a y/n arriving while the pager is up closes it and is answered; while it w
   await ui.type('say hi');
   await ui.press('return');
   await settle(8);
-  // The turn is held; the block is up the list.
+  // The turn is held; the stretch is up the list, the command one record inside it.
+  for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, '+ 1 command'));
   for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   expect(pagerUp(ui)).toBe(true);
@@ -297,7 +315,7 @@ test('a y/n arriving while the pager is up closes it and is answered; while it w
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(pagerUp(ui)).toBe(false);
-  // While it waits, a click on the tall block opens it inline, never a pager over it.
+  // While it waits, a click on the record opens it inline, never a pager over it.
   for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   expect(pagerUp(ui)).toBe(false);
@@ -319,6 +337,9 @@ test('a long reasoning opens in the pager titled by its own header, reads to its
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Thought it through.'));
   await settle(8);
+  // The stretch first: the thought is one record inside it, and the record's body is
+  // what the pager reads.
+  await click(ui, rowOf(ui, '+ 1 thought'));
   const before = ui.backend.lastFrame;
   const window = corner(before);
   await click(ui, rowOf(ui, '▸ thought'));
@@ -357,7 +378,9 @@ test('a long answer arriving while the pager is up: Esc shows it anchored at its
   await ui.type('go on');
   await ui.press('return');
   await settle(8);
-  // At the end of the list, the block in view, the turn held.
+  // At the end of the list, the stretch in view, the turn held — the command is one
+  // record inside it.
+  await click(ui, rowOf(ui, '+ 1 command'));
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   expect(pagerUp(ui)).toBe(true);
   model.release();
@@ -398,6 +421,8 @@ test('an answer arriving while the pager is up over a list scrolled up: Esc give
   await ui.type('go on');
   await ui.press('return');
   await settle(8);
+  for (let i = 0; i < 8 && !ui.backend.lastFrame.includes('+ 1 command'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, '+ 1 command'));
   for (let i = 0; i < 8 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
   const y = rowOf(ui, 'seq 1 300 ·');
   const lines = ui.backend.lastFrame.split('\n');
@@ -435,7 +460,10 @@ test('a run of steps taller than the conversation opens inline on a click, never
   await settleUntil(() => ui.backend.lastFrame.includes('All looked at.'));
   await settle(8);
   expect(ui.backend.lastFrame).not.toContain('Step detail 1.');
-  await click(ui, rowOf(ui, '▸ '));
+  // The stretch first; the run of steps is a narration block inside it, and it opens
+  // where it is, however tall.
+  await click(ui, rowOf(ui, '+ 1 tool'));
+  await click(ui, rowOf(ui, '▸ Step detail'));
   expect(pagerUp(ui)).toBe(false);
   // Opened in the conversation at its first row, one below the row the pinned question
   // covers (as for any block opened there): what is read first is the step's own lead

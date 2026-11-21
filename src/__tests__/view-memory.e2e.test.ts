@@ -36,12 +36,12 @@ async function pick(ui: UI, text: string) {
   await ui.press('return');
   await settle(4);
 }
-const OPEN = /▾ 1 tool/;
-const FOLDED = /▸ 1 tool/;
+const OPEN = /▾ (?:\+ )?1 tool/;
+const FOLDED = /▸ (?:\+ )?1 tool/;
 
-// A: a turn with a tool call behind a summary line, its block opened by a click and the
-// notes mode moved to `open`, then a second turn held; A is left by `/new` and B, a
-// plain session, is on screen. `how` goes back to A.
+// A: a turn with a tool call, its notes mode moved to `open` and its trail opened by a
+// click there, then a second turn held; A is left by `/new` and B, a plain session, is on
+// screen. `how` goes back to A.
 async function leftWhileHeld(dir: string) {
   const model = new ScriptedModel();
   const aSub = model.when((req) => firstUser(req).includes('session A question'));
@@ -56,11 +56,13 @@ async function leftWhileHeld(dir: string) {
   await ask(ui, 'session A question');
   await settleUntil(() => frameOf(ui).includes('A first.'));
   await settle(6);
-  await click(ui, rowOf(ui, '1 tool: datetime'));
-  expect(frameOf(ui)).toMatch(OPEN);
+  // In `open` notes nothing is grouped: the trail's own line is the block, and the click
+  // that opens it is the one the session must remember.
   await ask(ui, '/notes open');
   await settle(4);
   expect(frameOf(ui)).toContain('notes: open');
+  await click(ui, rowOf(ui, '1 tool: datetime'));
+  expect(frameOf(ui)).toMatch(OPEN);
   await ask(ui, 'session A again');
   await settleUntil(() => aSub.held);
   await ask(ui, '/new');
@@ -120,7 +122,7 @@ test('/clear folds everything and never brings back what the session had open', 
   await ask(ui, 'what day is it?');
   await settleUntil(() => frameOf(ui).includes('It is Tuesday.'));
   await settle(6);
-  await click(ui, rowOf(ui, '1 tool: datetime'));
+  await click(ui, rowOf(ui, '+ 1 tool'));
   expect(frameOf(ui)).toMatch(OPEN);
   await ask(ui, '/clear');
   await settle(8);
@@ -174,8 +176,8 @@ async function leftInPlace(scrolled: boolean) {
   await ask(ui, 'session A again');
   await settleUntil(() => aSub.held);
   if (scrolled) {
-    for (let i = 0; i < 40 && rowOf(ui, '1 tool: datetime') < 0; i++) await ui.press('pageup');
-    await click(ui, rowOf(ui, '1 tool: datetime'));
+    for (let i = 0; i < 40 && rowOf(ui, '+ 1 tool') < 0; i++) await ui.press('pageup');
+    await click(ui, rowOf(ui, '+ 1 tool'));
     expect(frameOf(ui)).toMatch(OPEN);
     for (let i = 0; i < 2; i++) await ui.press('pagedown');
     await settle(6);
@@ -212,7 +214,7 @@ test('a session left at its end comes back at its end, and follows what arrives 
   const { ui, aSub } = await leftInPlace(false);
   await pick(ui, 'session A question');
   expect(frameOf(ui)).toContain('Resumed «session A question»');
-  expect(frameOf(ui)).toMatch(/1 tool: datetime/);
+  expect(frameOf(ui)).toMatch(/1 tool/);
   aSub.release();
   await settleUntil(() => frameOf(ui).includes('Closing words.'));
   expect(frameOf(ui)).toContain('Closing words.');

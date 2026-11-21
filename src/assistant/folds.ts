@@ -76,14 +76,28 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // both always open where they are too.
 const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'reasoning', 'summary']);
 export function pageable(id: string): boolean {
-  return PAGEABLE.has(id.split(':')[1] ?? '');
+  const parts = id.split(':');
+  // A record of a stretch is a fold of its own INSIDE it — `group:<at>:<kind>:<n>:<m>` —
+  // and it stands for a member of that kind: a record of a view or a trail opens in the
+  // pager exactly as the block itself did. The stretch's own head has one segment fewer
+  // and keeps opening into its records where it is.
+  if (parts[0] === 'group' && parts.length >= 5) return PAGEABLE.has(parts[2] ?? '');
+  return PAGEABLE.has(parts[1] ?? '');
+}
+
+// Whether an id names a record a stretch's head opens into, rather than a block that
+// follows the global fold state. A record is clicked-only: it is open when its id is one
+// of the exceptions, never merely because everything else is.
+export function isRecordId(id: string): boolean {
+  return id.startsWith('group:') && id.split(':').length >= 5;
 }
 
 // The fold state a block is laid out with to be read WHOLE — how the pager draws it and
 // how tall it is measured to be: the block open, and for a trail its cap on earlier
 // calls lifted too. A view's own cap is the caller's (`RowOpts.viewLines`).
 export function openInFull(state: FoldState, id: string): FoldState {
-  let next = isOpen(state, id) ? state : toggleFold(state, id);
+  const open = isRecordId(id) ? isClicked(state, id) : isOpen(state, id);
+  let next = open ? state : toggleFold(state, id);
   const m = /^(\d+):tools:(\d+)$/.exec(id);
   if (m) {
     const calls = foldId(Number(m[1]), 'calls', Number(m[2]));
