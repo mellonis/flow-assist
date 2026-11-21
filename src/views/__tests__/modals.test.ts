@@ -1665,6 +1665,23 @@ test('a group counts a lone read without a plural', () => {
   expect(rowText(chatRows([msg] as never, groupOpts()).find((r) => r.group)!)).toBe('+ 1 read');
 });
 
+// Two console blocks of one turn are the stretch the group counts: the `ƒ Ran N
+// commands` head that stood over them is not drawn, and the summary carries the
+// failure's `✗` the head used to show.
+test('two console blocks fold into the group, and no Ran head stands over them', async () => {
+  const block = (command: string, seq: number, exitCode: number, ms: number) => ({
+    role: 'view', content: '',
+    views: [{ kind: 'console', seq, turn: 3, phase: 'done', startedAt: 0, data: { command, cwd: '~', text: command, exitCode, ...(exitCode ? { status: `exit ${exitCode}` } : {}), ms } }],
+  });
+  const blocks = [block('echo one', 1, 0, 800), block('echo two', 2, 1, 400)];
+  const rows = chatRows(blocks as never, groupOpts());
+  expect(rows.map(rowText)).toEqual(['+ 2 commands · 1s ✗']);
+  expect(rows.find((r) => r.group)!.group!.marks).toBe('✗');
+  const { lines } = await chatFrame({ messages: blocks });
+  expect(lines.some((l) => l.includes('Ran '))).toBe(false);
+  expect(lines.some((l) => /\+ 2 commands .*✗/.test(l))).toBe(true);
+});
+
 // ─── A record: one line per thought, call and console block ──────────────────
 // Opening a stretch opens it one level: a thought, a call and a console block are one
 // line each (`thought: <title>`, `⌁ <tool> · <status>`, `! <command> · <status>`), and

@@ -26,7 +26,7 @@ import { markText, type ImageMark } from '../assistant/tool-images.js';
 import { changeCounts, changeMarkdown, diffRows, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
 import { diffFileKey, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
-import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
+import { viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
@@ -222,8 +222,6 @@ interface ChatRow {
   // The one dim row a folded run of steps is: its newest step and how many there
   // are. Chrome: never copied by a drag, and cut to one row rather than wrapped.
   step?: boolean;
-  // A group's head: the `ƒ` in the gutter, chrome like a folded run's row.
-  groupHead?: boolean;
   // The stretch of the work this row stands for, folded to one line where it began:
   // consecutive dim rows — a run of steps, a thought, a trail of calls, a console
   // block. `id` is the fold id the line is opened by, `counts` what is inside it by
@@ -733,26 +731,16 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   // opens to are the rows the block itself has when it is open.
   const layout = (at: number, folds: FoldState): ChatRow[] =>
     messageRows(drawn[at]!, at, at === drawn.length - 1, { ...o, folds }, at === lastAssistant, steerAt.get(at));
-  const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
-  for (const g of viewGroups(drawn as GroupMsg[], o.notes)) {
-    const open = groupOpen(o.folds, g);
-    for (const at of [...g.members, ...g.hidden]) byAt.set(at, { g, open });
-  }
-  const per = drawn.map((m, at) => {
-    const last = at === drawn.length - 1;
-    const lead = at === lastAssistant;
-    const inGroup = byAt.get(at);
-    if (!inGroup) return layout(at, o.folds);
-    const out: ChatRow[] = [];
-    if (inGroup.g.head === at) {
-      const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
-      out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'), foldLine: true,
-        spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
-    }
-    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...layout(at, o.folds));
-    else if (!inGroup.open && inGroup.g.members.at(-1) === at && !last) out.push({ gap: true });
-    return out;
-  });
+  // The rounds a stretch of commands took in (`viewGroups`) say nothing but the plan of
+  // the next command — a `Next:` line the command itself carries out — so they draw no
+  // rows at all. The stretch's head (`ƒ Ran N commands · ✓ 34s`) is not drawn either:
+  // the activity group counts the same blocks (`+ N commands`) and opens into their
+  // records, and a second fold over one stretch would put a second `ƒ` down the gutter.
+  // The grouping stays in `viewGroups` for the pager's block ids and its own unit tests;
+  // the chat's own way into a stretch is the group's summary line.
+  const takenIn = new Set<number>();
+  for (const g of viewGroups(drawn as GroupMsg[], o.notes)) for (const at of g.hidden) takenIn.add(at);
+  const per = drawn.map((_m, at) => (takenIn.has(at) ? [] : layout(at, o.folds)));
   // A stretch of the work folds to one line where it begins, and opens into one line per
   // record. `open` notes draw everything in full and fold nothing; the fold key (`^o`)
   // is levelled too — it opens the stretches first, their records a line each — so the
@@ -813,8 +801,6 @@ function toolKind(run: { name: string; write?: boolean }): GroupKind {
 // side. A gap is not a row of its own here: it joins the stretch it sits in.
 function groupableRow(r: ChatRow): boolean {
   if (r.gap) return true;
-  // The `ƒ Ran N commands` head stands for blocks of its own and keeps its line.
-  if (r.groupHead) return false;
   // The person's side, and the host speaking: never inside a fold.
   if (r.role === 'user' || r.role === 'shell' || r.role === 'bg' || r.role === 'ask' || r.role === 'note') return false;
   // A console block is the work: one line folded, several opened. A view that is not a
@@ -1615,16 +1601,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
         return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)), ...parts);
       }
-      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);      // A group's head is a one-row line like a folded run — chrome, cut to one row —
-      // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
-      // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
-      // over the line's forced dim, or a red count would read as grey.
-      if (row.step && row.groupHead) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
-        gutter(row),
-        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
-          (row.spans || []).map((s, j) => h(Text, {
-            key: j, dim: s.dim, underline: lit, color: s.color, wrap: 'truncate',
-          }, String(s.text ?? '')))));
+      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
       // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
       // across the answer returns what the model SAID, never the host's one-line
       // account of it. It is cut to the width above, and truncated here as well so
@@ -1921,7 +1898,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!;
       if ((r.role === 'user' || r.role === 'shell' || r.role === 'bg') && r.first) break;
-      if (r.liveMark || (r.role === 'assistant' && r.first && !r.step && !r.limit && !r.groupHead)) { answerRow.current = i; break; }
+      if (r.liveMark || (r.role === 'assistant' && r.first && !r.step && !r.limit)) { answerRow.current = i; break; }
     }
   }
   let lastUserText = '';

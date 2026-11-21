@@ -5,6 +5,25 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A stretch of the work folds to one line that counts what is inside it.** Everything
+  dim between two of your own rows or two answers — tool calls, the thoughts the model
+  writes as it works, the steps of a run, a command's block — is ONE line where the
+  stretch began: `▸ + 3 commands, 2 thoughts, 1 read · 12s`, counted by kind (a
+  `run_command` and a console block are `commands`, `read_file` and `list_dir` are
+  `reads`, a write that is not a command an `edit`, the rest `tools`), with the worst
+  state inside it (`✗` a failure, `✎` a write that showed no diff, `‼` a command that
+  asked you something) and `Running command…` with a spinner while anything inside still
+  runs. A click opens the stretch one level — one line per thought, call and command
+  (`thought: Now the tests.`, `⌁ read_file · ok`, `! bun test · ✓ 4s`) — and a click on
+  one of those opens its own body: the thought's text, the call's arguments and result,
+  the command's output and its tail. `^o` opens the stretches first, their records a
+  line each, then every record's own body, and folds it all back on the press after
+  that. A bright row ends the stretch
+  before it — your `›`, the answer's `ƒ`, a steer's `→`, a result's `◆`, a `✎` change
+  title — so nothing of yours, and nothing waiting on you, is ever hidden inside a fold.
+  **The `ƒ Ran N commands` head over consecutive commands is gone:** the stretch's own
+  `N commands` says the same, and the summary carries the `✗`/`✎`/`‼` the head showed.
+
 - **The hint row sits under the field, and the work strip is the one place for background
   work.** The hint is the last row of the chat's field strip, under the line you type in, and
   it never gives way: a plan above the field is what shrinks. The count it carries names the

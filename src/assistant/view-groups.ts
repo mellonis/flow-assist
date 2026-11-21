@@ -1,12 +1,16 @@
-// Consecutive commands fold under ONE head. A model runs a command per round and
-// writes a `Next:` line before each, so five commands are five blocks — a column of
-// grey. Consecutive console views of one turn (no other call between them: their
-// `seq` are consecutive) are drawn as one line, `ƒ Ran 3 commands · ✓ 34 s`; opened,
-// the commands alone, each its own block. The messages before and between them that
-// hold only the plan of the next command (a round whose only text was its `Next:`
-// line) are taken in too — the head says what ran, which is what the plan said would.
-// Groups form only in the `step` notes mode, and a message that says more — a step of
-// its own, a call, a change, reasoning — is never folded into one.
+// Consecutive commands are ONE stretch. A model runs a command per round and writes a
+// `Next:` line before each, so five commands are five blocks — a column of grey.
+// Consecutive console views of one turn (no other call between them: their `seq` are
+// consecutive) are grouped here, and the rounds before and between them that hold only
+// the plan of the next command (a round whose only text was its `Next:` line) are taken
+// in too. The chat draws that stretch as its activity group — `+ 3 commands · 12s` — and
+// the head this module spells, `ƒ Ran 3 commands · ✓ 34 s`, is no longer drawn: a second
+// fold over one stretch would put a second `ƒ` down the gutter. What stays here is the
+// grouping itself: the members and the rounds it takes in, the head's own words
+// (`groupHeadText`), and the ids a group's block rows and its click path read
+// (`blockRows`, `pagerTitle`, `groupOpen`, `toggleGroup`). Groups form only in the
+// `step` notes mode, and a message that says more — a step of its own, a call, a change,
+// reasoning — is never folded into one.
 //
 // Pure: works on the DRAWN messages (the system prompt is not one), by index — the
 // same `at` fold ids are built from.
