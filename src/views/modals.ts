@@ -158,7 +158,7 @@ export interface Viewport {
 // summary line draws in this order (`activity-summary.ts`): a command (`run_command`
 // and a console block), an edit (a write that is not a command), a thought, a read
 // (`read_file`, `list_dir`), and a tool (everything else).
-export type GroupKind = 'command' | 'edit' | 'thought' | 'read' | 'tool';
+type GroupKind = 'command' | 'edit' | 'thought' | 'read' | 'tool';
 const GROUP_KINDS: readonly GroupKind[] = ['command', 'edit', 'thought', 'read', 'tool'];
 export type GroupCounts = Record<GroupKind, number>;
 
@@ -786,7 +786,7 @@ function toolKind(run: { name: string; write?: boolean }): GroupKind {
 // answer's `ƒ`, a steer's `→ `, a background result's `◆ `, a `✎` change title with the
 // hunks under it — and a `hostAsk` row, which is drawn dim and is still the person's
 // side. A gap is not a row of its own here: it joins the stretch it sits in.
-export function groupableRow(r: ChatRow): boolean {
+function groupableRow(r: ChatRow): boolean {
   if (r.gap) return true;
   // The `ƒ Ran N commands` head stands for blocks of its own and keeps its line.
   if (r.groupHead) return false;
@@ -808,7 +808,7 @@ export function groupableRow(r: ChatRow): boolean {
 // The stretches a group covers: each a maximal run of groupable rows. A gap carries the
 // stretch it sits in and never opens one, and a trailing gap stays out of it — the
 // blank line before what follows a group is not the group's to take away.
-export function splitGroups(rows: readonly ChatRow[]): { start: number; members: ChatRow[] }[] {
+function splitGroups(rows: readonly ChatRow[]): { start: number; members: ChatRow[] }[] {
   const found: { start: number; end: number }[] = [];
   let cur: { start: number; end: number } | null = null;
   rows.forEach((r, i) => {
@@ -824,7 +824,7 @@ export function splitGroups(rows: readonly ChatRow[]): { start: number; members:
 // are that thought), a console block once per block, and a call by its tool. The runs
 // come off the row that stands for them: a folded run of steps carries its calls, and
 // an open trail's head its whole stretch, so a call is never counted twice.
-export function groupCounts(members: readonly ChatRow[]): GroupCounts {
+function groupCounts(members: readonly ChatRow[]): GroupCounts {
   const counts: GroupCounts = { command: 0, edit: 0, thought: 0, read: 0, tool: 0 };
   for (const r of members) {
     if (r.reasonHeader) counts.thought++;
@@ -838,7 +838,7 @@ export function groupCounts(members: readonly ChatRow[]): GroupCounts {
 // commands took. The state marks are spans of their own — a mark carries the colour of
 // what it reports — so this draws none. `busy` is the wording of what still runs: it
 // stands in place of the counts, since a count of work not yet finished would lie.
-export function groupLabel(counts: GroupCounts, durationMs = 0, busy = ''): string {
+function groupLabel(counts: GroupCounts, durationMs = 0, busy = ''): string {
   if (busy) return busy;
   const parts = GROUP_KINDS.filter((k) => counts[k] > 0).map((k) => `${counts[k]} ${k}${counts[k] === 1 ? '' : 's'}`);
   const took = Number(durationMs) > 0 ? formatDuration(Number(durationMs)) : '';
@@ -919,7 +919,7 @@ function groupedRows(per: ChatRow[][], drawn: readonly ChatMsg[], o: RowOpts): C
       group: { id, counts, ...(durationMs ? { durationMs } : {}), ...(running ? { busy: true } : {}), marks },
       spans: [
         { text: groupLabel(counts, durationMs, running), dim: true },
-        ...(marks ? [{ text: ` ${marks}`, ...(tone !== 'ok' ? { mark: tone } : { dim: true }) }] : []),
+        ...(marks ? [{ text: ` ${marks}`, mark: tone }] : []),
       ],
     } });
     if (open) for (let i = start; i < end; i++) placed.push(flat[i]!);
@@ -1170,7 +1170,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
             if (!calls) return;
             if (notes === 'step') {
               for (const { run, n } of condenseRuns(calls.runs)) {
-                rows.push({ role, toolRun: true, fold: id, spans: [toolRunText(run, inner, n)] });
+                // The calls ride on their rows here too: with the run's own fold open,
+                // these rows are the only place a group can count them, and the summary
+                // must not change its counts with any fold state.
+                const runs = Array.from({ length: n }, () => run);
+                rows.push({ role, toolRun: true, fold: id, runs, spans: [toolRunText(run, inner, n)] });
                 for (const mark of imageMarkRows(run, inner)) rows.push({ role, toolRun: true, fold: id, spans: [mark] });
               }
             } else trail(calls.n, calls.runs);
@@ -1362,7 +1366,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
           (row.spans || []).map((s, j) => h(Text, {
             key: j, wrap: 'truncate', underline: lit && j === 0,
             // A mark carries the colour of what it reports; the counts stay dim.
-            ...(s.mark === 'error' ? { color: errorColor } : s.mark === 'warn' ? { color: m.warn } : { dim: true }),
+            ...(s.mark === 'error' ? { color: errorColor } : s.mark === 'warn' ? { color: m.warn } : s.mark === 'ok' ? { dim: true, color: m.ok } : { dim: true }),
           }, String(s.text ?? '')))));
       if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
       // A group's head is a one-row line like a folded run — chrome, cut to one row —

@@ -32,16 +32,22 @@ test('consecutive calls of one tool are one line with a count, and the open trai
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
 
-  // Folded, the turn is one line — and it says what each tool cost in calls.
-  expect(ui.backend.lastFrame).toContain('36 tools:');
-  expect(ui.backend.lastFrame).toMatch(/datetime ×24/);
-  expect(ui.backend.lastFrame).toMatch(/config_schema ×12/);
+  // Folded, the turn is one line — the stretch's own counts.
+  expect(ui.backend.lastFrame).toContain('▸ + 36 tools');
+  expect(ui.backend.lastFrame).not.toContain('datetime ×24');
 
-  // Opened with a click on the turn's own line — the trail of THAT turn, capped.
-  const summary = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('36 tools:'));
-  ui.backend.mouse('down', 12, summary);
-  ui.backend.mouse('up', 12, summary);
-  await settle(8);
+  // Opened with a click on the stretch's line, then on the turn's own — the trail of
+  // THAT turn, capped.
+  const at = (needle: string) => ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
+  const click = async (y: number) => {
+    ui.backend.mouse('down', 12, y);
+    ui.backend.mouse('up', 12, y);
+    await settle(8);
+  };
+  await click(at('+ 36 tools'));
+  expect(ui.backend.lastFrame).toMatch(/36 tools: .*datetime ×24/);
+  expect(ui.backend.lastFrame).toMatch(/config_schema ×12/);
+  await click(at('36 tools:'));
   const trail = rowsMatching(ui, /▸ (datetime|config_schema)/);
   // Twelve lines of trail and one that says what is above them — not thirty-six.
   expect(trail).toHaveLength(12);
@@ -58,15 +64,18 @@ test('the line that stands for the earlier calls opens them', async () => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
-  const summary = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('36 tools:'));
-  ui.backend.mouse('down', 12, summary);
-  ui.backend.mouse('up', 12, summary);
-  await settle(8);
-  const at = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('earlier calls'));
-  expect(at).toBeGreaterThan(-1);
-  ui.backend.mouse('down', 12, at);
-  ui.backend.mouse('up', 12, at);
-  await settle(8);
+  const at = (needle: string) => ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
+  const click = async (y: number) => {
+    ui.backend.mouse('down', 12, y);
+    ui.backend.mouse('up', 12, y);
+    await settle(8);
+  };
+  // The stretch first, then the turn's own trail line inside it.
+  await click(at('+ 36 tools'));
+  await click(at('36 tools:'));
+  const earlier = at('earlier calls');
+  expect(earlier).toBeGreaterThan(-1);
+  await click(earlier);
   expect(ui.backend.lastFrame).not.toContain('earlier calls');
   expect(rowsMatching(ui, /▸ (datetime|config_schema)/).length).toBeGreaterThan(12);
   // The run of thirteen calls of one tool is ONE line with its count — a different
@@ -87,7 +96,7 @@ test('a turn with three calls looks exactly as it did', async () => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Three of them.'));
   await settle(8);
-  expect(ui.backend.lastFrame).toContain('3 tools: datetime ×2, config_schema');
+  expect(ui.backend.lastFrame).toContain('▸ + 3 tools');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(8);
   // Three calls, three lines, each with its arguments — nothing is condensed away and

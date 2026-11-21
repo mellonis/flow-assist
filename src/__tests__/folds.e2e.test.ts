@@ -36,7 +36,7 @@ const dragAcross = async (ui: Ui, y: number, from = 12, to = 40) => {
   await settle(6);
 };
 
-// Two turns, each with tool calls behind a `▸ N tools` summary.
+// Two turns, each with tool calls behind a stretch's one line (`▸ + N tools`).
 async function twoTurns(cols = 100, rows = 34) {
   const model = new ScriptedModel();
   model.script(
@@ -60,19 +60,22 @@ async function twoTurns(cols = 100, rows = 34) {
 test('a click on a turn\'s tool line opens THAT turn\'s calls and leaves the other folded', async () => {
   const { ui } = await twoTurns();
   const frame = ui.backend.lastFrame.split('\n');
-  const summaries = frame.map((r, i) => (r.includes('1 tool: datetime') ? i : -1)).filter((i) => i >= 0);
-  expect(summaries).toHaveLength(2);
-  await click(ui, summaries[0]!);
+  const stretches = frame.map((r, i) => (r.includes('+ 1 tool') ? i : -1)).filter((i) => i >= 0);
+  expect(stretches).toHaveLength(2);
+  // The stretch first, then the turn's own tool line inside it.
+  await click(ui, stretches[0]!);
+  await click(ui, rowOf(ui, '1 tool: datetime'));
   const opened = ui.backend.lastFrame;
   // The calls of the first turn are out; the second turn is still one line.
   expect(opened).toMatch(/▸ datetime.*→ ok/);
-  expect(opened.split('\n').filter((r) => /▾ 1 tool/.test(r))).toHaveLength(1);
-  expect(opened.split('\n').filter((r) => /▸ 1 tool/.test(r))).toHaveLength(1);
+  expect(opened.split('\n').filter((r) => /▾ \+ 1 tool/.test(r))).toHaveLength(1);
+  expect(opened.split('\n').filter((r) => /▸ \+ 1 tool/.test(r))).toHaveLength(1);
   ui.app.unmount();
 });
 
 test('a click inside an open block closes it; a drag over it copies and folds nothing', async () => {
   const { ui } = await twoTurns();
+  await click(ui, rowOf(ui, '▸ + 1 tool'));
   await click(ui, rowOf(ui, '1 tool: datetime'));
   const call = rowOf(ui, '▸ datetime');
   // A drag is a selection, never a fold — the block is still open afterwards.
@@ -96,7 +99,8 @@ test('a click on a plain answer row changes nothing', async () => {
 
 test('the key opens everything — the block clicked shut included — and closes everything again', async () => {
   const { ui } = await twoTurns();
-  // One block open by a click; the key then opens BOTH.
+  // One block open by a click (the stretch, then its tool line); the key then opens BOTH.
+  await click(ui, rowOf(ui, '▸ + 1 tool'));
   await click(ui, rowOf(ui, '1 tool: datetime'));
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
@@ -106,10 +110,10 @@ test('the key opens everything — the block clicked shut included — and close
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   expect(ui.backend.lastFrame.split('\n').filter((r) => /▾ 1 tool/.test(r))).toHaveLength(2);
-  // Nothing folded now — so the key closes all of it.
+  // Nothing folded now — so the key closes all of it: the stretches' lines return.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
-  expect(ui.backend.lastFrame.split('\n').filter((r) => /▸ 1 tool/.test(r))).toHaveLength(2);
+  expect(ui.backend.lastFrame.split('\n').filter((r) => /▸ \+ 1 tool/.test(r))).toHaveLength(2);
   ui.app.unmount();
 });
 
@@ -194,8 +198,12 @@ async function longOutput(runOutputLines = 3, lines = 8) {
 }
 
 test('a finished command, folded, is one line saying how it ended', async () => {
-  // longOutput() already ends scrolled to the very top, where the folded line stands.
+  // longOutput() already ends scrolled to the very top, where the stretch's line stands.
   const { ui } = await longOutput(3, 60);
+  // Folded, the whole stretch is one line; the block's own line is one click below it.
+  expect(ui.backend.lastFrame).toMatch(/▸ \+ 1 command · (?:<1s|\d+s)/);
+  expect(ui.backend.lastFrame).not.toContain('seq 1 60 ·');
+  await click(ui, rowOf(ui, '+ 1 command'));
   expect(ui.backend.lastFrame).toMatch(/! seq 1 60 · ✓ (?:<1s|\d+s) · 60 lines/);
   expect(ui.backend.lastFrame).not.toContain('│ 60');
   ui.app.unmount();
@@ -206,6 +214,8 @@ test('opening a block starts at its FIRST row, not its last', async () => {
   // tail): as tall as fits the conversation whole, so it opens inline and
   // the list has to scroll for it.
   const { ui } = await longOutput(40);
+  // The block is inside the stretch's line: open that first.
+  await click(ui, rowOf(ui, '+ 1 command'));
   // Nudge the fold line away from the top before clicking — longOutput() itself ends
   // scrolled there, and a pass that never leaves the top proves nothing about the
   // click's own scroll-to-first-row behaviour (a prior version of this test did
@@ -233,6 +243,7 @@ test('opening a block starts at its FIRST row, not its last', async () => {
 
 test('closing a block leaves its first row where it was on screen', async () => {
   const { ui } = await longOutput();
+  await click(ui, rowOf(ui, '+ 1 command'));
   await click(ui, rowOf(ui, 'seq 1 8 ·'));
   const first = rowOf(ui, 'seq 1 8');
   // A click inside the open output folds it back — and the block starts on the same
@@ -245,6 +256,7 @@ test('closing a block leaves its first row where it was on screen', async () => 
 
 test('a click opens a command capped to its last lines; ^o opens it in full', async () => {
   const { ui } = await longOutput();
+  await click(ui, rowOf(ui, '+ 1 command'));
   await click(ui, rowOf(ui, 'seq 1 8 ·'));
   // A click shows the capped tail — the same 6 rows every open-by-click test sees.
   expect(ui.backend.lastFrame).toContain('… 5 lines cut · ^o for all');
@@ -277,6 +289,7 @@ test('a message sent after a block was opened still sticks to the bottom', async
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('It is Tuesday.'));
   await settle(6);
+  await click(ui, rowOf(ui, '▸ + 1 tool'));
   await click(ui, rowOf(ui, '1 tool: datetime'));
   await ui.type('anything else?');
   await ui.press('return');
