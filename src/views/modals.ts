@@ -955,7 +955,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
           rows.push({ role, step: true, fold: id, foldLine: true, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
-          // its rows folds the run again), the normal colour in `open` — and the normal
+          // its rows folds the run again, when the run is not lit), the normal colour in
+          // `open` — and the normal
           // colour for the step the person reads: the run that led into a waiting
           // question, and the step that answers a message steered in mid-turn. Under
           // each, the calls it made: in `step` a line per call, part of the run; in

@@ -1335,8 +1335,8 @@ test('the run before a pending question draws open and lit', async () => {
   expect(folded.some((r) => r.reason)).toBe(false);
 
   // The question waits: the last run — the one the ask follows — draws each step in
-  // full at full ink, and keeps its fold id so a click still folds it. The older run
-  // and the thought keep their folded look.
+  // full at full ink, and keeps its fold id so a click still folds it, when the run is
+  // not lit. The older run and the thought keep their folded look.
   const lit = chatRows([leadMsg] as never, leadOpts(true));
   const litText = lit.map(rowText);
   expect(litText).toContain('The branch is unclear.');

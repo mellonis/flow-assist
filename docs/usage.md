@@ -737,8 +737,9 @@ conversation; `/notes step` goes back. To have it that way from the start:
 assistant says after it picked your queued message up, and before its own answer or your
 next message, is the answer to it: that text draws at full ink, marked `→` in the gutter
 under the `›` of the message it answers, and whatever it said on the way stays dim. It is
-one mark per message, and the turn's own answer keeps its one `ƒ` — a steer the assistant
-answers by ending the turn there is that answer, not a `→`.
+one mark per message, on the last text the assistant wrote after picking your message up
+and before the turn settled; when the turn's own answer is the only text there is, `ƒ`
+alone marks it.
 
 **A question the assistant asked you stays where it was asked.** Once you have answered
 it — an option picked, your own words typed, or a dismissal — the block remains in the
