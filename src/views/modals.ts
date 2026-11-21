@@ -2146,9 +2146,10 @@ export interface ChatRoomInput {
 
 // The measures of the chat's column, in one place so what is drawn and what a key may
 // act on cannot disagree. `besides` is everything in the column but the conversation and
-// the plan — the error, the queue line, the field strip (the field's place and the hint
-// row under it, no gap between them) — each child with the gap above it (the frame's
-// border and padding take 4 rows more); `planFull` is the rows of the whole plan block.
+// the plan — the error, the queue line, the field strip (the field's place, the strip's
+// own empty row and the hint row under it) — each child with the gap above it (the
+// frame's border and its top padding take 3 rows more); `planFull` is the rows of the
+// whole plan block.
 // `hidden`: a question, a y/n, `/context`, the pager, a watched child, the picker or a
 // command panel takes the column.
 export function chatRoom(p: ChatRoomInput) {
@@ -2181,20 +2182,23 @@ export function chatRoom(p: ChatRoomInput) {
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
     : visible.length + (askNotice ? 1 : 0) + (completion?.list?.height ?? 0);
-  // The field and the hint under it are ONE child of the column, so they share one gap
-  // above the strip; the hint's own row is inside it.
-  const fieldStrip = fieldPlace + 1;
+  // The strip's rows: the field's place, the strip's own gap row and the hint row, all
+  // under one gap from the column above. The render leaves the field's place `null` under
+  // the pager and under a plain watch — the gap draws nothing then, and the strip is the
+  // hint (and a watch's notice) alone; the column's gap above it is the one empty row.
+  const stripHolds = !(pager || (watch && !confirmAsk && !watch.question));
+  const fieldStrip = stripHolds ? fieldPlace + 2 : (watch?.notice ? 2 : 1);
   const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, queued.length ? 1 : 0, fieldStrip]
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
   const hidden = !!(pager || watch || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
-  const planShape = planFit(boxH - 4, besides, planFull);
+  const planShape = planFit(boxH - 3, besides, planFull);
   // `/diff`'s split. The rows it may use are the content less the strip that stays full
   // width below it — the error, the hint row, the queue line and the field's place (each
   // with its gap), and the plan as it is drawn — less the one gap the split's own row
   // brings. `fieldRows: 0`: the field is in that strip, not the split's.
   const stripRows = besides + (planShape === 'full' ? planFull + 1 : planShape === 'line' ? 2 : 0);
-  const split = diffPanel ? diffPanelLayout({ width: boxW - 4, height: Math.max(0, boxH - 4 - stripRows - 1), fieldRows: 0, minChatRows: 4 }) : null;
+  const split = diffPanel ? diffPanelLayout({ width: boxW - 4, height: Math.max(0, boxH - 3 - stripRows - 1), fieldRows: 0, minChatRows: 4 }) : null;
   return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, planShape, split, hidden };
 }
 
@@ -2568,7 +2572,10 @@ export function renderChatModal({
           : subject ? `${chatName} · ${subject}` : chatName, Math.max(0, boxW - 4)),
         width: boxW,
         height: boxH,
-        padding: 1,
+        // The bottom row (the hint, the status) goes to the frame's edge — the empty row
+        // that used to stand under it is the strip's now, above it (2026-11-22, by request).
+        paddingX: 1,
+        paddingTop: 1,
         flexDirection: 'column',
         gap: 1,
         overflow: 'hidden',
@@ -2620,13 +2627,16 @@ export function renderChatModal({
               tail ? h(Text, { dim: true, wrap: 'truncate' }, tail) : null);
           })()
         : null,
-      // The field strip: the field (or the y/n or the question that stands in its place)
-      // and, under it, the hint that says what its keys do. ONE child of the column, with
-      // no gap between the two — the column's gap separates pieces, never a field from its
-      // own legend. The strip never shrinks: in a small panel the plan gives way
-      // (`planFit`), the field and its hint keep their rows. The field is not drawn under
-      // the pager; the hint is.
-      h(Box, { key: 'field-strip', flexDirection: 'column', width: '100%', flexShrink: 0 },
+      // The field strip: the field (or the y/n or the question that stands in its place),
+      // one empty row, and the hint that says what its keys do. The empty row BETWEEN the
+      // two is deliberate (2026-11-22, by request — before it the hint hung on the field
+      // and the empty row sat under the hint): the hint hugs the frame's bottom edge and
+      // the breathing room is under the field's place. With the field's place `null` (the
+      // pager, a plain watch) there is no gap to draw — the column's own gap above the
+      // strip is the one empty row. The strip never shrinks: in a small panel the plan
+      // gives way (`planFit`), the field and its hint keep their rows. The field is not
+      // drawn under the pager; the hint is.
+      h(Box, { key: 'field-strip', flexDirection: 'column', width: '100%', flexShrink: 0, gap: 1 },
         pager || (watch && !confirmAsk && !watch.question) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
           pendingQuestion
             ? renderAsk(pendingQuestion, m.bg, wrap)
@@ -3485,9 +3495,10 @@ function confirmView(c: ConfirmAsk, wrap: number) {
 const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Math.max(1, width), 'wrap').length);
 
 // How many rows the chat needs to show a pending question or y/n WHOLE, in a frame
-// `width` columns wide that fills its area (a docked panel): the frame and its padding,
-// one row of conversation, the status row, the plan and the queue line when they are
-// up, the block — and the gaps between them. 0 when nothing is pending. The App grows a
+// `width` columns wide that fills its area (a docked panel): the frame's border and its
+// top padding, one row of conversation, the status row, the plan and the queue line when
+// they are up, the block — and the gaps between them. 0 when nothing is pending. The App
+// grows a
 // bottom panel to it, and draws the chat as a window while it is pending when even that
 // would leave the plugin less than its least (src/runtime/panel-layout.ts).
 export function pendingChatRows({ width, question, confirm, notice = 0, todo, queued = 0 }: {
@@ -3505,8 +3516,10 @@ export function pendingChatRows({ width, question, confirm, notice = 0, todo, qu
   const block = question ? askBlockRows(question, wrap) : notice && !confirm ? notice : confirmBlockRows(confirmView(confirm!, wrap), wrap);
   const planRows = question ? 0 : planBlockRows(planView(todo ?? []));
   const parts = [1, 1, planRows, queued ? 1 : 0, block].filter((n) => n > 0);
-  // The frame's border and padding, the parts, a gap between each two.
-  return 4 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
+  // The frame's border and its top padding, the parts, a gap between each two — the block
+  // and the status row are separate parts and the strip really carries the gap row
+  // between them.
+  return 3 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
 }
 
 // The rows of the blocks that take the field's place, counted from the pieces their

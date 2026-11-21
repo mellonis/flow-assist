@@ -179,7 +179,10 @@ test('collapsed on the right, the turn\'s status is on the plugin\'s bottom row;
   await ui.press('F');
   await ui.type('go');
   await ui.press('return');
-  const footer = () => rows(ui).find((l) => l.includes(': commands')) ?? '';
+  // The row is shared: the plugin's keys on the left, the chat's frame beside them now
+  // that its status row hugs the border. The plugin's own segment is what the assertion
+  // is about — the turn's status must not ride on the plugin's keys.
+  const footer = () => (rows(ui).find((l) => l.includes(': commands')) ?? '').split('│')[0] ?? '';
   expect(footer()).not.toContain('…');
   await press(ui, COLLAPSE);
   expect(chatFrame(ui).top).toBe(-1);
@@ -508,12 +511,15 @@ const notebook = (make: any) => make('notes', {
 const toolResult = (model: ScriptedModel, n: number) =>
   String(((model.requests[n]?.messages ?? []) as { role: string; content?: string }[]).find((m) => m.role === 'tool')?.content ?? '');
 const ASK = { questions: [{ question: 'Rebase or merge?', header: 'Strategy', options: [{ label: 'rebase', description: 'Linear history' }, { label: 'merge', description: 'Keeps the branch shape' }] }] };
+// A question taller than the panel's own rows — four options with descriptions — so the
+// growth the next test pins is real (the plain ASK fits exactly and would show none).
+const ASK_TALL = { questions: [{ question: 'Rebase or merge?', header: 'Strategy', options: [{ label: 'rebase', description: 'Linear history' }, { label: 'merge', description: 'Keeps the branch shape' }, { label: 'squash', description: 'One commit on top' }, { label: 'rebase-onto', description: 'Replays onto the target' }] }] };
 
 // A question the bottom panel cannot hold: the panel grows to it while the plugin keeps
 // more than its least, and is its own size again once it is answered.
 test('a bottom panel grows to show a pending question whole, and shrinks back once it is answered', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'ask_user', args: ASK }], [{ text: 'Merging then.' }]);
+  model.script([{ tool: 'ask_user', args: ASK_TALL }], [{ text: 'Merging then.' }]);
   const g = guest();
   const ui = await bootApp(model, 100, 40, g.make as never, {}, { chatMode: 'panel' });
   await ui.press('F');
@@ -521,13 +527,13 @@ test('a bottom panel grows to show a pending question whole, and shrinks back on
   await ui.type('how?');
   await ui.press('return');
   await settle(10);
-  // 17 rows: the frame and its padding, a row of conversation, the status row, the
-  // nine of the question, and the gaps.
-  expect(chatFrame(ui)).toEqual({ top: 23, bottom: 39, left: 0, width: 100 });
-  expect(g.size).toEqual({ width: 100, height: 17 });
+  // 20 rows: the frame's border and its top padding, a row of conversation, the status
+  // row, the thirteen of the question, and the gaps.
+  expect(chatFrame(ui)).toEqual({ top: 20, bottom: 39, left: 0, width: 100 });
+  expect(g.size).toEqual({ width: 100, height: 14 });
   const r = rows(ui);
   const hintAt = r.findIndex((l) => l.includes('Esc dismiss'));
-  expect(r[hintAt - 5]).toContain('1. rebase');
+  expect(r[hintAt - 9]).toContain('1. rebase');
   expect(r[hintAt + 1]).toMatch(/╰─+╯/);
   await ui.press('down');
   await ui.press('return');
@@ -752,8 +758,9 @@ test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row ter
   const f = chatFrame(ui);
   expect(f.left).toBe(0); // docked at the bottom
   if (shape === 'line') expect(f.bottom - f.top + 1).toBe(12);
-  // Inside the frame's border and padding.
-  const inside = rows(ui).slice(f.top + 2, f.bottom - 1);
+  // Inside the frame's border and its top padding: the content goes to the frame's bottom
+  // edge now, the hint row its last.
+  const inside = rows(ui).slice(f.top + 2, f.bottom);
   // The field whole, the hint row under it on the last row of the frame's content.
   const fieldRow = inside.find((l) => l.includes('⏎ send ·'))!;
   expect(fieldRow).toContain('› ');
