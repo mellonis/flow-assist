@@ -1373,6 +1373,84 @@ test('the lead-in lights under a message drawn after it, and nowhere else', () =
   expect(both).toContain('▸ The branch is unclear.');
 });
 
+// ─── The answer to a message steered in mid-turn ─────────────────────────────
+// The steer's answer is the LAST text written after the steered-in row and before
+// either the turn's answer or the person's next message: it draws at full ink and
+// carries `→` in the gutter, under the `› ` of the message it answers. The turn's own
+// answer keeps its one `ƒ`, and the narration before the steer's answer stays dim.
+const steerFrame = async (messages: ChatMsg[]) => {
+  const backend = new TestBackend(120, 30);
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 120, height: 30, messages } as never), backend);
+  const lines = (backend.lastFrame ?? '').split('\n');
+  const grid = (backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean } } } }).lastBuffer;
+  const dimAt = (text: string) => {
+    const y = lines.findIndex((l) => l.includes(text));
+    return y < 0 ? null : grid.get(lines[y]!.indexOf(text), y).style.dim === true;
+  };
+  handle.unmount();
+  return { lines, dimAt };
+};
+
+test('a message steered in mid-turn gets the answer mark on the last text before the turn settles', async () => {
+  const { lines, dimAt } = await steerFrame([
+    { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
+    {
+      role: 'assistant', content: 'Итог',
+      parts: [
+        { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
+        { kind: 'text', text: 'Смотрю.' },
+        { kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] },
+        { kind: 'text', text: 'Ответ на вопрос.' },
+      ],
+    },
+  ]);
+  // The last text of the stretch is the steer's answer: `→` in the gutter, full ink.
+  const answer = lines.find((l) => l.includes('Ответ на вопрос.')) ?? '';
+  expect(answer).toContain('→ Ответ на вопрос.');
+  expect(dimAt('Ответ на вопрос.')).toBe(false);
+  // The narration before it answers nothing and keeps neither the mark nor the ink.
+  const narration = lines.find((l) => l.includes('Смотрю.')) ?? '';
+  expect(narration).not.toContain('→');
+  expect(dimAt('Смотрю.')).toBe(true);
+  // The turn's own answer keeps the one `ƒ`.
+  const settled = lines.find((l) => l.includes('Итог')) ?? '';
+  expect(settled).toMatch(/ƒ Итог/);
+  expect(settled).not.toContain('→');
+});
+
+test('a steer answered by ending the turn there keeps ƒ and gets no →', async () => {
+  const { lines } = await steerFrame([
+    { role: 'user', content: 'а что с git?', midTurn: true },
+    {
+      role: 'assistant', content: 'Три изменённые строки.',
+      parts: [{ kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] }],
+    },
+  ]);
+  // The text the turn ends on IS the answer: `ƒ`, never `→`.
+  const answer = lines.find((l) => l.includes('Три изменённые строки.')) ?? '';
+  expect(answer).toMatch(/ƒ Три изменённые строки\./);
+  expect(lines.some((l) => l.includes('→ '))).toBe(false);
+});
+
+test('a dim hostAsk row does not join the steer answer', async () => {
+  // The host's own ask after a `!!command` is a dim row of the person's side: it ends
+  // the stretch the steered-in row opened, so the text after it is not the steer's
+  // answer and carries no `→`.
+  const { lines } = await steerFrame([
+    { role: 'user', content: 'прикинь, сколько файлов', midTurn: true },
+    { role: 'user', content: 'The host asks one thing', hostAsk: true },
+    {
+      role: 'assistant', content: 'Итог',
+      parts: [
+        { kind: 'tools', runs: [{ name: 'list_dir', outcome: 'ok' }] },
+        { kind: 'text', text: 'Ответ хосту.' },
+      ],
+    },
+  ]);
+  expect(lines.some((l) => l.includes('The host asks one thing'))).toBe(true);
+  expect(lines.some((l) => l.includes('→ '))).toBe(false);
+});
+
 test('the chat title that fits by clusters is not cut', async () => {
   // 46 cells by clusters, 106 summed per code point; the title has 72.
   const subject = FAMILY.repeat(15);

@@ -733,6 +733,13 @@ they were made (`▸ 2 tools: read_file ×2`).
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.
 
+**A message you steered in mid-turn is answered under `→`.** The last thing the
+assistant says after it picked your queued message up, and before its own answer or your
+next message, is the answer to it: that text draws at full ink, marked `→` in the gutter
+under the `›` of the message it answers, and whatever it said on the way stays dim. It is
+one mark per message, and the turn's own answer keeps its one `ƒ` — a steer the assistant
+answers by ending the turn there is that answer, not a `→`.
+
 **A question the assistant asked you stays where it was asked.** Once you have answered
 it — an option picked, your own words typed, or a dismissal — the block remains in the
 conversation: the question under `?` and your answer under `→` (`→ dismissed` when you

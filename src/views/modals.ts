@@ -188,6 +188,10 @@ interface ChatRow {
   // The answer row of a question the person was asked and answered (role 'ask'): the
   // `→` in the gutter, under the question's `?`.
   askAnswer?: boolean;
+  // The first row of the answer to a message steered in mid-turn: `→` in the same
+  // two cells, under the `› ` of the message it answers. The turn's own answer keeps
+  // its one `ƒ`.
+  steerAnswer?: boolean;
   // A view that is not a command draws no run mark.
   plainGutter?: boolean;
   // A console block's own state, read off its view record — resolved here, once,
@@ -603,10 +607,52 @@ export interface RowOpts {
   askPending?: boolean;
 }
 
+// The step that answers a message steered in mid-turn, as the row builder finds it:
+// the run's place among the message's segments, and its place among the run's steps.
+interface SteerAnswer { seg: number; step: number }
+
+// The step that answers each steered-in message of the list: the LAST text written
+// after the steered-in row and before either the turn's answer or the person's next
+// message. One mark per steer — the turn's own last text stays the answer and keeps its
+// `ƒ`, so a steer the model answers by ending the turn there is the answer, not a
+// steer's reply. A message of the work (a view, a note) does not end the stretch; the
+// person's next message does, and so does the turn's answer.
+function steerAnswers(drawn: readonly ChatMsg[]): Map<number, SteerAnswer> {
+  const out = new Map<number, SteerAnswer>();
+  // The last step found in the stretch open now, and where it is; `open` says whether a
+  // steered-in row began one.
+  let found: { at: number; seg: number; step: number } | null = null;
+  let open = false;
+  // The stretch is over: the step found by now is the steer's answer.
+  const settle = () => {
+    if (found) out.set(found.at, { seg: found.seg, step: found.step });
+    found = null;
+    open = false;
+  };
+  for (const [at, m] of drawn.entries()) {
+    if (m.role === 'user') {
+      settle();
+      open = m.midTurn === true;
+      continue;
+    }
+    if (!open || m.role !== 'assistant') continue;
+    turnSegments(readParts(m.parts)).forEach((seg, segIndex) => {
+      if (seg.kind !== 'run') return;
+      seg.steps.forEach((_step, step) => { found = { at, seg: segIndex, step }; });
+    });
+    // The turn's answer is the last text there is: nothing written after it can be the
+    // steer's answer.
+    if (answerText(String(m.content ?? ''))) settle();
+  }
+  settle();
+  return out;
+}
+
 // `last` is the list's last message (its trailing gap); `lead` says this is the newest
 // ASSISTANT message — the only one a waiting question may light, however much furniture
-// (a view, a note) was drawn under it.
-function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = false): ChatRow[] {
+// (a view, a note) was drawn under it. `steer` is the step that answers a message
+// steered in mid-turn, when this message holds it (`steerAnswers`).
+function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = false, steer?: SteerAnswer): ChatRow[] {
   const views = (Array.isArray(m.views) ? m.views : []) as ViewRecord[];
   // A live view's seconds are part of its rows: without them in the key a cached
   // `12 s` stands still through a silent `sleep 30`. A finished view's time is in
@@ -641,12 +687,13 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = f
   // views reads it: every other message would gain a cache entry per late answer.
   // `askPending`: only the message a waiting question is read against gains a new entry
   // — a flag that is off for everything but one message must not invalidate the whole
-  // conversation's cache.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending && lead ? 1 : 0}:${Object.values(o.palette).join(',')}`;
+  // conversation's cache. The same for a steer's answer, which moves when the person's
+  // next message settles the stretch it is in.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending && lead ? 1 : 0}:${steer ? `${steer.seg}.${steer.step}` : ''}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, lead, o)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, lead, o, steer)));
   return rows;
 }
 
@@ -661,6 +708,7 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   // DRAWN message — a tool's view or a note lands below a turn's narration, and the
   // question is still read against the narration that led into it.
   const lastAssistant = drawn.reduce((n, m, i) => (m.role === 'assistant' ? i : n), -1);
+  const steerAt = steerAnswers(drawn);
   const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
   for (const g of viewGroups(drawn as GroupMsg[], o.notes)) {
     const open = groupOpen(o.folds, g);
@@ -670,14 +718,14 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
     const last = at === drawn.length - 1;
     const lead = at === lastAssistant;
     const inGroup = byAt.get(at);
-    if (!inGroup) return messageRows(m, at, last, o, lead);
+    if (!inGroup) return messageRows(m, at, last, o, lead, steerAt.get(at));
     const out: ChatRow[] = [];
     if (inGroup.g.head === at) {
       const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
       out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'), foldLine: true,
         spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
     }
-    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o, lead));
+    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o, lead, steerAt.get(at)));
     else if (!inGroup.open && inGroup.g.members.at(-1) === at && !last) out.push({ gap: true });
     return out;
   });
@@ -747,7 +795,7 @@ export function anchorRow(messages: ChatMsg[], o: RowOpts, anchor: { at: number;
   return seen;
 }
 
-function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, o: RowOpts): ChatRow[] {
+function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, o: RowOpts, steer?: SteerAnswer): ChatRow[] {
   const { wrap, folds, viewLines, notes, detailsKey } = o;
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
@@ -848,6 +896,15 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       // of the turn — the question's block is). `lead` is the newest assistant message
       // of the conversation whose question it is.
       const leadRun = o.askPending === true && lead ? segs.reduce((n, s, i) => (s.kind === 'run' ? i : n), -1) : -1;
+      // The run that answers a message steered in mid-turn, when this message holds it.
+      const steerRun = steer?.seg ?? -1;
+      // The one fact the two paths share: a run's text is the person's to read at full
+      // ink. Every step of the run that led into a waiting question qualifies, and the
+      // one step that answers a steered-in message — narration answers nothing and
+      // stays dim.
+      const forPerson = (run: number, step: number): boolean => run === leadRun || (run === steerRun && step === steer?.step);
+      // A run with a step the person reads is drawn unfolded, so that step is seen.
+      const litRun = (run: number): boolean => run === leadRun || run === steerRun;
       for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'reasoning') {
           // Each thought is its own block where the model wrote it: folded in `step`,
@@ -881,8 +938,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
           continue;
         }
         const id = foldId(at, 'steps', seg.n);
-        const lead = si === leadRun;
-        if (notes === 'step' && !isOpen(folds, id) && !lead) {
+        if (notes === 'step' && !isOpen(folds, id) && !litRun(si)) {
           // The run folded: ONE dim row where it began, saying the newest step and
           // how many there are. Chrome — the host's account of what was said. Its
           // marks say what happened inside without a click: `✗` a call failed or was
@@ -899,15 +955,22 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
           rows.push({ role, step: true, fold: id, foldLine: true, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
-          // its rows folds the run again), the normal colour in `open` — and, while a
-          // question waits, the normal colour for the run that led into it, which is
-          // the whole of what the question is read against. Under each, the calls it
-          // made: in `step` a line per call, part of the run; in `open` the trail line
-          // the calls have anywhere else.
-          seg.steps.forEach((text, si) => {
-            if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
-            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { fold: id, ...(lead ? {} : { quiet: true }) } : {}));
-            const calls = seg.calls[si];
+          // its rows folds the run again), the normal colour in `open` — and the normal
+          // colour for the step the person reads: the run that led into a waiting
+          // question, and the step that answers a message steered in mid-turn. Under
+          // each, the calls it made: in `step` a line per call, part of the run; in
+          // `open` the trail line the calls have anywhere else.
+          seg.steps.forEach((text, step) => {
+            if (step) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
+            const lit = forPerson(si, step);
+            // The mark lands on the step's first row only: its other rows are the
+            // answer's own text.
+            const steerAnswer = si === steerRun && step === steer?.step;
+            mdLines(text, inner).forEach((line, li) => rows.push(row(line, {
+              ...(notes === 'step' ? { fold: id, ...(lit ? {} : { quiet: true }) } : {}),
+              ...(steerAnswer && li === 0 ? { steerAnswer: true } : {}),
+            })));
+            const calls = seg.calls[step];
             if (!calls) return;
             if (notes === 'step') {
               for (const { run, n } of condenseRuns(calls.runs)) {
@@ -1051,6 +1114,10 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
     // for the answer. The two cells line up as every other marker does.
     if (row.first && row.role === 'ask') return h(Text, { bold: true, color: m.accent }, '? ');
     if (row.askAnswer && row.role === 'ask') return h(Text, { dim: true, color: m.accent }, '→ ');
+    // The answer to a message steered in mid-turn: `→` in the same two cells, under
+    // the `› ` of the message it answers, dim like the ask's own answer mark. The
+    // turn's own answer keeps its one `ƒ`.
+    if (row.steerAnswer && row.role === 'assistant') return h(Text, { dim: true, color: m.accent }, '→ ');
     // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
     // ∮ reads well as "a loop" but is East-Asian-ambiguous width — flowtty reads it as
     // one cell, so it would shift the row in a terminal that draws it two cells wide.

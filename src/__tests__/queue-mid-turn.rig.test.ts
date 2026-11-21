@@ -62,9 +62,10 @@ test('a delivered queued message goes to the model framed as steered in, and the
   expect(String(wire.content)).toContain('not there, the other file');
   expect(String(wire.content)).toContain('steered in mid-turn');
   expect(String(wire.content)).not.toContain('previous turn');
-  // The screen row and the journal keep the text as typed.
+  // The screen row and the journal keep the text as typed; the row is marked as
+  // delivered mid-turn, which is what the answer to it is drawn from.
   const row = rig.conv.messages.find((m) => m.role === 'user' && m.content === 'not there, the other file');
-  expect(row).toEqual({ role: 'user', content: 'not there, the other file' });
+  expect(row).toEqual({ role: 'user', content: 'not there, the other file', midTurn: true });
   const rows = rig.journal().filter((e) => e.t === 'row' && e.role === 'user' && e.text === 'not there, the other file');
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ midTurn: true });

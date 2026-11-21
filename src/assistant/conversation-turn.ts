@@ -358,7 +358,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
             }
             // The model reads each framed as steered in; the row and the journal keep it as typed.
             delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: frameSteered(m.text, false) })));
-            c.setRows((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
+            c.setRows((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text, midTurn: true }))]);
             c.deps.notify();
           }
         }
