@@ -257,28 +257,31 @@ test('the gutter marker draws the interactive run mark, folded and opened', asyn
   expect(opened).toContain('│ out');
 });
 
-// The trail's header (`▾ N tools:`) takes red only for a failure nobody recovered
-// from, yellow for one a later call of the same tool recovered, and the normal
-// colour otherwise — a write never turns it yellow, it only adds its own ✎.
-test('the tool trail header is yellow on a recovered failure, red on one that stands, and normal for writes alone', async () => {
+// The marks a stretch's line carries take the trail's tone: red only for a failure
+// nobody recovered from, yellow for one a later call of the same tool recovered, and
+// the normal colour otherwise — a write never turns it yellow, it only adds its own ✎.
+test("a group line marks a failure in the trail's tone, and a write that showed no diff with ✎", async () => {
   const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
-  const trailRow = async (runs: { name: string; outcome: string }[]) => {
+  const marked = async (runs: { name: string; outcome: string }[]) => {
     const backend = new TestBackend(80, 24);
     const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [{ role: 'assistant', content: 'done', parts: [{ kind: 'tools', runs }] }] }), backend);
     const rows = backend.lastFrame.split('\n');
-    const y = rows.findIndex((r) => /tool/.test(r));
-    const x = rows[y]!.search(/[▸▾]/);
-    const style = backend.lastBuffer!.get(x, y).style;
+    const y = rows.findIndex((r) => /\+ \d+ tool/.test(r));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const line = rows[y]!;
+    const at = line.includes('✗') ? line.indexOf('✗') : -1;
+    const fg = at < 0 ? undefined : backend.lastBuffer!.get(at, y).style.fg;
     handle.unmount();
-    return { fg: style.fg, line: rows[y]! };
+    return { fg, line };
   };
   // Recovered: tool a failed, then succeeded — yellow, not red.
-  expect((await trailRow([{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }])).fg).toBe('yellow');
+  const recovered = await marked([{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }]);
+  expect(recovered.fg).toBe('yellow');
   // Unrecovered: the failing tool never ran again — red.
-  expect((await trailRow([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).fg).toBe('red');
-  // A write with nothing failed: the normal colour, with ✎ beside it, never yellow.
-  const wrote = await trailRow([{ name: 'w', outcome: 'applied' }]);
-  expect(wrote.fg).toBe('green');
+  expect((await marked([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).fg).toBe('red');
+  // A write with nothing failed: no ✗ at all, and its own ✎.
+  const wrote = await marked([{ name: 'w', outcome: 'applied' }]);
+  expect(wrote.line).not.toContain('✗');
   expect(wrote.line).toContain('✎');
 });
 
@@ -1266,12 +1269,13 @@ test('a folded run with a failed call keeps its marks and a ZWJ step uncut', () 
   const text = `▸ ${FAMILY} looked`;
   // The row is laid out in `wrap` less the two-cell gutter: exactly the row and its mark.
   const wrap = 2 + stringWidth(text) + stringWidth(' ✗');
-  const rows = chatRows([msg] as never, { wrap, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
+  // The stretch the run is in opened: the run's own one-line row is behind the group's.
+  const rows = chatRows([msg] as never, { wrap, folds: { open: false, except: new Set(['group:0:steps:0']) }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
   const row = rows.find((r) => r.startsWith('▸'));
   expect(row).toBe(`${text} ✗`);
 });
 
-test("a folded run's ✗ carries the trail's tone: warn when the same tool recovered, error when it did not", () => {
+test("a group line's ✗ carries the trail's tone: warn when the same tool recovered, error when it did not", () => {
   const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
   const markOf = (runs: { name: string; outcome: string }[]) => {
     const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'text', text: 'looked' }, { kind: 'tools', runs }] };
@@ -1326,17 +1330,14 @@ const leadFrame = (extra: Record<string, unknown>) => chatFrame({
 });
 
 test('the run before a pending question draws open and lit', async () => {
-  // Folded: two chrome rows — one per run — and the thought between them.
+  // Folded: the whole stretch — both runs and the thought between them — is one line.
   const folded = chatRows([leadMsg] as never, leadOpts());
-  const foldedText = folded.map(rowText);
-  expect(foldedText).toContain('▸ Read the log first.');
-  expect(foldedText).toContain('▸ The branch is unclear.');
-  expect(folded.some((r) => r.reasonHeader)).toBe(true);
+  expect(folded.map(rowText).filter(Boolean)).toEqual(['+ 1 thought, 1 read, 1 tool']);
   expect(folded.some((r) => r.reason)).toBe(false);
 
   // The question waits: the last run — the one the ask follows — draws each step in
   // full at full ink, and keeps its fold id so a click still folds it, when the run is
-  // not lit. The older run and the thought keep their folded look.
+  // not lit. The older run and the thought keep their folded look: a group of their own.
   const lit = chatRows([leadMsg] as never, leadOpts(true));
   const litText = lit.map(rowText);
   expect(litText).toContain('The branch is unclear.');
@@ -1344,20 +1345,18 @@ test('the run before a pending question draws open and lit', async () => {
   expect(lead?.quiet).not.toBe(true);
   expect(lead?.step).not.toBe(true);
   expect(lead?.fold).toBe('0:steps:1');
-  expect(litText).toContain('▸ Read the log first.');
-  expect(lit.some((r) => r.reasonHeader)).toBe(true);
+  expect(litText.filter((t) => t.startsWith('+ '))).toEqual(['+ 1 thought, 1 read', '+ 1 tool']);
   expect(lit.some((r) => r.reason)).toBe(false);
 
   // On the screen, one question or a wizard alike: the block in the field's place says
   // nothing about the rows — `pendingQuestion` alone leaves them folded, and only the
   // transcript's own flag lights the run. Lit, the run's rows are at full ink and the
-  // folded run beside them is dim.
+  // group beside them is dim.
   const waiting = await leadFrame({});
-  expect(waiting.dimAt('▸ The branch is unclear.')).toBe(true);
+  expect(waiting.dimAt('+ 1 thought, 1 read, 1 tool')).toBe(true);
   const litFrame = await leadFrame({ askPending: true });
   expect(litFrame.dimAt('The branch is unclear.')).toBe(false);
-  expect(litFrame.dimAt('▸ Read the log first.')).toBe(true);
-  expect(litFrame.dimAt('▸ thought')).toBe(true);
+  expect(litFrame.dimAt('+ 1 thought, 1 read')).toBe(true);
 });
 
 test('the lead-in lights under a message drawn after it, and nowhere else', () => {
@@ -1366,14 +1365,14 @@ test('the lead-in lights under a message drawn after it, and nowhere else', () =
   const note = { role: 'note', content: 'compacted', summary: 'kept 12 messages' };
   const lit = chatRows([leadMsg, note] as never, leadOpts(true)).map(rowText);
   expect(lit).toContain('The branch is unclear.');
-  expect(lit).toContain('▸ Read the log first.');
-  // Without the flag, the same list folds it again.
+  expect(lit).toContain('+ 1 thought, 1 read');
+  // Without the flag, the same list folds it again: one stretch, one line.
   const folded = chatRows([leadMsg, note] as never, leadOpts()).map(rowText);
-  expect(folded).toContain('▸ The branch is unclear.');
+  expect(folded).toContain('+ 1 thought, 1 read, 1 tool');
   // And an older turn is never the one lit: only the newest assistant message is.
   const older = { role: 'assistant', content: 'Done.' };
   const both = chatRows([leadMsg, older] as never, leadOpts(true)).map(rowText);
-  expect(both).toContain('▸ The branch is unclear.');
+  expect(both).toContain('+ 1 thought, 1 read, 1 tool');
 });
 
 // ─── The answer to a message steered in mid-turn ─────────────────────────────
@@ -1407,10 +1406,10 @@ test('a message steered in mid-turn gets the answer mark on the last text before
   expect(dimAt('Ответ на вопрос.')).toBe(false);
   // One mark per steer — not a second one on any other row.
   expect(gutterArrows(lines)).toHaveLength(1);
-  // The narration before it answers nothing and keeps neither the mark nor the ink.
-  const narration = lines.find((l) => l.includes('Смотрю.')) ?? '';
-  expect(narration).not.toContain('→');
-  expect(dimAt('Смотрю.')).toBe(true);
+  // The narration before it answers nothing and keeps neither the mark nor the ink: it
+  // is a dim row of the stretch, folded into the group's line with the calls.
+  expect(lines.some((l) => l.includes('Смотрю.'))).toBe(false);
+  expect(lines.some((l) => l.includes('+ 1 read'))).toBe(true);
   // The turn's own answer keeps the one `ƒ`.
   const settled = lines.find((l) => l.includes('Итог')) ?? '';
   expect(settled).toMatch(/ƒ Итог/);
@@ -1475,6 +1474,113 @@ test('a dim hostAsk row does not join the steer answer', async () => {
   });
   expect(lines.some((l) => l.includes('The host asks one thing'))).toBe(true);
   expect(gutterArrows(lines)).toEqual([]);
+});
+
+// ─── A stretch of the work, folded to one line ───────────────────────────────
+// Consecutive dim rows — a folded run, a thought, a trail of calls, a console block,
+// the gaps between them — are ONE collapsible line: what it
+// counts by kind (opencode's grammar), how long its commands took, and the worst state
+// it holds. Any bright row ends the stretch before it, and so does a row of the
+// person's: nothing of theirs is ever hidden in a fold.
+const groupOpts = (folds: { open: boolean; except: Set<string> } = { open: false, except: new Set() }): RowOpts => ({
+  wrap: 60, folds, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {},
+});
+
+test('a stretch of dim rows collapses to one line counting its tools and thoughts', async () => {
+  const msg = {
+    role: 'assistant', content: 'Done.',
+    parts: [
+      { kind: 'reasoning', text: 'Read the log first.' },
+      { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] },
+      { kind: 'tools', runs: [{ name: 'git_diff', outcome: 'ok' }] },
+      { kind: 'reasoning', text: 'The branch is unclear.' },
+      { kind: 'tools', runs: [{ name: 'git_log', outcome: 'ok' }] },
+    ],
+  };
+  const rows = chatRows([msg] as never, groupOpts());
+  // One line where the stretch began — opencode's kind order, thought before tool.
+  const summary = rows.find((r) => r.group);
+  expect(rowText(summary!)).toBe('+ 2 thoughts, 3 tools');
+  // Its members are folded away: no trail's head, no thought's header.
+  expect(rows.some((r) => r.meta || r.reasonHeader)).toBe(false);
+  const folded = await chatFrame({ messages: [msg] });
+  expect(folded.lines.some((l) => l.includes('▸ + 2 thoughts, 3 tools'))).toBe(true);
+  // A click opens it: the same line, now `▾`, over the members as they always were.
+  const opened = chatRows([msg] as never, groupOpts({ open: false, except: new Set(['group:0:reasoning:0']) }));
+  expect(rowText(opened.find((r) => r.group)!)).toBe('+ 2 thoughts, 3 tools');
+  expect(opened.filter((r) => r.meta)).toHaveLength(3);
+  expect(opened.filter((r) => r.reasonHeader)).toHaveLength(2);
+  const shown = await chatFrame({ messages: [msg], folds: { open: false, except: new Set(['group:0:reasoning:0']) } });
+  expect(shown.lines.some((l) => l.includes('▾ + 2 thoughts, 3 tools'))).toBe(true);
+});
+
+test('a bright row ends the group that precedes it and the next dim row starts a new one', () => {
+  const reasoned = {
+    role: 'assistant', content: 'Итог',
+    parts: [{ kind: 'text', text: 'Смотрю.' }, { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] }],
+  };
+  const steered = { role: 'user', content: 'а что с git?', midTurn: true };
+  // The steer's answer is the lit run: its rows are bright, so the group before it
+  // ends there and the calls that came earlier count alone.
+  const answered = {
+    role: 'assistant', content: 'Итог',
+    parts: [{ kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] }, { kind: 'text', text: 'Ответ на вопрос.' }],
+  };
+  const again = {
+    role: 'assistant', content: 'Итог',
+    parts: [{ kind: 'text', text: 'Ещё смотрю.' }, { kind: 'tools', runs: [{ name: 'git_log', outcome: 'ok' }, { name: 'git_diff', outcome: 'ok' }] }],
+  };
+  const rows = chatRows([reasoned, steered, answered, again] as never, groupOpts());
+  const text = rows.map(rowText);
+  // Three stretches, three summaries — each counting only its own members.
+  expect(text.filter((r) => r.startsWith('+ '))).toEqual(['+ 1 tool', '+ 1 read', '+ 2 tools']);
+  // The bright rows themselves are never folded away.
+  expect(rows.some((r) => r.steerAnswer)).toBe(true);
+  expect(text).toContain('Ответ на вопрос.');
+
+  // A change title is bright too, and so are the hunks under it: they split a stretch
+  // the same way, and neither the title nor the diff is ever hidden.
+  const changed = {
+    role: 'assistant', content: '',
+    parts: [
+      { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] },
+      { kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } },
+      { kind: 'tools', runs: [{ name: 'git_log', outcome: 'ok' }, { name: 'git_diff', outcome: 'ok' }] },
+    ],
+  };
+  const split = chatRows([changed] as never, groupOpts()).map(rowText);
+  const title = split.findIndex((r) => r.startsWith('✎'));
+  expect(split[title]).toBe('✎ src/a.ts · +1 −1');
+  expect(split.slice(0, title)).toContain('+ 1 tool');
+  expect(split.slice(title)).toContain('+ 2 tools');
+});
+
+test('a group with a live item shows a busy line with a spinner while it runs', async () => {
+  // A round being written and a command still running: the round stays on the screen
+  // as it arrives — the command's own block is what folds, and it says what it is
+  // waiting on rather than what it has finished.
+  const msg = {
+    role: 'assistant', content: '', live: 'щас гляну',
+    parts: [{ kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] }],
+  };
+  const running = {
+    role: 'view', content: '',
+    views: [{ kind: 'console', data: { command: 'bun test', cwd: '~', text: 'running…' }, phase: 'live', startedAt: 0 }],
+  };
+  const rows = chatRows([msg, running] as never, { ...groupOpts(), now: 6000 });
+  const summary = rows.find((r) => r.group?.busy === true);
+  // The wording of what still runs, and no counts: a count of work not yet finished
+  // would be a lie.
+  expect(rowText(summary!)).toBe('Running command…');
+  // The text being typed under it is drawn, never folded away.
+  expect(rows.map(rowText)).toContain('щас гляну');
+  // On the screen it spins where the fold marker stands — a static label reads as stuck.
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, messages: [msg, running] as never, now: 6000 }), backend);
+  expect(backend.lastFrame).toContain('⠋ Running command…');
+  expect(backend.lastFrame).toContain('щас гляну');
+  expect(backend.lastFrame).not.toContain('⠋ +');
+  handle.unmount();
 });
 
 test('the chat title that fits by clusters is not cut', async () => {
