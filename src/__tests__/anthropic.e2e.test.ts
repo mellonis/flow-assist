@@ -131,10 +131,16 @@ test('thinking lands in the thinking fold, and its block goes back unchanged —
     { type: 'thinking', thinking: 'The clock tool will know.', signature: 'sig-A' },
     { type: 'tool_use', id: 'toolu_0', name: 'datetime', input: {} },
   ]);
-  // The reasoning is folded under the answer, and opens with the details key.
+  // The reasoning is folded under the answer: the stretch is one line, and the details
+  // key opens it one level — a record line per thought, the text still shut.
   expect(ui.backend.lastFrame).toContain('It is noon.');
-  expect(ui.backend.lastFrame).toMatch(/▸ (?:thinking|thought)/);
+  expect(ui.backend.lastFrame).toMatch(/▸ \+ 2 thoughts, 1 tool/);
   expect(ui.backend.lastFrame).not.toContain('The clock tool will know.');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
+  expect(ui.backend.lastFrame).toMatch(/▸ thought/);
+  expect(ui.backend.lastFrame).not.toContain('The clock tool will know.');
+  // Again: every record's body, the last round's thought included.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
   expect(ui.backend.lastFrame).toContain('Now I can answer.');
@@ -156,6 +162,10 @@ test('a thought still being written reads thinking, and becomes thought once the
   await ask(ui, 'what time is it?');
   await settleUntil(() => model.held);
   await settle(10);
+  // The thought is a record inside the stretch: one press opens that level, and there
+  // its label is read.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
   expect(ui.backend.lastFrame).toMatch(/▸ thinking/);
   expect(ui.backend.lastFrame).not.toMatch(/▸ thought/);
   model.release();
@@ -181,6 +191,9 @@ test('a thought reads thought once the turn moved on, even when a tool block lan
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('All done.'));
   await settle(10);
+  // The stretch is one line; its records are one press of the details key down.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
   expect(ui.backend.lastFrame).toMatch(/▸ thought/);
   expect(ui.backend.lastFrame).not.toMatch(/▸ thinking/);
   ui.app.unmount();
@@ -196,7 +209,12 @@ test('each round keeps its own thinking block, in the order it happened', async 
   await ask(ui, 'what time is it?');
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
-  expect((ui.backend.lastFrame.match(/▸ (?:thinking|thought)/g) ?? []).length).toBe(2);
+  // The stretch counts both thoughts on its one line; the details key opens it to a
+  // record per thought, and one press more to the text of each.
+  expect(ui.backend.lastFrame).toMatch(/▸ \+ 2 thoughts, 1 tool/);
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
+  expect((ui.backend.lastFrame.match(/▸ thought/g) ?? []).length).toBe(2);
   ui.backend.press({ name: 'o', ctrl: true });
   await settle();
   const frame = ui.backend.lastFrame;

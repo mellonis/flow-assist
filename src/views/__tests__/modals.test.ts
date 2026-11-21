@@ -1681,6 +1681,18 @@ test('two console blocks fold into the group, and no Ran head stands over them',
   expect(lines.some((l) => /\+ 2 commands .*✗/.test(l))).toBe(true);
 });
 
+// The same is true of a command that asked the person something: `‼` is on the
+// stretch's own line while it holds that block, so what happened inside it is read
+// without opening the stretch at all.
+test("a collapsed group's line keeps the `‼` of a command that asked", async () => {
+  const interactive = { role: 'view', content: '', views: [{ kind: 'console', data: { command: 'bun test', cwd: '~', text: 'ok', exitCode: 0, ms: 300, interactive: true }, phase: 'done', startedAt: 0 }] };
+  const rows = chatRows([interactive] as never, groupOpts());
+  expect(rows.map(rowText)).toEqual(['+ 1 command · <1s ‼']);
+  expect(rows.find((r) => r.group)!.group!.marks).toBe('‼');
+  const { lines } = await chatFrame({ messages: [interactive] });
+  expect(lines.some((l) => /▸ \+ 1 command .*‼/.test(l))).toBe(true);
+});
+
 // ─── A record: one line per thought, call and console block ──────────────────
 // Opening a stretch opens it one level: a thought, a call and a console block are one
 // line each (`thought: <title>`, `⌁ <tool> · <status>`, `! <command> · <status>`), and

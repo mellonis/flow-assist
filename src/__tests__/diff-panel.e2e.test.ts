@@ -289,13 +289,14 @@ test('a click on a trail row beside the panel opens it: the rows are measured at
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   await settle(6);
-  const at = ui.backend.lastFrame.split('\n').findIndex((l) => l.includes('1 tool: datetime'));
+  const at = ui.backend.lastFrame.split('\n').findIndex((l) => l.includes('+ 1 tool'));
   expect(at).toBeGreaterThanOrEqual(0);
   ui.backend.mouse('down', 12, at);
   ui.backend.mouse('up', 12, at);
   await settle(6);
-  // The call the trail holds is drawn under it, as a key would open it.
-  expect(ui.backend.lastFrame).toMatch(/▸ datetime.*→ ok/);
+  // The stretch opens under it, one record line for the call it holds, as a key would.
+  expect(ui.backend.lastFrame).toMatch(/▾ \+ 1 tool/);
+  expect(ui.backend.lastFrame).toMatch(/▸ ⌁ datetime · ok/);
   ui.app.unmount();
 });
 

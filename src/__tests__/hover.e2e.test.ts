@@ -32,7 +32,7 @@ type Style = { dim?: boolean; underline?: boolean; bold?: boolean; fg?: string }
 const style = (ui: Ui, p: { x: number; y: number }) => ui.backend.lastBuffer!.get(p.x, p.y).style as Style;
 const move = async (ui: Ui, p: { x: number; y: number }) => { ui.backend.mouse('move', p.x, p.y); await settle(); };
 
-// A turn with one tool call behind its `▸ 1 tool: datetime` line, then an answer.
+// A turn with one tool call behind its stretch's `▸ + 1 tool` line, then an answer.
 async function oneTurn(extra: Record<string, unknown> = {}, guests?: (make: Make) => never[]) {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'It is Tuesday.' }]);
@@ -47,7 +47,7 @@ async function oneTurn(extra: Record<string, unknown> = {}, guests?: (make: Make
 
 test('a fold line under the pointer is underlined, and nothing else is; moving off or leaving the window takes it back', async () => {
   const ui = await oneTurn();
-  const trail = at(ui, '1 tool: datetime');
+  const trail = at(ui, '+ 1 tool');
   const answer = at(ui, 'It is Tuesday.');
   const question = at(ui, 'what day is it?');
   const trailBefore = style(ui, trail);
@@ -77,7 +77,7 @@ test('a fold line under the pointer is underlined, and nothing else is; moving o
 test('ui.hover false, or the mouse off, leaves every row as it is', async () => {
   for (const ui of [{ hover: false }, { mouse: false }]) {
     const app = await oneTurn({ ui });
-    const trail = at(app, '1 tool: datetime');
+    const trail = at(app, '+ 1 tool');
     const before = style(app, trail);
     await move(app, trail);
     expect(style(app, trail)).toEqual(before);
@@ -99,7 +99,13 @@ test('a command block\'s line is a fold line too; the pager\'s rows, which fold 
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
   await settle(8);
-  const block = at(ui, 'seq 1 300 ·');
+  // The block is one record inside the stretch now: a click on the summary opens that
+  // level, and the record's line is the block's fold line.
+  const summary = at(ui, '+ 1 command');
+  ui.backend.mouse('down', summary.x, summary.y);
+  ui.backend.mouse('up', summary.x, summary.y);
+  await settle(6);
+  const block = at(ui, '! seq 1 300');
   await move(ui, block);
   expect(style(ui, block).underline).toBe(true);
   // A click on it opens it in the pager (it is taller than the conversation): its rows
@@ -130,8 +136,15 @@ test('the thinking header and a folded run of steps are fold lines', async () =>
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('It is Tuesday.'));
   await settle(6);
-  for (const needle of ['▸ thought', 'check the clock']) {
-    const p = at(ui, needle);
+  // The thought is a record under the stretch: one click on the summary opens it, and
+  // then both the record's own line and the narration inside are fold lines. The
+  // record's label starts past its marker, which is the cell the underline skips.
+  const summary = at(ui, '+ 1 thought');
+  ui.backend.mouse('down', summary.x, summary.y);
+  ui.backend.mouse('up', summary.x, summary.y);
+  await settle(6);
+  const record = at(ui, '▸ thought');
+  for (const p of [{ x: record.x + 2, y: record.y }, at(ui, 'check the clock')]) {
     expect(style(ui, p).underline).toBeFalsy();
     await move(ui, p);
     expect(style(ui, p).underline).toBe(true);
@@ -154,7 +167,7 @@ test('a move is never a key: it redraws no plugin, disarms no Esc, answers no y/
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('It is Tuesday.'));
   await settle(6);
-  const trail = at(ui, '1 tool: datetime');
+  const trail = at(ui, '+ 1 tool');
   const before = drawn;
   for (let x = 0; x < 150; x += 7) ui.backend.mouse('move', x, (x % 30) + 2);
   await move(ui, trail);
@@ -171,7 +184,7 @@ test('a move is never a key: it redraws no plugin, disarms no Esc, answers no y/
   ui.backend.mouse('move', trail.x, trail.y);
   ui.backend.mouse('up', trail.x, trail.y);
   await settle(6);
-  expect(ui.backend.lastFrame).toMatch(/▾ 1 tool/);
+  expect(ui.backend.lastFrame).toMatch(/▾ \+ 1 tool/);
   // A y/n waits through any number of moves.
   await ui.type('run it');
   await ui.press('return');

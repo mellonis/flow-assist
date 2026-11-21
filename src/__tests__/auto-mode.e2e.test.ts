@@ -314,7 +314,11 @@ test('all with shell.autoRun runs the command unasked, still shows it, and says 
   await settle(10);
   expect(ui.backend.lastFrame).not.toContain('Confirm write');
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
-  expect(ui.backend.lastFrame).toContain('echo made > made.txt; echo autorun-42'); // what ran is shown
+  // What ran is shown: the stretch's one line, and one level down the command itself.
+  expect(ui.backend.lastFrame).toMatch(/▸ \+ 1 command · (?:<1s|\d+s)/);
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('echo made > made.txt; echo autorun-42');
   expect(JSON.stringify(model.requests[1]!.messages)).toContain('autorun-42');
   ui.app.unmount();
 });

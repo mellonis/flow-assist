@@ -63,7 +63,9 @@ test('a write that finishes after Esc is marked above `stopped (Esc)`, and nothi
   const { ui, model } = await stoppedMidEdit(false);
   const rows = conversation(ui.backend.lastFrame);
   expect(rows.at(-1)).toMatch(/^\s*stopped \(Esc\)/);
-  const step = rows.findIndex((r) => r.includes('▸ change b.'));
+  // The landed write is the stretch's own mark: the narration and the call are folded
+  // into its one line, which carries the `✎` above the label.
+  const step = rows.findIndex((r) => r.includes('+ 1 edit'));
   expect(step).toBeGreaterThan(-1);
   expect(rows[step]).toContain('✎');
   expect(step).toBeLessThan(rows.length - 1);
@@ -73,6 +75,10 @@ test('a write that finishes after Esc is marked above `stopped (Esc)`, and nothi
 
 test("a stopped call's block is drawn above `stopped (Esc)`, never under it", async () => {
   const { ui } = await stoppedMidEdit(true);
+  // The block is a record inside the stretch: one press of the details key opens that
+  // level, and its line is where it has to stand — above the label.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
   const rows = conversation(ui.backend.lastFrame);
   const block = rows.findIndex((r) => r.includes('patch app.ts'));
   expect(block).toBeGreaterThan(-1);
@@ -89,6 +95,10 @@ test('the label stays the last row after a restart', async () => {
   const again = await bootApp(new ScriptedModel(), 100, 30, undefined, { sessions: { dir } });
   await settle(6);
   await again.press('F');
+  // Restored folded: the stretch is one line, and the block is its record — one press
+  // of the details key down, still above the label.
+  again.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
   const rows = conversation(again.backend.lastFrame);
   expect(rows.findIndex((r) => r.includes('patch app.ts'))).toBeGreaterThan(-1);
   expect(rows.at(-1)).toMatch(/^\s*stopped \(Esc\)/);

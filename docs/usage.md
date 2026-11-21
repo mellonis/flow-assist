@@ -729,13 +729,14 @@ between two of your own rows or two answers — tool calls, a command's block, a
 assistant said on the way — is one quiet line where that stretch began, folded away with
 everything in it: `▸ + 3 commands, 2 thoughts, 1 read · 12s`. The line counts what is
 inside by kind (a `run_command` and a command's block are `commands`, a thought is
-`thoughts`, `read_file` and `list_dir` are `reads`, the rest `tools`), carries `✗` for a
-failure, `✎` for a write that showed no diff and `‼` for a command that asked you
-something, and says `Running command…` while one of them still runs. `· 12s` is what the
-commands took, summed — never the stretch's own wall-clock time. What the assistant said
-on the way is not counted, and is folded away with the rest while the stretch is closed:
-opened, it reads dim where it was written. A click opens the stretch one level — a line
-per thought, call and command (`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`,
+`thoughts`, `read_file` and `list_dir` are `reads`, a write that is not a command is an
+`edit`, the rest `tools`), carries `✗` for a failure, `✎` for a write that showed no diff
+and `‼` for a command that asked you something, and says `Running command…` while one of
+them still runs. `· 12s` is what the commands took, summed — never the stretch's own
+wall-clock time. What the assistant said on the way is not counted, and is folded away
+with the rest while the stretch is closed: opened, it reads dim where it was written. A
+click opens the stretch one level — a line per thought, call and command
+(`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`,
 `▸ ! bun test · ✓ 4s`) — and a click on one of those opens its own body: the thought's
 text, the call's arguments and result, the command's output. `^o` opens the stretches
 first, their records a line each, then every record's own body, and folds it all back on

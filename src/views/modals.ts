@@ -1570,7 +1570,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
       // A stretch of the work, folded to one line: the fold marker its own state says,
       // what it counted, how long its commands took and the worst state inside it — or,
-      // while anything inside still runs, a spinner in the marker's place and the
+      // while one of its commands still runs, a spinner in the marker's place and the
       // wording of what runs. Chrome, like a folded run's row: a drag copies what the
       // model SAID, never the host's account of the work.
       if (row.group) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },

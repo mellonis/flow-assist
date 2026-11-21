@@ -95,6 +95,12 @@ const holders: Holder[] = [
   {
     name: 'a pager over the chat', kids: (k) => [k], main: SEQ,
     open: async (rig) => {
+      // The command is a record inside its stretch: a click opens that level, and the
+      // click that opens the pager is on the record's own line.
+      const group = rowsOf(rig.ui).findIndex((r) => r.includes('+ 1 command'));
+      rig.ui.backend.mouse('down', 12, group);
+      rig.ui.backend.mouse('up', 12, group);
+      await settle(6);
       const rows = rowsOf(rig.ui);
       const at = rows.findIndex((r) => r.includes('seq 1 300 ·'));
       const x = rows[at]!.indexOf('seq 1 300 ·');

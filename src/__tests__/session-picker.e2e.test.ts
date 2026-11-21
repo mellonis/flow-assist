@@ -272,6 +272,9 @@ test('a click over the picker reaches nothing it hides: no pager opens over it, 
   await ui.press('y');
   await upAt(ui, 'Done counting.');
   await settle(8);
+  // The tall block is one record inside the stretch: a click opens that level, and its
+  // line is where a click used to open the pager from.
+  await clickRow(ui, '+ 1 command');
   const y = ui.backend.lastFrame!.split('\n').findIndex((r) => r.includes('seq 1 300 ·'));
   expect(y).toBeGreaterThan(0);
   ui.backend.press({ name: 's', ctrl: true });
@@ -304,6 +307,10 @@ test('while a y/n is drawn in the picker’s place, a click reaches the conversa
   await upAt(ui, 'Confirm write: run_command');
   await ui.press('y');
   await upAt(ui, 'Done counting.');
+  await settle(8);
+  // The command's block is a record inside its stretch: open it while no picker is up,
+  // so the click after the y/n lands on the conversation the y/n shows.
+  await clickRow(ui, '+ 1 command');
   await ui.type('say hi');
   await ui.press('return');
   await settle(4); // held
