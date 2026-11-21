@@ -1,6 +1,8 @@
-// The state a click and the key share. They cannot be allowed to disagree: the key
-// opens EVERYTHING and a click opens ONE block, and after either the person must be
-// able to say what the screen is showing.
+// The state a click and the key share. They cannot be allowed to disagree: a click
+// opens ONE block, and after either the person must be able to say what the screen is
+// showing. The chat's key now works one level per press (`nextFoldLevel`,
+// `src/views/modals.ts`), so the whole-way `flipFolds` this file still covers is a
+// retained helper.
 import { expect, test } from 'bun:test';
 import { allFolded, flipFolds, foldId, isClicked, isOpen, openInFull, pageable, toggleFold } from '../folds';
 
@@ -67,7 +69,7 @@ test('the state a click makes is a new object — the chat never mutates what it
   expect(isOpen(s, a)).toBe(false);
 });
 
-test('a block a click opens may go to the pager — a run of steps, a group head and a trail\'s earlier calls may not', () => {
+test('a block a click opens may go to the pager — a run of steps, the retired group id and a trail\'s earlier calls may not', () => {
   for (const kind of ['view', 'tools', 'thinking', 'reasoning', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
   expect(pageable(foldId(3, 'steps', 1))).toBe(false);
   expect(pageable(foldId(3, 'group'))).toBe(false);

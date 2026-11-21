@@ -1,4 +1,4 @@
-// A click opens the block under it, and the key opens everything.
+// A click opens the block under it, and the key opens one level per press.
 //
 // A single global key would make everything foldable answer to it: to read the output
 // of ONE command a person would have to unfold the whole conversation and fold it

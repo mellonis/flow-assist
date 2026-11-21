@@ -151,7 +151,7 @@ test('a 5-line block still opens inline, where it was clicked', async () => {
   ui.app.unmount();
 });
 
-test('^o opens everything inline, the tall block included — the pager is for opening ONE block', async () => {
+test('^o opens every block inline, the tall block included — the pager is for opening ONE block', async () => {
   const { ui } = await commandThenTalk('seq 1 300');
   // A level at a time: the stretch, then the record's body — the whole block inline.
   ui.backend.press({ name: 'o', ctrl: true });

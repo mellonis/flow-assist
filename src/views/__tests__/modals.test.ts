@@ -293,8 +293,8 @@ test("a group line marks a failure in the trail's tone, and a write that showed 
 });
 
 // A record's tone is the trail's, read FORWARD from its own call: a failure a later call
-// of the same tool recovered is yellow, not red — the record and the group head above it
-// say the same thing, since a red ✗ under a yellow head would contradict itself.
+// of the same tool recovered is yellow, not red — the record and the stretch's summary
+// above it say the same thing, since a red ✗ under a yellow summary would contradict itself.
 test("a record line takes the trail's tone, a recovered failure included", async () => {
   const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
   const msg = {

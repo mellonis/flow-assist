@@ -14,18 +14,18 @@ What each version of flow-assist brought, newest first. The version is the one i
   `tools`; `· 12s` is what the commands took, summed, never the stretch's wall-clock time.
   It carries the worst state inside it (`✗` a failure, `✎` a write that showed no diff,
   `‼` a command that asked you something) and `Running command…` with a spinner while
-  anything inside still runs. What the assistant said on the way is not counted, and is
-  folded away with the rest while the stretch is closed: opened, it reads dim where it
-  was written. A click opens the stretch one level — one line per thought, call and
-  command (`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`, `▸ ! bun test · ✓ 4s`) —
-  and a click on one of those opens its own body: the thought's text, the call's
-  arguments and result, the command's output and its tail. `^o` opens the stretches
-  first, their records a line each, then every record's own body, and folds it all back
-  on the press after that. A bright row ends the stretch before it — your `›`, the
-  answer's `ƒ`, a steer's `→`, a result's `◆`, a `✎` change title — so nothing of yours,
-  and nothing waiting on you, is ever hidden inside a fold. **The `ƒ Ran N commands` head
-  over consecutive commands is gone:** the stretch's own `N commands` says the same, and
-  the summary carries the `✗`/`✎`/`‼` the head showed.
+  one of its commands is still running. What the assistant said on the way is not
+  counted, and is folded away with the rest while the stretch is closed: opened, it
+  reads dim where it was written. A click opens the stretch one level — one line per
+  thought, call and command (`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`,
+  `▸ ! bun test · ✓ 4s`) — and a click on one of those opens its own body: the thought's
+  text, the call's arguments and result, the command's output and its tail. `^o` opens
+  the stretches first, their records a line each, then every record's own body, and folds
+  it all back on the press after that. A bright row ends the stretch before it — your
+  `›`, the answer's `ƒ`, a steer's `→`, a result's `◆`, a `✎` change title — so nothing of
+  yours, and nothing waiting on you, is ever hidden inside a fold. **The `ƒ Ran N
+  commands` head over consecutive commands is gone:** the stretch's own `N commands` says
+  the same, and the summary carries the `✗`/`✎`/`‼` the head showed.
 
 - **The hint row sits under the field, and the work strip is the one place for background
   work.** The hint is the last row of the chat's field strip, under the line you type in, and

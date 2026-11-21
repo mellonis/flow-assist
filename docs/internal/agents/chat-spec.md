@@ -636,11 +636,12 @@ there is no `/fullscreen`.
   block at once, so reading ONE command's output would mean unfolding the whole
   conversation and folding it back. Instead each command block folds to ONE line
   whatever it printed — see the `run_command` bullet above — and the work around it
-  folds to ONE line per stretch: consecutive dim rows — calls, thoughts, the steps of a
-  run, a command's block — counted by kind and opened into one line per record, each of
-  those opening to its own body (`groupedRows` / `recordRows`, `src/views/modals.ts`;
-  `docs/usage.md` says how the line reads). The model, so
-  that a click and the key cannot disagree:
+  folds to ONE line per stretch: consecutive dim rows — calls, thoughts, a command's
+  block — counted by kind and opened into one line per record, each of those opening to
+  its own body (`groupedRows` / `recordRows`, `src/views/modals.ts`; `docs/usage.md` says
+  how the line reads). A run of steps contributes its calls but not its own text, which is
+  neither counted nor a record; a stretch of narration alone counts nothing and stays as
+  it is. The model, so that a click and the key cannot disagree:
   - **ONE global state** — everything folded (where a conversation starts) or
     everything open — plus the blocks a CLICK has made an exception of. A click
     toggles that block alone: opening one command's output must not become a sticky

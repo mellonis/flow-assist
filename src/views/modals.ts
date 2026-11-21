@@ -705,7 +705,7 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = f
   // `askPending`: only the message a waiting question is read against gains a new entry
   // — a flag that is off for everything but one message must not invalidate the whole
   // conversation's cache. The same for a steer's answer, which moves when the person's
-  // next message settles the stretch it is in. A group's own fold is not in the key:
+  // next message settles the stretch it is in. A stretch's summary is not in the key:
   // it is drawn over these rows, and it changes none of them.
   const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.askPending && lead ? 1 : 0}:${steer ? `${steer.seg}.${steer.step}` : ''}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
@@ -715,9 +715,9 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts, lead = f
   return rows;
 }
 
-// The rows each DRAWN message contributes — the group head counted with its first
-// member, a member of a folded group and every message a group took in contributing
-// none. One walk, so the rows drawn and the rows a click or an anchor counts agree.
+// The rows each DRAWN message contributes: a stretch's summary stands where its first
+// member begins, and every message that stretch took in contributes none. One walk, so
+// the rows drawn and the rows a click or an anchor counts agree.
 // `chatRows`, `rowAnchor` and `anchorRow` below all read this instead of each walking
 // the messages on its own, which is what keeps grouping decided in exactly one place.
 function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
@@ -963,7 +963,8 @@ function recordLine(kind: RecordKind, run: ToolRun | undefined, head: ChatRow, i
   const call = run ?? { name: 'tool', outcome: 'ok' };
   // The trail's tone, read from this call forward: a failure a later call of the same
   // tool recovered is the trail's yellow, not a red of its own, so the record agrees with
-  // the group head it sits under. A failure still waiting on its recovery stays red.
+  // the stretch's summary it sits under. A failure still waiting on its recovery stays
+  // red.
   const tone = trailTone(trail.length ? trail : [call]);
   const wrote = (call as { write?: boolean }).write === true && call.outcome === 'applied';
   // A command is read by what it ran, not by the tool that ran it: `run_command · ok`

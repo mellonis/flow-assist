@@ -20,6 +20,8 @@ import { isConsoleKind, sanitizeViewText, type ViewRecord } from './views.js';
 import { runMark } from './shell.js';
 import { formatDuration } from './duration.js';
 
+// `head` — the first member's index, which the group's fold id and `groupHeadText` are
+// built from; the head itself is not drawn.
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
 export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; roundLimit?: unknown; stopped?: unknown };
 
@@ -29,9 +31,9 @@ const consoleOf = (m: GroupMsg): ViewRecord | null => {
   return isConsoleKind(r.kind) && typeof r.seq === 'number' && typeof r.turn === 'number' ? r : null;
 };
 // A part that stays out of a group: a change, a call (one a command's block does not
-// already show), or a step that says more than its plan — a step that is nothing but
-// the `Next:` line the prompt asks for before a call is the plan of the command the
-// group's head names, and goes under the head with it.
+// already show), or a step that says more than its plan. A step that is nothing but the
+// `Next:` line the prompt asks for before a call is that command's plan, so its round is
+// taken into the stretch.
 const drawsPart = (p: unknown) => {
   const part = p as TurnPart | null;
   if (!part || typeof part !== 'object') return false;
@@ -63,8 +65,8 @@ export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
         return;
       }
       close();
-      // A silent round just before the first command is the group's too: the head
-      // takes the place of all of them.
+      // A silent round just before the first command is the group's too: the stretch
+      // draws none of the rounds it takes in.
       const before = passable(drawn[i - 1]) ? [i - 1] : [];
       cur = { g: { head: i, members: [i], hidden: before }, last: rec, between: [] };
       return;
@@ -76,10 +78,12 @@ export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
   return groups;
 }
 
-// The text is drawn straight into chat rows (never through `frameView`, which
+// The spans this returns are chat-row spans (never through `frameView`, which
 // sanitizes what it frames) — `sanitizeViewText` here is the same defence in depth,
 // against a command line embedded verbatim from the tool's own data. The success
-// mark is `✓` in the `ok` colour, same as a block's own tail (console-view.ts).
+// mark is `✓` in the `ok` colour, same as a block's own tail (console-view.ts). No row
+// draws this any more: the chat's stretch is its activity summary line, and this helper
+// stays with `viewGroups` for the module's own tests.
 export function groupHeadText(recs: ViewRecord[], now: number): { text: string; color?: 'warn' | 'ok' }[] {
   const n = recs.length;
   const running = recs.find((r) => r.phase === 'live');

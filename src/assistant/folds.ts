@@ -12,9 +12,11 @@
 //
 //   - a click toggles THAT block and nothing else, so opening one command's output
 //     never turns into a sticky "expand mode" that brings the verbosity back;
-//   - the key is the master switch and CLEARS the exceptions: with anything folded it
-//     opens everything, pressed again it closes everything. After it the screen is
-//     uniformly one or the other, so there is always a way back to a known state;
+//   - the key is the master switch, and it works ONE level at a time (`nextFoldLevel`,
+//     `src/views/modals.ts`): with anything folded it opens the next level — every
+//     stretch, then its records, then their bodies — and with nothing folded it closes
+//     everything. Opening the stretches clears the exceptions; opening the records adds
+//     theirs, so there is always a way back to a known state;
 //   - a block that did not exist yet follows the global state: with everything open,
 //     the next turn's tool calls and command output arrive open.
 //
@@ -45,19 +47,20 @@ export function toggleFold(state: FoldState, id: string): FoldState {
   return { open: state.open, except };
 }
 
-// The key: anything folded → open everything; nothing folded → close everything. The
-// exceptions go either way, which is what makes the result a state a person can see
-// the whole of.
+// The whole-way key: anything folded → open everything; nothing folded → close
+// everything. The exceptions go either way, which is what makes the result a state a
+// person can see the whole of. The chat's `^o` no longer goes this way — it opens one
+// level per press (`nextFoldLevel`) — so what reads this today is `folds.test.ts`.
 export function flipFolds(state: FoldState): FoldState {
   return { open: !state.open || state.except.size > 0, except: new Set() };
 }
 
 // A block that does NOT follow the global state: it stays folded until a click opens
-// it, and the key that clears the exceptions puts it back. Exactly one block is like
-// this — the earlier calls of an open tool trail. The trail is capped because sixty
-// dim lines are a sheet of grey with the end of the turn lost in the middle of it, and
-// a key meaning "open everything" is asking for the trail, not for all sixty rows of
-// it. Whoever wants them clicks the line that stands for them.
+// it, and the key that clears the exceptions puts it back. Two blocks are like this —
+// the earlier calls of an open tool trail and a stretch's record bodies. The trail is
+// capped because sixty dim lines are a sheet of grey with the end of the turn lost in
+// the middle of it, and a key meaning "open everything" is asking for the trail, not for
+// all sixty rows of it. Whoever wants them clicks the line that stands for them.
 export function isClicked(state: FoldState, id: string): boolean {
   return state.except.has(id);
 }
