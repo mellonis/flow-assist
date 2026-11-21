@@ -117,27 +117,34 @@ test('step: a run folds into ONE row where it began — under the diff it follow
   expect(answerMarks(ui)).toBe(0);
   model.release();
   await settle(20);
-  // It carried a call: it is a run of one now, on the same row — no count.
-  expect(rowOf(ui, '▸ I will change b to 42.')).toBe(first);
-  expect(rows(ui)[first]).not.toContain('steps)');
+  // It carried a call: the stretch stands for it on the same row, and its run is one
+  // line with no count — only a run of several steps says how many.
+  expect(rowOf(ui, '+ 1 tool')).toBe(first);
+  await click(ui, first);
+  const oneStep = rows(ui)[rowOf(ui, '▸ I will change b to 42.')] ?? '';
+  expect(oneStep).toContain('▸ I will change b to 42.');
+  expect(oneStep).not.toContain('step');
   const diff = rowOf(ui, '✎ clone/app.ts');
   expect(diff).toBeGreaterThan(first);
   const second = rowOf(ui, 'Let me check the rest');
   expect(second).toBeGreaterThan(diff);
   model.release();
   await settle(20);
-  // Two steps with nothing between them are one run: its row stands where the run
-  // began, says the newest step and how many there are.
-  const run = rowOf(ui, 'All clear, nothing else uses b.');
+  // Two steps with nothing between them are one run: the stretch stands where the run
+  // began, and opened, the run's own row says the newest step and how many there are.
+  const run = rowOf(ui, '+ 2 tools');
   expect(run).toBe(second);
-  expect(rows(ui)[run]).toContain('▸ All clear, nothing else uses b.  (2 steps)');
+  await click(ui, run);
+  expect(rows(ui)[run]).toContain('▾ + 2 tools');
+  expect(rowOf(ui, '▸ All clear, nothing else uses b.  (2 steps)')).toBe(run + 1);
   expect(ui.backend.lastFrame).not.toContain('Let me check the rest');
   // Nothing above it moved.
-  expect(rowOf(ui, '▸ I will change b to 42.')).toBe(first);
+  expect(rowOf(ui, '+ 1 tool')).toBe(first);
   expect(rowOf(ui, '✎ clone/app.ts')).toBe(diff);
   model.release();
   await settle(20);
-  expect(rowOf(ui, '(2 steps)')).toBe(run);
+  // The stretch opened a moment ago stays open, the run's row with it.
+  expect(rowOf(ui, '▸ All clear, nothing else uses b.  (2 steps)')).toBe(run + 1);
   expect(rowOf(ui, 'Done: b is now 42.')).toBeGreaterThan(run);
   expect(cellOn(ui, 'Done: b is now').dim).toBeFalsy();
   ui.app.unmount();
@@ -176,6 +183,8 @@ test('a round whose text and tool call arrive in ONE chunk keeps its text — an
   // Which rounds survive must not depend on how the network cuts the stream: read
   // before its own state update has run, a round would be lost, and the NEXT one
   // taken for the step it had been.
+  expect(ui.backend.lastFrame).toContain('▸ + 1 tool');
+  await click(ui, rowOf(ui, '▸ + 1 tool'));
   expect(ui.backend.lastFrame).toContain('▸ I will look in the notebook now.');
   expect(rowOf(ui, 'Three entries.')).toBeGreaterThan(rowOf(ui, 'I will look in the notebook now.'));
   expect(rows(ui)[rowOf(ui, 'Three entries.')]).toMatch(/│ ƒ Three entries\./);
@@ -198,7 +207,10 @@ test('a Next: line is its step without the token — streaming, folded, opened a
   model.release();
   await settle(20);
   seen.push(ui.backend.lastFrame);
-  // The run's row says the newest step; opened, both are there, token-less.
+  // Opened, the run's row says the newest step; opened further, both are there,
+  // token-less.
+  expect(ui.backend.lastFrame).toContain('+ 2 tools');
+  await click(ui, rowOf(ui, '+ 2 tools'));
   expect(ui.backend.lastFrame).toContain('▸ The notebook has a header.  (2 steps)');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
@@ -219,6 +231,8 @@ test('a Next: line is its step without the token — streaming, folded, opened a
 test('a step that is only its Next: line folds to that sentence', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, [[{ text: 'Next: read app.ts' }, { tool: 'datetime', args: {} }], [{ text: 'Read.' }]]);
+  expect(ui.backend.lastFrame).toContain('▸ + 1 tool');
+  await click(ui, rowOf(ui, '▸ + 1 tool'));
   expect(ui.backend.lastFrame).toContain('▸ read app.ts');
   expect(ui.backend.lastFrame).not.toContain('Next:');
   ui.app.unmount();
@@ -243,20 +257,24 @@ const TWO_RUNS: Turn[] = [
 test('two runs split by a diff fold on their own: a click opens one, ^o opens both, and back', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, TWO_RUNS);
-  const one = rowOf(ui, '▸ Now I change it.  (2 steps)');
-  const two = rowOf(ui, '▸ Then the tests.  (2 steps)');
+  const stretches = rows(ui).map((r, i) => (r.includes('+ 2 tools') ? i : -1)).filter((i) => i >= 0);
+  expect(stretches).toHaveLength(2);
+  const [one, two] = stretches;
+  const diff = rowOf(ui, '✎ clone/app.ts');
   expect(one).toBeGreaterThan(-1);
-  expect(two).toBeGreaterThan(one);
-  expect(one).toBeGreaterThan(-1);
-  expect(rowOf(ui, '✎ clone/app.ts')).toBeGreaterThan(one);
-  expect(rowOf(ui, '✎ clone/app.ts')).toBeLessThan(two);
-  expect(rowOf(ui, '✎ clone/app.test.ts')).toBeGreaterThan(two);
+  expect(two).toBeGreaterThan(one!);
+  expect(diff).toBeGreaterThan(one!);
+  expect(diff).toBeLessThan(two!);
+  expect(rowOf(ui, '✎ clone/app.test.ts')).toBeGreaterThan(two!);
 
-  // A click on the second run opens it alone, in place: its steps in full, dim.
-  await click(ui, two);
-  expect(ui.backend.lastFrame).toContain('▸ Now I change it.  (2 steps)');
+  // A click on the second stretch opens its run's row alone, in place; a click on that
+  // row opens its steps in full, dim.
+  await click(ui, two!);
+  expect(ui.backend.lastFrame).toContain('▸ Then the tests.  (2 steps)');
   expect(ui.backend.lastFrame).not.toContain('First I read it.');
-  expect(rowOf(ui, 'Now I read it again.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
+  await click(ui, rowOf(ui, '▸ Then the tests.  (2 steps)'));
+  expect(ui.backend.lastFrame).not.toContain('First I read it.');
+  expect(rowOf(ui, 'Now I read it again.')).toBeGreaterThan(diff);
   expect(rowOf(ui, 'Then the tests.')).toBeGreaterThan(rowOf(ui, 'Now I read it again.'));
   expect(cellOn(ui, 'Now I read it again.').dim).toBe(true);
   // A click on any of its rows folds it back.
@@ -272,17 +290,22 @@ test('two runs split by a diff fold on their own: a click opens one, ^o opens bo
   for (const s of ['First I read it.', 'Now I change it.', 'Now I read it again.', 'Then the tests.']) expect(frame).toContain(s);
   expect(rowOf(ui, 'Now I change it.')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
   expect(rowOf(ui, 'Now I read it again.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
-  // …and again: every run folded.
+  // …and again: every stretch folded.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
-  expect(times(ui.backend.lastFrame, '(2 steps)')).toBe(2);
+  expect(times(ui.backend.lastFrame, '+ 2 tools')).toBe(2);
   ui.app.unmount();
 });
 
 test('a drag copies the answer, never a run\'s row', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, TWO_RUNS);
-  const from = rowOf(ui, 'Then the tests.');
+  // The last run's own row is visible once its stretch is opened — the drag starts on
+  // that row, so the assertion below is about a row really on screen.
+  const last = rows(ui).map((r, i) => (r.includes('+ 2 tools') ? i : -1)).filter((i) => i >= 0).at(-1)!;
+  await click(ui, last);
+  const from = rowOf(ui, '▸ Then the tests.  (2 steps)');
+  expect(from).toBeGreaterThan(-1);
   const to = rowOf(ui, 'Done.');
   ui.backend.mouse('down', 2, from);
   for (let y = from; y <= to; y++) ui.backend.mouse('drag', 90, y);
@@ -308,8 +331,11 @@ const WITH_READS: Turn[] = [
 test('calls no step made stand between the runs, in order; a click opens one, ^o all', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, WITH_READS);
+  // One stretch holds the runs and the calls no step made, in the order they happened.
+  expect(rowOf(ui, '+ 5 tools')).toBeGreaterThan(-1);
+  await click(ui, rowOf(ui, '+ 5 tools'));
   const run = rowOf(ui, '▸ Then I look again.  (2 steps)');
-  const reads = rowOf(ui, '▸ 2 tools: config_schema ×2');
+  const reads = rows(ui).findIndex((r) => r.includes('⌁ config_schema · ok'));
   const change = rowOf(ui, '▸ Now I change it.');
   expect(run).toBeGreaterThan(-1);
   expect(reads).toBeGreaterThan(run);
@@ -317,24 +343,27 @@ test('calls no step made stand between the runs, in order; a click opens one, ^o
   expect(rowOf(ui, '✎ clone/app.ts')).toBeGreaterThan(change);
   expect(rowOf(ui, 'Done.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
   // The trail sits where the call was made, never under the answer.
-  expect(times(ui.backend.lastFrame, 'tools:')).toBe(1);
+  expect(times(ui.backend.lastFrame, '⌁ config_schema · ok')).toBe(2);
 
-  // A click on the calls opens them alone.
+  // A click on a call opens that record alone: what it answered, under it, and no
+  // other body out.
   await click(ui, reads);
-  expect(ui.backend.lastFrame).toMatch(/▸ config_schema ×2 → ok/);
+  expect(times(ui.backend.lastFrame, '→ ok')).toBe(1);
   expect(ui.backend.lastFrame).toContain('(2 steps)');
-  expect(ui.backend.lastFrame).not.toMatch(/▸ datetime → ok/);
-  await click(ui, rowOf(ui, 'config_schema ×2 → ok'));
-  expect(ui.backend.lastFrame).not.toMatch(/config_schema ×2 → ok/);
+  await click(ui, rowOf(ui, '⌁ config_schema · ok'));
+  expect(ui.backend.lastFrame).not.toMatch(/→ ok/);
 
-  // ^o: every run with its steps' own calls, and every trail.
+  // ^o: every record's line, then every record's body — the runs' own calls included.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   const all = ui.backend.lastFrame;
-  expect(all).toMatch(/▸ config_schema ×2 → ok/);
-  expect(times(all, 'datetime → ok')).toBe(2);
-  expect(rowOf(ui, 'First I look.')).toBeLessThan(rowOf(ui, 'config_schema ×2 → ok'));
-  expect(rowOf(ui, 'edit_app')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
+  expect(times(all, '⌁ datetime · ok')).toBe(2);
+  expect(rowOf(ui, 'First I look.')).toBeLessThan(rowOf(ui, '⌁ config_schema · ok'));
+  expect(rowOf(ui, '⌁ edit_app · ok')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(times(ui.backend.lastFrame, '→ ok')).toBe(5);
+  expect(ui.backend.lastFrame).toContain('→ ok — edited');
   ui.app.unmount();
 });
 
@@ -367,7 +396,7 @@ test('a config that still says fold or hidden reads as step; /clear comes back t
   for (const old of ['fold', 'hidden']) {
     const model = new ScriptedModel();
     const ui = await ask(model, TWO_RUNS, { plugins: { assistant: { notes: old } } });
-    expect(ui.backend.lastFrame).toContain('▸ Then the tests.  (2 steps)');
+    expect(ui.backend.lastFrame).toContain('▸ + 2 tools');
     ui.app.unmount();
   }
   const model = new ScriptedModel();
@@ -376,7 +405,7 @@ test('a config that still says fold or hidden reads as step; /clear comes back t
   await ui.type('/notes step');
   await ui.press('return');
   await settle(6);
-  expect(ui.backend.lastFrame).toContain('(2 steps)');
+  expect(ui.backend.lastFrame).toContain('+ 2 tools');
   await ui.type('/clear');
   await ui.press('return');
   await settle(10);
@@ -387,11 +416,12 @@ test('a config that still says fold or hidden reads as step; /clear comes back t
   // Back to what the config asks for — the mode was this conversation's.
   expect(ui.backend.lastFrame).toContain('Then the tests.');
   expect(ui.backend.lastFrame).not.toContain('(2 steps)');
+  expect(ui.backend.lastFrame).not.toContain('+ 2 tools');
   // /resume opens another conversation, and it brings the config's answer with it.
   await ui.type('/notes step');
   await ui.press('return');
   await settle(6);
-  expect(ui.backend.lastFrame).toContain('(2 steps)');
+  expect(ui.backend.lastFrame).toContain('+ 2 tools');
   await ui.type('/resume 2');
   await ui.press('return');
   await settle(10);
@@ -433,7 +463,7 @@ test('Esc on a round that began with its Next: plan keeps it as a step — the t
 test('a folded run says a call in it failed', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, [[{ text: 'I try the tool.' }, { tool: 'no_such_tool', args: {} }], [{ text: 'It is not there.' }]]);
-  const row = rows(ui)[rowOf(ui, '▸ I try the tool.')] ?? '';
+  const row = rows(ui)[rowOf(ui, '+ 1 tool')] ?? '';
   expect(row).toContain('✗');
   ui.app.unmount();
 });
@@ -530,17 +560,23 @@ test('a session saved before the time order still renders — and a malformed me
   const text = rowOf(ui, '▸ I looked at the old file.');
   expect(text).toBeGreaterThan(-1);
   expect(rowOf(ui, '✎ clone/old.ts')).toBeGreaterThan(text);
-  // The trail that was drawn under the answer is one line just before it — once.
-  const trail = rowOf(ui, '▸ 2 tools');
+  // The trail that was drawn under the answer is one stretch's line just before it —
+  // once; its calls are the members opened under it.
+  const trail = rowOf(ui, '+ 1 edit, 1 read');
   expect(trail).toBeGreaterThan(rowOf(ui, '✎ clone/old.ts'));
   expect(rowOf(ui, 'Old answer.')).toBeGreaterThan(trail);
+  await click(ui, trail);
   expect(times(ui.backend.lastFrame, 'read_file')).toBe(1);
   expect(ui.backend.lastFrame).not.toContain('Next:');
   expect(ui.backend.lastFrame).toContain('Second answer.');
-  const step3 = rowOf(ui, '▸ Third step.');
-  const trail3 = rowOf(ui, '▸ 1 tool: list_dir');
-  expect(step3).toBeGreaterThan(-1);
-  expect(trail3).toBeGreaterThan(step3);
+  const third = rowOf(ui, 'third question');
+  const step3 = rows(ui).findIndex((r, i) => i > third && r.includes('+ 1 read'));
+  expect(step3).toBeGreaterThan(third);
+  await click(ui, step3);
+  const run3 = rowOf(ui, '▸ Third step.');
+  const trail3 = rowOf(ui, '⌁ list_dir · ok');
+  expect(run3).toBeGreaterThan(-1);
+  expect(trail3).toBeGreaterThan(run3);
   expect(rowOf(ui, 'Third answer.')).toBeGreaterThan(trail3);
   expect(ui.backend.lastFrame).not.toContain('run_command');
   ui.app.unmount();

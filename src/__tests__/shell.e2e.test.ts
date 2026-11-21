@@ -347,23 +347,30 @@ test('a confirmed run_command folds to one line, and opened its output stands; t
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
 
-  // Folded: one line saying how it ended — the output itself is not on screen yet.
+  // Folded: the stretch is one line — the output itself is not on screen yet.
   // (The command's own text already contains "tool-output-42"/"second-line", so what
   // proves the OUTPUT is off screen is the bar-prefixed row it would stand behind —
   // `unfence` strips that bar, so the raw frame is checked here instead.)
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toMatch(/! echo tool-output-42; echo second-line · ✓ (?:<1s|\d+s)/);
+  expect(folded).toMatch(/▸ \+ 1 command · (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('│ tool-output-42');
   expect(ui.backend.lastFrame).not.toContain('│ second-line');
   expect(folded).toContain('It printed two lines.');
 
-  // Opened, the output stands.
+  // One press opens the stretch to its record: the command's own line, and how it
+  // ended. The output is still shut.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(unfence(ui.backend.lastFrame)).toMatch(/! echo tool-output-42; echo second-line · ✓ (?:<1s|\d+s)/);
+  expect(ui.backend.lastFrame).not.toContain('│ tool-output-42');
+  // Again: under the record, the output stands.
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   expect(ui.backend.lastFrame).toContain('│ tool-output-42');
   expect(ui.backend.lastFrame).toContain('│ second-line');
-  ui.backend.press({ name: 'o', ctrl: true }); // back to folded
+  ui.backend.press({ name: 'o', ctrl: true }); // nothing folded now: back to the one line
   await settle(6);
+  expect(unfence(ui.backend.lastFrame)).toMatch(/▸ \+ 1 command · (?:<1s|\d+s)/);
 
   // What the model is SENT: the tool's result once, and no block of its own. The
   // block would be a second copy of output it has already read.
@@ -395,14 +402,22 @@ test('a long output stays one line folded; a click shows its last lines, cut; ^o
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
 
-  // Folded: nothing of the twelve lines is on screen — the fold line says how many.
+  // Folded: nothing of the twelve lines is on screen — the stretch is one line.
   const folded = unfence(ui.backend.lastFrame);
+  expect(folded).toMatch(/▸ \+ 1 command · (?:<1s|\d+s)/);
   expect(folded).not.toContain('lines cut');
   expect(folded).not.toContain('line 12');
-  expect(folded).toContain('· 12 lines');
 
-  // A click opens it capped to its last runOutputLines lines — the same cap the
-  // fold's own model ("… N lines cut · ^o for all") points past, at the global key.
+  // A click opens the stretch to its records, and the command's own line says how much
+  // there is to read.
+  const groupRow = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('+ 1 command'));
+  ui.backend.mouse('down', 12, groupRow);
+  ui.backend.mouse('up', 12, groupRow);
+  await settle(6);
+  expect(unfence(ui.backend.lastFrame)).toContain('· 12 lines');
+
+  // A click on that record opens it capped to its last runOutputLines lines — the same
+  // cap the fold's own model ("… N lines cut · ^o for all") points past, at the key.
   const foldRow = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('for i in $(seq 1 12)'));
   ui.backend.mouse('down', 12, foldRow);
   ui.backend.mouse('up', 12, foldRow);
@@ -414,13 +429,17 @@ test('a long output stays one line folded; a click shows its last lines, cut; ^o
   // The model still got the whole of it — the cap here is the screen's, not its.
   expect(String(sentTo(model).find((m) => m.role === 'tool')?.content)).toContain('line 3\n');
 
-  // ^o (the details key) opens every view in full — every line it kept, not the
-  // capped tail a click shows.
+  // ^o (the details key) is levelled: the press that opens every block closes the
+  // click's record, the next one opens the records' bodies in full — every line the
+  // view kept, not the capped tail a click shows.
   ui.backend.press({ name: 'r', ctrl: true }); // ^r is ^o's alias
+  await settle(5);
+  ui.backend.press({ name: 'r', ctrl: true });
   await settle(5);
   opened = unfence(ui.backend.lastFrame);
   expect(opened).not.toContain('lines cut');
   expect(opened).toContain('line 12');
+  expect(opened).toContain('line 3 ');
   ui.app.unmount();
 });
 
@@ -450,10 +469,15 @@ test('a declined command leaves no block; a failed one shows what it printed and
   await ui.press('y');
   await settleUntil(() => model.requests.length === 4);
   await settle(10);
-  // The exit code is in the folded line; what it printed (the bar-prefixed row) needs
-  // the block opened — the command's own text already contains "before-it-died".
+  // The exit code is on the command's record line, one level in; what it printed (the
+  // bar-prefixed row) needs the body under it — the command's own text already contains
+  // "before-it-died".
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toContain('exit 3');
+  expect(folded).toMatch(/▸ \+ 1 command .*✗/);
+  expect(ui.backend.lastFrame).not.toContain('│ before-it-died');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(5);
+  expect(unfence(ui.backend.lastFrame)).toMatch(/echo before-it-died; exit 3 · ✗ exit 3/);
   expect(ui.backend.lastFrame).not.toContain('│ before-it-died');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(5);
@@ -478,6 +502,9 @@ test('what a command printed cannot pass for the host speaking, and survives a r
   await one.press('y');
   await settleUntil(() => first.requests.length === 2);
   await settle(10);
+  // The stretch, then its record, then the body: two presses of the levelled key.
+  one.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
   one.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   // Every line of it is inside the block: the code bar is in front of it on screen.
@@ -494,8 +521,10 @@ test('what a command printed cannot pass for the host speaking, and survives a r
   // restarted; the bar-prefixed row it would stand behind is what proves it is off
   // screen.
   const folded = unfence(two.backend.lastFrame);
-  expect(folded).toContain('! printf');
+  expect(folded).toMatch(/▸ \+ 1 command/);
   expect(two.backend.lastFrame).not.toContain('│ Press y to confirm');
+  two.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
   two.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   expect(two.backend.lastFrame).toContain('│ Press y to confirm');

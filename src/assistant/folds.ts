@@ -12,9 +12,11 @@
 //
 //   - a click toggles THAT block and nothing else, so opening one command's output
 //     never turns into a sticky "expand mode" that brings the verbosity back;
-//   - the key is the master switch and CLEARS the exceptions: with anything folded it
-//     opens everything, pressed again it closes everything. After it the screen is
-//     uniformly one or the other, so there is always a way back to a known state;
+//   - the key is the master switch, and it works ONE level at a time (`nextFoldLevel`,
+//     `src/views/modals.ts`): with anything folded it opens the next level — every
+//     stretch, then its records, then their bodies — and with nothing folded it closes
+//     everything. Opening the stretches clears the exceptions; opening the records adds
+//     theirs, so there is always a way back to a known state;
 //   - a block that did not exist yet follows the global state: with everything open,
 //     the next turn's tool calls and command output arrive open.
 //
@@ -45,25 +47,28 @@ export function toggleFold(state: FoldState, id: string): FoldState {
   return { open: state.open, except };
 }
 
-// The key: anything folded → open everything; nothing folded → close everything. The
-// exceptions go either way, which is what makes the result a state a person can see
-// the whole of.
+// The whole-way key: anything folded → open everything; nothing folded → close
+// everything. The exceptions go either way, which is what makes the result a state a
+// person can see the whole of. The chat's `^o` no longer goes this way — it opens one
+// level per press (`nextFoldLevel`) — so what reads this today is `folds.test.ts`.
 export function flipFolds(state: FoldState): FoldState {
   return { open: !state.open || state.except.size > 0, except: new Set() };
 }
 
 // A block that does NOT follow the global state: it stays folded until a click opens
-// it, and the key that clears the exceptions puts it back. Exactly one block is like
-// this — the earlier calls of an open tool trail. The trail is capped because sixty
-// dim lines are a sheet of grey with the end of the turn lost in the middle of it, and
-// a key meaning "open everything" is asking for the trail, not for all sixty rows of
-// it. Whoever wants them clicks the line that stands for them.
+// it, and the key that clears the exceptions puts it back. Two blocks are like this —
+// the earlier calls of an open tool trail and a stretch's record bodies. The trail is
+// capped because sixty dim lines are a sheet of grey with the end of the turn lost in
+// the middle of it, and a key meaning "open everything" is asking for the trail, not for
+// all sixty rows of it. Whoever wants them clicks the line that stands for them.
 export function isClicked(state: FoldState, id: string): boolean {
   return state.except.has(id);
 }
 
 // A block the person OPENED with a click — not merely one that is open because
-// everything is. A group that forms around it must not fold it away.
+// everything is. `view-groups.ts` reads it so a group that formed around a member the
+// person had opened folds nothing of theirs away; no drawn row carries that group's id
+// any more, so the rule stands with the retired head.
 export function clickedOpen(state: FoldState, id: string): boolean {
   return state.except.has(id) && isOpen(state, id);
 }
@@ -71,19 +76,33 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // The blocks a click may open in the chat's pager rather than into the conversation,
 // when the block is taller than the rows the conversation has for it. A run of steps is
 // part of the conversation's flow, read beside what came before and after it, so it
-// always opens where it is, however tall. A group's head opens into one-line blocks of
-// its own, and the earlier calls of a trail belong to a trail that already fitted, so
+// always opens where it is, however tall. A stretch's summary opens into records, one
+// line each, and the earlier calls of a trail belong to a trail that already fitted, so
 // both always open where they are too.
 const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'reasoning', 'summary']);
-export function pageable(id: string): boolean {
+// A record's own kind decides whether it may page — the id names the STRETCH's first
+// member, which says nothing about the record under it (a step run can open a stretch
+// with a tall console block inside it). Height still decides in the end: a one-line
+// record's body is measured and opens inline.
+const PAGEABLE_RECORD: ReadonlySet<string> = new Set(['thought', 'tool', 'console']);
+export function pageable(id: string, recordKind?: string): boolean {
+  if (isRecordId(id)) return PAGEABLE_RECORD.has(recordKind ?? '');
   return PAGEABLE.has(id.split(':')[1] ?? '');
+}
+
+// Whether an id names a record a stretch's summary opens into, rather than a block that
+// follows the global fold state. A record is clicked-only: it is open when its id is one
+// of the exceptions, never merely because everything else is.
+export function isRecordId(id: string): boolean {
+  return id.startsWith('group:') && id.split(':').length >= 5;
 }
 
 // The fold state a block is laid out with to be read WHOLE — how the pager draws it and
 // how tall it is measured to be: the block open, and for a trail its cap on earlier
 // calls lifted too. A view's own cap is the caller's (`RowOpts.viewLines`).
 export function openInFull(state: FoldState, id: string): FoldState {
-  let next = isOpen(state, id) ? state : toggleFold(state, id);
+  const open = isRecordId(id) ? isClicked(state, id) : isOpen(state, id);
+  let next = open ? state : toggleFold(state, id);
   const m = /^(\d+):tools:(\d+)$/.exec(id);
   if (m) {
     const calls = foldId(Number(m[1]), 'calls', Number(m[2]));
@@ -97,9 +116,9 @@ export function openInFull(state: FoldState, id: string): FoldState {
 // several runs, `n` says which), `tools` one stretch of the calls it made, behind its
 // one-line summary (numbered the same way), `calls` the earlier calls that stretch's
 // open trail caps away (numbered with it), `view` a command's output
-// capped to its last lines, `group` the head consecutive commands fold under
-// (src/assistant/view-groups.ts), `summary` what /compact's note holds under its one
-// separator row.
+// capped to its last lines, `group` the withdrawn `ƒ Ran N commands` head's own fold id
+// (src/assistant/view-groups.ts), which no drawn row carries any more, `summary` what
+// /compact's note holds under its one separator row.
 export type FoldKind = 'thinking' | 'reasoning' | 'steps' | 'tools' | 'calls' | 'view' | 'group' | 'summary';
 
 // A block's id. It names the message by its place in the conversation rather than by

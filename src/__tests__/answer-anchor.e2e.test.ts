@@ -266,8 +266,9 @@ test('a session resumed with a long last answer opens at its end — no answer i
 });
 
 // The list holds a row by keeping the box's own scroll position once it is off the
-// end; a round that turned out to carry a call folds its rows into one step row, and
-// the box keeps that position through the shrink rather than going back to the end.
+// end; a round that turned out to carry a call folds its rows into the stretch's one
+// summary line, and the box keeps that position through the shrink rather than going
+// back to the end.
 test('an anchored round that turns into a step leaves the reader where the turn began', async () => {
   const model = new ScriptedModel();
   model.script(
@@ -284,9 +285,9 @@ test('an anchored round that turns into a step leaves the reader where the turn 
   await settle(20);
   model.release();
   await settle(20);
+  // The round is one summary line where it began: the reader's row is that line.
   const top = topRow(ui.backend.lastFrame, 'go');
-  expect(top).toContain('▸');
-  expect(top).toContain('round one');
+  expect(top).toContain('▸ + 1 tool');
   expect(ui.backend.lastFrame).toContain('round two 01');
   expect(ui.backend.lastFrame).not.toContain('round two 40');
   ui.app.unmount();

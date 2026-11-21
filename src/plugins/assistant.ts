@@ -40,10 +40,10 @@ import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js
 import { setConfigValue } from '../config/load.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentsPanelRows, stopQuestion } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
-import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
+import { allFolded, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, canonicalBinding, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
@@ -725,12 +725,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             host.notify();
           };
-          // The key: everything at once, and the exceptions go with it. There is no one
-          // block to anchor on, so the person keeps the text they were reading.
-          const flipAllFolds = () => applyFolds(flipFolds(foldsRef.current), null);
+          // The key: one level at a time, from wherever the screen is — the stretches,
+          // then their records' bodies, then it all folds back (`nextFoldLevel`). There
+          // is no one block to anchor on, so the person keeps the text they were reading.
+          const flipAllFolds = () => applyFolds(nextFoldLevel(foldsRef.current, chatRows(drawn(), rowOpts(foldsRef.current))), null);
           // Which block a click landed on — null for a cell that is not a fold line and
           // not inside an open block, which is most of the screen and does nothing.
-          const foldAt = (x: number, y: number): string | null => {
+          const foldRow = (x: number, y: number) => {
             const v = viewportRef.current;
             if (!v || x < v.left || x >= v.left + v.width) return null;
             const line = y - v.top;
@@ -739,7 +740,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // pin, not on the row beneath it.
             if (v.pinned && line === 0) return null;
             const rows = chatRows(drawn(), rowOpts(foldsRef.current));
-            return rows[v.scrollTop + line]?.fold ?? null;
+            return rows[v.scrollTop + line] ?? null;
           };
           // A click: a press and a release on the SAME cell, with no drag between them
           // and inside the quarter second a finger takes. Anything else is a drag, and
@@ -754,11 +755,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const down = pressRef.current;
             pressRef.current = null;
             if (!down || down.x !== Number(key.x) || down.y !== Number(key.y) || Date.now() - down.at > CLICK_MS) return false;
-            const id = foldAt(down.x, down.y);
+            const row = foldRow(down.x, down.y);
+            const id = row?.fold;
             if (id == null) return false;
-            // A group's head is never a plain toggle: whether it reads open depends
-            // on its members too (src/assistant/view-groups.ts), so `toggleGroup`
-            // decides the whole group's next state, not `id` alone.
+            // The retired head's click is never a plain toggle: whether its group read
+            // open depends on its members too (src/assistant/view-groups.ts), so
+            // `toggleGroup` decides the whole group's next state, not `id` alone.
+            // Unreachable while no drawn row carries a `…:group` id — the chat draws a
+            // stretch as its activity group — and kept because the plan keeps `viewGroups`.
             if (id.endsWith(':group')) {
               const g = viewGroupFor(drawn(), rowOpts(foldsRef.current), id);
               if (!g) return false;
@@ -767,14 +771,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               return true;
             }
             // Which way this click goes: for a block that follows the global state,
-            // away from it; for the trail's cap, which never does, simply on.
-            const opening = id.endsWith(':calls') ? !isClicked(foldsRef.current, id) : !isOpen(foldsRef.current, id);
+            // away from it; for the trail's cap, which never does, and for a stretch's
+            // record, which is its own level inside the stretch, simply on.
+            const opensByClick = id.endsWith(':calls') || !!row?.record;
+            const opening = opensByClick ? !isClicked(foldsRef.current, id) : !isOpen(foldsRef.current, id);
             // A block taller than the rows the conversation has for it — measured whole,
             // as the pager would show it, and at the conversation's own width, since the
             // question is whether it fits THERE — opens in the pager and stays folded
             // here. Below that it opens inline. Never while a y/n or a question waits:
             // that is answered in the conversation, and a pager would cover it.
-            if (opening && pageable(id) && !conv.confirm && !conv.question) {
+            if (opening && pageable(id, row?.record?.kind) && !conv.confirm && !conv.question) {
               const v = viewportRef.current;
               const whole = blockRows(drawn(), { ...rowOpts(openInFull(foldsRef.current, id)), viewLines: VIEW_CAPS.lines }, id).length;
               if (v && whole > roomForBlock(v.height)) { setPager(id); host.notify(); return true; }
@@ -3079,7 +3085,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return true;
                 }
                 if (key.name === 'escape') endWatch(true);
-                else if (isKey(host.keys.details ?? [], key)) { setWatchFolds(flipFolds(watchFoldsRef.current)); host.notify(); }
+                // One level at a time, as in the conversation: the child's stretches, then
+                // their records' bodies, then it all folds back.
+                else if (isKey(host.keys.details ?? [], key)) {
+                  const rows = watchSnap ? chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], { ...rowOpts(watchFoldsRef.current), askPending: !!watched?.question }) : [];
+                  setWatchFolds(nextFoldLevel(watchFoldsRef.current, rows));
+                  host.notify();
+                }
                 else if (isKey(host.keys.toEnd ?? [], key)) watchToEndRef.current?.();
                 else if (key.name === 'x' && !key.ctrl && !key.meta && w.ended === null && !asked) { setWatch({ ...w, ask: true }); host.notify(); }
                 return true;

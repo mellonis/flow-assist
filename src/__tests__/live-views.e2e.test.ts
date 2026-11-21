@@ -17,6 +17,14 @@ const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < 
 const rowOf = (ui: Ui, needle: string) => ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
 const click = async (ui: Ui, y: number, x = 12) => { ui.backend.mouse('down', x, y); ui.backend.mouse('up', x, y); await settle(6); };
 
+// A command's block is drawn inside the stretch's one line: opening the stretch —
+// `Running command…` while it runs, `+ N commands` once it ends — draws the block's
+// own line, which is what a click opens to its output.
+async function openStretch(ui: Ui) {
+  const at = ui.backend.lastFrame.split('\n').findIndex((r) => /(Running command…|\+ \d+ commands?)/.test(r));
+  if (at >= 0) await click(ui, at);
+}
+
 async function running(command: string) {
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command } }], [{ text: 'Done.' }]);
@@ -32,9 +40,13 @@ async function running(command: string) {
 
 test('the command is a line in the chat before it ends, and a click shows what it printed so far', async () => {
   const { ui } = await running('echo first; sleep 1.5; echo second');
+  // Folded while it runs: the stretch's line says what it waits on, never its counts.
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  expect(ui.backend.lastFrame).not.toContain('Done.');
+  // Opened, the command is a line in the chat before it ends.
+  await openStretch(ui);
   await settleUntil(() => rowOf(ui, 'echo first; sleep') >= 0);
   expect(rowOf(ui, 'echo first; sleep')).toBeGreaterThanOrEqual(0);
-  expect(ui.backend.lastFrame).not.toContain('Done.');
   expect(ui.backend.lastFrame).toMatch(/echo first; sleep 1\.5; echo second · (?:<1s|\d+s)/);
   await click(ui, rowOf(ui, 'echo first; sleep'));
   await settleUntil(() => ui.backend.lastFrame.includes('│ first'));
@@ -52,6 +64,12 @@ test('left folded, it ends folded — one line with its outcome', async () => {
   const { ui } = await running('echo hi; exit 3');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   expect(ui.backend.lastFrame).toContain('Done.');
+  // Folded, the stretch is one line with the command's outcome.
+  expect(ui.backend.lastFrame).toMatch(/\+ 1 command · (?:<1s|\d+s)/);
+  expect(ui.backend.lastFrame).toContain('✗');
+  expect(ui.backend.lastFrame).not.toContain('│ hi');
+  // Opened, the block's own line says how it ended, the exit code included.
+  await openStretch(ui);
   expect(ui.backend.lastFrame).toMatch(/echo hi; exit 3 · ✗ exit 3 · (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('│ hi');
   ui.app.unmount();
@@ -59,6 +77,9 @@ test('left folded, it ends folded — one line with its outcome', async () => {
 
 test('the clock moves while nothing is printed', async () => {
   const { ui } = await running('sleep 2.5');
+  // Opened, the command's own clock ticks there.
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  await openStretch(ui);
   await settleUntil(() => /sleep 2\.5 · <1s/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · <1s/);
   await settleUntil(() => /sleep 2\.5 · [12]s/.test(ui.backend.lastFrame));
@@ -68,10 +89,12 @@ test('the clock moves while nothing is printed', async () => {
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'), 1500);
   expect(ui.backend.lastFrame).toContain('Done.');
   ui.app.unmount();
-});
+}, 10_000);
 
 test('Esc stops it, and the block stays, saying so', async () => {
   const { ui } = await running('sleep 5');
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  await openStretch(ui);
   await settleUntil(() => rowOf(ui, 'sleep 5 ·') >= 0);
   expect(rowOf(ui, 'sleep 5 ·')).toBeGreaterThanOrEqual(0);
   await ui.press('escape');
@@ -116,10 +139,11 @@ test('two run_command calls in one turn never collide, even when the provider\'s
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   expect(ui.backend.lastFrame).toContain('Done.');
-  // Two consecutive commands fold under one head — open it to see both blocks
+  // Two consecutive commands are the stretch's one line — one level down, both blocks
   // stand: the second round's call never overwrote the first's.
-  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
-  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  expect(ui.backend.lastFrame).toMatch(/\+ 2 commands/);
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
+  await openStretch(ui);
   await settleUntil(() => /echo AAA-first · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo AAA-first · ✓/);
   expect(ui.backend.lastFrame).toMatch(/echo BBB-second · ✓/);
@@ -136,6 +160,8 @@ test('/clear during a running command: its eventual completion never lands in th
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  await openStretch(ui);
   await settleUntil(() => rowOf(ui, 'echo XYZ; sleep 1.5') >= 0);
   expect(rowOf(ui, 'echo XYZ; sleep 1.5')).toBeGreaterThanOrEqual(0);
   await ui.type('/clear');
@@ -170,7 +196,7 @@ test('the model is sent a !command\'s output as plain text, and never a view', a
   ui.app.unmount();
 });
 
-test('three commands in a row fold under one head, and open into their own blocks', async () => {
+test('three commands in a row fold into one line, and open into their own records', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ text: 'Next: one.\n' }, { tool: 'run_command', args: { command: 'echo one' } }],
@@ -193,11 +219,12 @@ test('three commands in a row fold under one head, and open into their own block
   }
   await settleUntil(() => ui.backend.lastFrame.includes('All set.'));
   expect(ui.backend.lastFrame).toContain('All set.');
-  expect(ui.backend.lastFrame).toMatch(/Ran 3 commands · ✓ (?:<1s|\d+s)/);
+  expect(ui.backend.lastFrame).toMatch(/\+ 3 commands/);
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
   expect(ui.backend.lastFrame).not.toContain('echo two ·');
-  // The head takes the place of every step line, the first one included.
+  // The stretch's line takes the place of every step line, the first one included.
   for (const step of ['one.', 'two.', 'three.']) expect(ui.backend.lastFrame).not.toContain(step);
-  await click(ui, rowOf(ui, 'Ran 3 commands'));
+  await openStretch(ui);
   for (const c of ['echo one ·', 'echo two ·', 'echo three ·']) expect(ui.backend.lastFrame).toContain(c);
   expect(ui.backend.lastFrame).not.toContain('one.');
   ui.app.unmount();
@@ -225,6 +252,9 @@ test('another tool between two commands keeps them apart', async () => {
   // Not `.not.toContain('commands ·')` — the footer's own `/ commands ·` hint
   // contains that substring on every frame, group or no group.
   expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
+  // One stretch holds both blocks and the tool between them; opened, each block stands
+  // on its own line, apart.
+  await click(ui, rowOf(ui, '+ 2 commands, 1 tool'));
   expect(ui.backend.lastFrame).toContain('echo a ·');
   expect(ui.backend.lastFrame).toContain('echo b ·');
   ui.app.unmount();
@@ -244,6 +274,8 @@ test('a command opened before a second one starts stays open inside the group', 
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  await openStretch(ui);
   await settleUntil(() => /echo first-out · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo first-out · ✓/);
   await click(ui, rowOf(ui, 'echo first-out ·'));
@@ -259,7 +291,7 @@ test('a command opened before a second one starts stays open inside the group', 
   ui.app.unmount();
 });
 
-test('a head click closes a group that is open only through a member, and a second click reopens it', async () => {
+test('the stretch of commands closes whole from its own line, and a second click reopens it', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'run_command', args: { command: 'echo left-out' } }],
@@ -273,11 +305,14 @@ test('a head click closes a group that is open only through a member, and a seco
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  // Open the stretch, then the lone command's record: its body is on the screen before
+  // the second command arrives. The stretch's id is derived from its first member's fold,
+  // so it does not move when the stretch grows: the line the person opened is the line
+  // that stands.
+  await openStretch(ui);
   await settleUntil(() => /echo left-out · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo left-out · ✓/);
-  // Open the lone command's block — no group exists yet (one member only) — before
-  // the second command arrives and the group forms around it: the group is then open
-  // only because THIS member was clicked, not because its own head id was.
   await click(ui, rowOf(ui, 'echo left-out ·'));
   await settleUntil(() => ui.backend.lastFrame.includes('│ left-out'));
   expect(ui.backend.lastFrame).toContain('│ left-out');
@@ -287,18 +322,18 @@ test('a head click closes a group that is open only through a member, and a seco
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Both ran.'));
   expect(ui.backend.lastFrame).toContain('Both ran.');
-  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
+  expect(ui.backend.lastFrame).toMatch(/\+ 2 commands/);
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
   expect(ui.backend.lastFrame).toContain('│ left-out');
-  // The head click must fold the WHOLE group, not just re-toggle its own (already
-  // "closed", from its own naive perspective) exception on top of the member's.
-  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  // The line closes the WHOLE stretch — every record under it, the body that was open
+  // included — and a second click brings them all back.
+  await click(ui, rowOf(ui, '+ 2 commands'));
   await settleUntil(() => !ui.backend.lastFrame.includes('│ left-out'));
   expect(ui.backend.lastFrame).not.toContain('│ left-out');
   expect(ui.backend.lastFrame).not.toContain('echo left-out ·');
   expect(ui.backend.lastFrame).not.toContain('echo right-out ·');
-  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
-  // Click the head again: both commands' blocks are back.
-  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  expect(ui.backend.lastFrame).toMatch(/\+ 2 commands/);
+  await click(ui, rowOf(ui, '+ 2 commands'));
   await settleUntil(() => ui.backend.lastFrame.includes('echo left-out ·'));
   expect(ui.backend.lastFrame).toContain('echo left-out ·');
   expect(ui.backend.lastFrame).toContain('echo right-out ·');
@@ -332,6 +367,8 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   const again = await bootApp(new ScriptedModel(), 100, 24, undefined, { sessions: { dir } });
   await settle(6);
   await again.press('F');
+  await settleUntil(() => again.backend.lastFrame.includes('+ 1 command'));
+  await openStretch(again);
   await settleUntil(() => /echo saved · ✓ (?:<1s|\d+s)/.test(again.backend.lastFrame));
   expect(again.backend.lastFrame).toMatch(/echo saved · ✓ (?:<1s|\d+s)/);
   again.app.unmount();

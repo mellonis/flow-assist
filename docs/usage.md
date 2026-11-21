@@ -715,23 +715,45 @@ calls — opens in a pager instead (what the assistant said between its tool cal
 opens where it is, however long): that block alone in the conversation's place inside the chat's frame, with its own scroll
 (PgUp/PgDn, the wheel) and a drag to copy from it; Esc brings the conversation back
 where you left it, the block still folded.
-`^o` is the same thing for the whole screen: with anything folded it opens everything,
-pressed again it closes everything (`config set keys.details <key>` moves it; `^r`
+`^o` is the same thing for the whole screen: with anything folded it opens the next
+level — the stretches first, then the records inside them — and once everything
+is open it closes it all (`config set keys.details <key>` moves it; `^r`
 works too).
 
 ## How a turn reads, and `/notes`
 
 A turn reads in the order it happened: what the assistant said, the diff of the
-file it changed, what it said next, the answer. Its text stays where it was written —
-dim, with a spinner beside it, until it is known to be the answer, which then gets the
-`ƒ`. What it said between tool calls folds to one quiet line per stretch, where that
-stretch began: the latest thing it said, and how many steps there were
-(`▸ Now the tests.  (3 steps)`); a click opens that stretch, with the calls each step
-made, `^o` opens them all. Calls made without a word are a line of their own, where
-they were made (`▸ 2 tools: read_file ×2`).
+file it changed, what it said next, the answer. A round being written stays dim, with a
+spinner beside it, until it is known to be the answer, which then gets the `ƒ`. The work
+between two of your own rows or two answers — tool calls, a command's block, and what the
+assistant said on the way — is one quiet line where that stretch began, folded away with
+everything in it: `▸ + 3 commands, 2 thoughts, 1 read · 12s`. The line counts what is
+inside by kind (a `run_command` and a command's block are `commands`, a thought is
+`thoughts`, `read_file` and `list_dir` are `reads`, a write that is not a command is an
+`edit`, the rest `tools`), carries `✗` for a failure, `✎` for a write that showed no diff
+and `‼` for a command that asked you something, and says `Running command…` while one of
+them still runs. `· 12s` is what the commands took, summed — never the stretch's own
+wall-clock time. What the assistant said on the way is not counted, and is folded away
+with the rest while the stretch is closed: opened, it reads dim where it was written. A
+click opens the stretch one level — a line per thought, call and command
+(`▸ thought: Now the tests.`, `▸ ⌁ read_file · ok`,
+`▸ ! bun test · ✓ 4s`) — and a click on one of those opens its own body: the thought's
+text, the call's arguments and result, the command's output. `^o` opens the stretches
+first, their records a line each, then every record's own body, and folds it all back on
+the press after that. A bright row ends the stretch before it: your `›`, the answer's
+`ƒ`, a steer's `→`, a background result's `◆`, a change's `✎` title — nothing of yours,
+and nothing waiting on you, is ever hidden inside a fold.
 `/notes open` leaves every step on screen in the normal colour — for the current
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.
+
+**A message you steered in mid-turn is answered under `→`.** The last thing the
+assistant says after it picked your queued message up, and before its own answer or your
+next message, is the answer to it: that text draws at full ink, marked `→` in the gutter
+under the `›` of the message it answers, and whatever it said on the way stays dim. It is
+one mark per message, on the last text the assistant wrote after picking your message up
+and before the turn settled; when the turn's own answer is the only text there is, `ƒ`
+alone marks it.
 
 **A question the assistant asked you stays where it was asked.** Once you have answered
 it — an option picked, your own words typed, or a dismissal — the block remains in the
@@ -1041,10 +1063,10 @@ directory is, not at that default.
 
 The assistant can run commands too — `run_command`, in the same directory and
 drawn the same live way, and only after you confirm each one (`ai.disabledTools:
-["shell"]` turns it off); several in a row fold under one head, `Ran N commands`, that
-opens into each command's own block. A folded command that printed more than that
-says how much it holds (`· 40 lines`, or `· last 200 of 300 lines` when only the tail
-was kept). A click on a command's line opens its last
+["shell"]` turns it off); several in a row are one line of the stretch, `+ N commands`,
+that opens into a line per command, each opening to its own block. A folded command
+that printed more than that says how much it holds (`· 40 lines`, or `· last 200 of
+300 lines` when only the tail was kept). A click on a command's line opens its last
 `runOutputLines` lines (`plugins.assistant.runOutputLines`), or the whole of it in the
 pager when it is taller than the conversation's window; `^o` opens it, and everything
 else folded, in full. Limits:

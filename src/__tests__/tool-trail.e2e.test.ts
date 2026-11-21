@@ -20,11 +20,10 @@ const many = () => [
   ...Array.from({ length: 24 }, (_, i) => ({ tool: i % 2 ? 'config_schema' : 'datetime', args: {} })),
 ];
 
-test('consecutive calls of one tool are one line with a count, and the open trail is capped', async () => {
+test('consecutive calls of one tool are one record each in the expanded stretch', async () => {
   const model = new ScriptedModel();
   model.script(many(), [{ text: 'Done at last.' }]);
-  // Tall enough for the whole trail (25 rows) to fit the conversation, so a click opens
-  // it inline, where the cap holds; a taller trail opens in the pager (pager.e2e).
+  // Tall enough for a good part of the trail to fit the conversation.
   const ui = await bootApp(model, 110, 44);
   await ui.press('F');
   await ui.type('do a lot');
@@ -32,24 +31,31 @@ test('consecutive calls of one tool are one line with a count, and the open trai
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
 
-  // Folded, the turn is one line — and it says what each tool cost in calls.
-  expect(ui.backend.lastFrame).toContain('36 tools:');
-  expect(ui.backend.lastFrame).toMatch(/datetime ×24/);
-  expect(ui.backend.lastFrame).toMatch(/config_schema ×12/);
+  // Folded, the turn is one line — the stretch's own counts.
+  expect(ui.backend.lastFrame).toContain('▸ + 36 tools');
+  expect(ui.backend.lastFrame).not.toContain('datetime ×24');
 
-  // Opened with a click on the turn's own line — the trail of THAT turn, capped.
-  const summary = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('36 tools:'));
-  ui.backend.mouse('down', 12, summary);
-  ui.backend.mouse('up', 12, summary);
-  await settle(8);
-  const trail = rowsMatching(ui, /▸ (datetime|config_schema)/);
-  // Twelve lines of trail and one that says what is above them — not thirty-six.
-  expect(trail).toHaveLength(12);
-  expect(ui.backend.lastFrame).toContain('… 12 earlier calls');
+  // Opened, one line per call, in the order they happened: a call is its own record,
+  // never condensed into a count and never capped — the stretch's one line is what
+  // keeps the screen quiet, not a second cap under it.
+  const at = (needle: string) => ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
+  const click = async (y: number) => {
+    ui.backend.mouse('down', 12, y);
+    ui.backend.mouse('up', 12, y);
+    await settle(8);
+  };
+  await click(at('+ 36 tools'));
+  expect(rowsMatching(ui, /▸ ⌁ datetime · ok/).length).toBeGreaterThan(12);
+  expect(ui.backend.lastFrame).not.toContain('earlier calls');
+  expect(ui.backend.lastFrame).not.toContain('×24');
+  // A record opens to its own body, and the others stay one line each.
+  await click(at('⌁ datetime · ok'));
+  expect(rowsMatching(ui, /→ ok/)).toHaveLength(1);
+  expect(rowsMatching(ui, /▸ ⌁ datetime · ok/).length).toBeGreaterThan(12);
   ui.app.unmount();
 });
 
-test('the line that stands for the earlier calls opens them', async () => {
+test('the key opens every record\'s body one level at a time, a stretch of many calls included', async () => {
   const model = new ScriptedModel();
   model.script(many(), [{ text: 'Done at last.' }]);
   const ui = await bootApp(model, 110, 60);
@@ -58,20 +64,15 @@ test('the line that stands for the earlier calls opens them', async () => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
   await settle(8);
-  const summary = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('36 tools:'));
-  ui.backend.mouse('down', 12, summary);
-  ui.backend.mouse('up', 12, summary);
+  // The first press opens the stretch: one record per call, no body out.
+  ui.backend.press({ name: 'o', ctrl: true });
   await settle(8);
-  const at = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('earlier calls'));
-  expect(at).toBeGreaterThan(-1);
-  ui.backend.mouse('down', 12, at);
-  ui.backend.mouse('up', 12, at);
+  expect(rowsMatching(ui, /⌁ (datetime|config_schema) · ok/).length).toBeGreaterThan(12);
+  expect(ui.backend.lastFrame).not.toContain('→ ok');
+  // The second opens every record's body, one level down — its result under its line.
+  ui.backend.press({ name: 'o', ctrl: true });
   await settle(8);
-  expect(ui.backend.lastFrame).not.toContain('earlier calls');
-  expect(rowsMatching(ui, /▸ (datetime|config_schema)/).length).toBeGreaterThan(12);
-  // The run of thirteen calls of one tool is ONE line with its count — a different
-  // argument is not a different line, and the arguments are in the log.
-  expect(ui.backend.lastFrame).toMatch(/▸ datetime ×13 → ok/);
+  expect(rowsMatching(ui, /→ ok/).length).toBeGreaterThan(12);
   ui.app.unmount();
 });
 
@@ -87,14 +88,12 @@ test('a turn with three calls looks exactly as it did', async () => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Three of them.'));
   await settle(8);
-  expect(ui.backend.lastFrame).toContain('3 tools: datetime ×2, config_schema');
+  expect(ui.backend.lastFrame).toContain('▸ + 3 tools');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(8);
-  // Three calls, three lines, each with its arguments — nothing is condensed away and
-  // nothing is capped.
-  expect(rowsMatching(ui, /▸ (datetime|config_schema)/)).toHaveLength(3);
+  // Three calls, three records — nothing is condensed into a count, nothing is capped.
+  expect(rowsMatching(ui, /▸ ⌁ (datetime|config_schema) · ok/)).toHaveLength(3);
   expect(ui.backend.lastFrame).not.toContain('earlier calls');
-  // Each line is a call of its own with its arguments — nothing is condensed away.
   expect(rowsMatching(ui, /▸ .*×/)).toHaveLength(0);
   ui.app.unmount();
 });
@@ -113,10 +112,12 @@ test('a condensed group of failures still says why it failed', async () => {
   await settle(8);
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(8);
-  // Three of a kind on one line — and the reason, which is how a person knows why the
-  // answer is thin. The group shares its outcome, so one reason stands for all of it.
-  const line = rowsMatching(ui, /▸ no_such_tool/)[0] ?? '';
-  expect(line).toContain('×3 → error');
+  // One record per failed call, and the reason — which is how a person knows why the
+  // answer is thin — is the record's own body, a level down.
+  expect(rowsMatching(ui, /▸ ⌁ no_such_tool · error/)).toHaveLength(3);
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(8);
+  const line = rowsMatching(ui, /→ error/)[0] ?? '';
   expect(line).toMatch(/— .*Unknown tool/i);
   ui.app.unmount();
 });

@@ -1,12 +1,16 @@
-// Consecutive commands fold under ONE head. A model runs a command per round and
-// writes a `Next:` line before each, so five commands are five blocks — a column of
-// grey. Consecutive console views of one turn (no other call between them: their
-// `seq` are consecutive) are drawn as one line, `ƒ Ran 3 commands · ✓ 34 s`; opened,
-// the commands alone, each its own block. The messages before and between them that
-// hold only the plan of the next command (a round whose only text was its `Next:`
-// line) are taken in too — the head says what ran, which is what the plan said would.
-// Groups form only in the `step` notes mode, and a message that says more — a step of
-// its own, a call, a change, reasoning — is never folded into one.
+// Consecutive commands are ONE stretch. A model runs a command per round and writes a
+// `Next:` line before each, so five commands are five blocks — a column of grey.
+// Consecutive console views of one turn (no other call between them: their `seq` are
+// consecutive) are grouped here, and the rounds before and between them that hold only
+// the plan of the next command (a round whose only text was its `Next:` line) are taken
+// in too. The chat draws that stretch as its activity group — `+ 3 commands · 12s` — and
+// the head this module spells, `ƒ Ran 3 commands · ✓ 34 s`, is no longer drawn: a second
+// fold over one stretch would put a second `ƒ` down the gutter. What reads this module
+// today is the rounds a stretch takes in (`hidden`, drawn nowhere) and the module's own
+// unit tests; nothing else does, and the `…:group` click branch is unreachable until a
+// drawn row carries that id shape again. Groups form only in the `step` notes mode, and
+// a message that says more — a step of its own, a call, a change, reasoning — is never
+// folded into one.
 //
 // Pure: works on the DRAWN messages (the system prompt is not one), by index — the
 // same `at` fold ids are built from.
@@ -16,6 +20,8 @@ import { isConsoleKind, sanitizeViewText, type ViewRecord } from './views.js';
 import { runMark } from './shell.js';
 import { formatDuration } from './duration.js';
 
+// `head` — the first member's index, which the group's fold id and `groupHeadText` are
+// built from; the head itself is not drawn.
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
 export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; roundLimit?: unknown; stopped?: unknown };
 
@@ -25,9 +31,9 @@ const consoleOf = (m: GroupMsg): ViewRecord | null => {
   return isConsoleKind(r.kind) && typeof r.seq === 'number' && typeof r.turn === 'number' ? r : null;
 };
 // A part that stays out of a group: a change, a call (one a command's block does not
-// already show), or a step that says more than its plan — a step that is nothing but
-// the `Next:` line the prompt asks for before a call is the plan of the command the
-// group's head names, and goes under the head with it.
+// already show), or a step that says more than its plan. A step that is nothing but the
+// `Next:` line the prompt asks for before a call is that command's plan, so its round is
+// taken into the stretch.
 const drawsPart = (p: unknown) => {
   const part = p as TurnPart | null;
   if (!part || typeof part !== 'object') return false;
@@ -59,8 +65,8 @@ export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
         return;
       }
       close();
-      // A silent round just before the first command is the group's too: the head
-      // takes the place of all of them.
+      // A silent round just before the first command is the group's too: the stretch
+      // draws none of the rounds it takes in.
       const before = passable(drawn[i - 1]) ? [i - 1] : [];
       cur = { g: { head: i, members: [i], hidden: before }, last: rec, between: [] };
       return;
@@ -72,10 +78,12 @@ export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
   return groups;
 }
 
-// The text is drawn straight into chat rows (never through `frameView`, which
+// The spans this returns are chat-row spans (never through `frameView`, which
 // sanitizes what it frames) — `sanitizeViewText` here is the same defence in depth,
 // against a command line embedded verbatim from the tool's own data. The success
-// mark is `✓` in the `ok` colour, same as a block's own tail (console-view.ts).
+// mark is `✓` in the `ok` colour, same as a block's own tail (console-view.ts). No row
+// draws this any more: the chat's stretch is its activity summary line, and this helper
+// stays with `viewGroups` for the module's own tests.
 export function groupHeadText(recs: ViewRecord[], now: number): { text: string; color?: 'warn' | 'ok' }[] {
   const n = recs.length;
   const running = recs.find((r) => r.phase === 'live');
@@ -92,28 +100,45 @@ export function groupHeadText(recs: ViewRecord[], now: number): { text: string; 
     : [{ text: `Ran ${n} commands · ` }, { text: '✓', color: 'ok' }, { text: ` ${formatDuration(total)}` }]);
 }
 
+// The records a member's stretch opens into, by id: `<group id>:<n>`, where the stretch
+// is `group:` and the member's own first row's fold. Only the ones a click has opened
+// count — an open record is the member being read one level down.
+const memberRecords = (folds: FoldState, at: number): string[] => {
+  const prefix = `group:${foldId(at, 'view', 0)}:`;
+  return [...folds.except].filter((id) => id.startsWith(prefix) && clickedOpen(folds, id));
+};
+
 // Open when its own id says so, or when the person opened one of its members with a
-// click before the group formed around it. Derived, never stored.
+// click before the group formed around it — or opened a record inside one of them,
+// which is the member being read one level down. Derived, never stored. Unreachable
+// while no drawn row carries a `…:group` id — the chat draws a stretch as its activity
+// group — and kept because the plan keeps `viewGroups`.
 export function groupOpen(folds: FoldState, g: ViewGroup): boolean {
-  return isOpen(folds, foldId(g.head, 'group')) || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)));
+  return isOpen(folds, foldId(g.head, 'group'))
+    || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)) || memberRecords(folds, at).length > 0);
 }
 
 // A head click's effect on the WHOLE group — never a plain `toggleFold` on the
 // group's own id alone, which cannot see a member's own exception and so cannot
 // reliably flip what `groupOpen` reads (the same `FoldState` is reachable by two
 // click orders that need opposite answers; only the group's own current reading,
-// not a fold id in isolation, can decide which way this click goes). Closing drops
-// every member's own exception too — a reopened group starts folded, not reopening
-// whatever a person had individually clicked before it closed. Only the group's own
-// id and its members' view ids are ever touched; every other block's exception
-// stands exactly as it was.
+// not a fold id in isolation, can decide which way this click goes). It closes by
+// dropping every member's own exception, so a reopened group starts folded. That
+// forget-on-close rule is the retired head's: the chat's stretch keeps its record
+// exceptions and reopens with the bodies that were open. Only the group's own id and
+// its members' view ids are ever touched; every other block's exception stands
+// exactly as it was. Unreachable while no drawn row carries a `…:group` id, and kept
+// because the plan keeps `viewGroups`.
 export function toggleGroup(folds: FoldState, g: ViewGroup): FoldState {
   const except = new Set(folds.except);
   const groupId = foldId(g.head, 'group');
   // Add or remove `id` from the exception set so `isOpen` reads it as `open`.
   const setId = (id: string, open: boolean) => { if (open === folds.open) except.delete(id); else except.add(id); };
   if (groupOpen(folds, g)) {
-    for (const at of g.members) except.delete(foldId(at, 'view', 0));
+    for (const at of g.members) {
+      except.delete(foldId(at, 'view', 0));
+      for (const id of memberRecords(folds, at)) except.delete(id);
+    }
     setId(groupId, false);
   } else {
     setId(groupId, true);

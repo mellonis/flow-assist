@@ -165,13 +165,14 @@ test('a confirmed edit that fails is an error, not a change made', async () => {
   expect(result?.content).toStartWith('ERROR: edit_file:');
   expect(result?.content).toContain('not found in');
   expect(result?.content).toContain('Nothing was changed.');
-  // What the person sees: no ✎, and under ^r the run is an error.
-  expect(ui.backend.lastFrame).toContain('1 tool: ');
+  // What the person sees: no ✎, and the stretch's line already says the run is an error.
+  expect(ui.backend.lastFrame).toMatch(/▸ \+ 1 edit ✗/);
   expect(ui.backend.lastFrame).not.toContain('✎');
   ui.backend.press({ name: 'r', ctrl: true });
   await settle(5);
-  expect(ui.backend.lastFrame).toMatch(/▸ edit_file.*→ error/);
-  expect(ui.backend.lastFrame).not.toContain('→ applied');
+  // One level down, the call's record says how it ended: an error, never a write.
+  expect(ui.backend.lastFrame).toMatch(/▸ ⌁ edit_file · error ✗/);
+  expect(ui.backend.lastFrame).not.toContain('· applied');
   ui.app.unmount();
 });
 

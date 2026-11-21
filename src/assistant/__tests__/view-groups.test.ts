@@ -44,7 +44,7 @@ test('groups form only in the step notes mode', () => {
   expect(viewGroups(msgs, 'open')).toEqual([]);
 });
 
-test('the head says what runs now, then what ran', () => {
+test('the retained head text still reads what runs now, then what ran', () => {
   const live: ViewRecord = { kind: 'console', data: { command: 'bun run lint' }, phase: 'live', startedAt: 10_000, seq: 1 };
   const done = (code: number): ViewRecord => ({ kind: 'console', data: { command: 'x', exitCode: code, ms: 17_000 }, phase: 'done', startedAt: 0 });
   expect(groupHeadText([done(0), live], 14_500).map((s) => s.text).join('')).toBe('Running 2 commands · ! bun run lint · 4s');
@@ -57,7 +57,7 @@ test('the head says what runs now, then what ran', () => {
   expect(failed.some((s) => s.color === 'warn')).toBe(true);
 });
 
-test('the head text is sanitized — an escape sequence or control character in the command never reaches the row', () => {
+test('the retained head text is sanitized — an escape sequence or control character in the command stays out of it', () => {
   const done = (): ViewRecord => ({ kind: 'console', data: { command: 'y', exitCode: 0, ms: 0 }, phase: 'done', startedAt: 0 });
   const live: ViewRecord = { kind: 'console', data: { command: 'echo \u001B[31mhi\u001B[0m\u0007' }, phase: 'live', startedAt: 0, seq: 1 };
   const text = groupHeadText([done(), live], 0).map((s) => s.text).join('');

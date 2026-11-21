@@ -33,6 +33,10 @@ export interface ChatMsg {
   // the same call still finds it (ids are places among drawn messages; removing the
   // message would move every fold id after it).
   discardedCallId?: string;
+  // A queued message delivered mid-turn: the person's row stands where it reached the
+  // model, and the answer to it is marked from there (`steerAnswer`, src/views/modals.ts).
+  // Display only: the model reads the message as steered in, never this flag.
+  midTurn?: boolean;
   // A question the person answered, as the chat keeps it (role 'ask'): the title the
   // block was shown under is `content`; `answer` is what the person gave, and
   // `dismissed` says they never answered it. Display only: the model has the answer as

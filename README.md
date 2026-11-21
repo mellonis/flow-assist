@@ -45,7 +45,7 @@ bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
 | Ctrl+S | the saved sessions |
 | Ctrl+] | move the keyboard between the chat and a plugin's screen |
 | Ctrl+\\ | fold the chat panel away and bring it back |
-| ^o | open everything folded, or close it all again |
+| ^o | open the next level of folds, or close them all |
 | Ctrl+V | attach the image on the clipboard |
 | Ctrl+C twice | quit |
 
