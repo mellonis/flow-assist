@@ -117,9 +117,13 @@ test('step: a run folds into ONE row where it began — under the diff it follow
   expect(answerMarks(ui)).toBe(0);
   model.release();
   await settle(20);
-  // It carried a call: it is a stretch of one now, on the same row — no count.
+  // It carried a call: the stretch stands for it on the same row, and its run is one
+  // line with no count — only a run of several steps says how many.
   expect(rowOf(ui, '+ 1 tool')).toBe(first);
-  expect(rows(ui)[first]).not.toContain('steps)');
+  await click(ui, first);
+  const oneStep = rows(ui)[rowOf(ui, '▸ I will change b to 42.')] ?? '';
+  expect(oneStep).toContain('▸ I will change b to 42.');
+  expect(oneStep).not.toContain('step');
   const diff = rowOf(ui, '✎ clone/app.ts');
   expect(diff).toBeGreaterThan(first);
   const second = rowOf(ui, 'Let me check the rest');
@@ -296,7 +300,12 @@ test('two runs split by a diff fold on their own: a click opens one, ^o opens bo
 test('a drag copies the answer, never a run\'s row', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, TWO_RUNS);
-  const from = rows(ui).map((r, i) => (r.includes('+ 2 tools') ? i : -1)).filter((i) => i >= 0).at(-1)!;
+  // The last run's own row is visible once its stretch is opened — the drag starts on
+  // that row, so the assertion below is about a row really on screen.
+  const last = rows(ui).map((r, i) => (r.includes('+ 2 tools') ? i : -1)).filter((i) => i >= 0).at(-1)!;
+  await click(ui, last);
+  const from = rowOf(ui, '▸ Then the tests.  (2 steps)');
+  expect(from).toBeGreaterThan(-1);
   const to = rowOf(ui, 'Done.');
   ui.backend.mouse('down', 2, from);
   for (let y = from; y <= to; y++) ui.backend.mouse('drag', 90, y);
