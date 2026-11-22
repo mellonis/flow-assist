@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The field wraps at words.** What you type now breaks at spaces on screen, the same
+  way the message breaks when it is printed — mid-word cuts while you write are gone,
+  in the chat's field and in every question's own-words field (flowtty `1.0.0-alpha.38`).
+  Only a word longer than the field breaks at its letters.
+
 - **The answer to a question takes your line breaks.** The `ask_user` block's own-words
   field is the chat's editor all the way now: `⇧⏎` (or `⌥⏎`) leaves a line break, `⏎`
   still submits, a paste keeps its breaks, and the hint rows say so. It used to be one

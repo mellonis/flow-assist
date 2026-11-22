@@ -204,6 +204,31 @@ test('the arrows move the caret inside the free-text answer', async () => {
   ui.app.unmount();
 });
 
+// A regression guard for the field's word wrap (flowtty alpha.38): the answer wraps at
+// words, the same break the message gets when it is printed. At width 110 the answer
+// field is 95 columns wide, so this sentence wraps inside its `september october
+// november` cluster — whatever the exact width, one of the three would tear mid-word
+// if the rows packed letters.
+test('the answer field wraps at words — its long words stay whole on the rows', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+    [{ text: 'Fine.' }],
+  );
+  const ui = await bootApp(model, 110, 30);
+  await ui.press('F');
+  await ui.type('which branch should I use?');
+  await ui.press('return');
+  await settleUi(15);
+  await ui.type('alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike september october november oscar papa quebec romeo');
+  await settleUi(4);
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('september');
+  expect(frame).toContain('october');
+  expect(frame).toContain('november');
+  ui.app.unmount();
+});
+
 test('an answered question is saved with the session and drawn again when it is continued', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ask-sessions-'));
   const model = new ScriptedModel();

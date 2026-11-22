@@ -143,6 +143,9 @@ does not — there Shift+Enter is a plain Enter and sends. Two more keys start a
 anywhere: ⌥⏎ (Alt+Enter; in Terminal.app with "Use Option as Meta key" on), and a
 backslash typed at the end of the line, then ⏎, which works in every terminal.
 
+The field wraps at words — the same break the message gets when it is printed — so what
+you type reads as what you send; only a word longer than the field breaks at its letters.
+
 In a terminal with the protocol, Ctrl+[ is a key of its own, not Esc, and Ctrl+I and
 Ctrl+M are not ⇥ and ⏎; Esc arrives at once.
 
