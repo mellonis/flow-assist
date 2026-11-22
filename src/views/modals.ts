@@ -2182,12 +2182,15 @@ export function chatRoom(p: ChatRoomInput) {
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
     : visible.length + (askNotice ? 1 : 0) + (completion?.list?.height ?? 0);
-  // The strip's rows: the field's place, the strip's own gap row and the hint row, all
+  // The strip's rows: the field's place, the strip's own gap row and the bottom row, all
   // under one gap from the column above. The render leaves the field's place `null` under
-  // the pager and under a plain watch — the gap draws nothing then, and the strip is the
-  // hint (and a watch's notice) alone; the column's gap above it is the one empty row.
+  // the pager and under a plain watch — the gap draws nothing then; the column's gap above
+  // the strip is the one empty row there. The bottom row is the hint alone, or under a
+  // watch its notice (when a request waits elsewhere) and the state row — exactly what
+  // `renderChatModal` draws in the strip.
   const stripHolds = !(pager || (watch && !confirmAsk && !watch.question));
-  const fieldStrip = stripHolds ? fieldPlace + 2 : (watch?.notice ? 2 : 1);
+  const bottomRow = pager ? 1 : watch ? (watch.notice ? 2 : 1) : 1;
+  const fieldStrip = stripHolds ? fieldPlace + 1 + bottomRow : bottomRow;
   const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, queued.length ? 1 : 0, fieldStrip]
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
@@ -3501,13 +3504,16 @@ const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Mat
 // grows a
 // bottom panel to it, and draws the chat as a window while it is pending when even that
 // would leave the plugin less than its least (src/runtime/panel-layout.ts).
-export function pendingChatRows({ width, question, confirm, notice = 0, todo, queued = 0 }: {
+export function pendingChatRows({ width, question, confirm, notice = 0, watchNotice = false, todo, queued = 0 }: {
   width: number;
   question?: AskState | null;
   confirm?: ConfirmAsk | null;
   // The rows of the field's place when a subagent's y/n waits behind a draft: the notice
   // line and the field. They stand where the block would, and are counted the same way.
   notice?: number;
+  // The watch's own notice row (a request waiting elsewhere) sits above the state row at
+  // the bottom of the strip — one more row than the hint row other states have.
+  watchNotice?: boolean;
   todo?: PlanItem[] | null;
   queued?: number;
 }): number {
@@ -3515,7 +3521,7 @@ export function pendingChatRows({ width, question, confirm, notice = 0, todo, qu
   const wrap = chatWrapWidth(width, true);
   const block = question ? askBlockRows(question, wrap) : notice && !confirm ? notice : confirmBlockRows(confirmView(confirm!, wrap), wrap);
   const planRows = question ? 0 : planBlockRows(planView(todo ?? []));
-  const parts = [1, 1, planRows, queued ? 1 : 0, block].filter((n) => n > 0);
+  const parts = [1, 1 + (watchNotice ? 1 : 0), planRows, queued ? 1 : 0, block].filter((n) => n > 0);
   // The frame's border and its top padding, the parts, a gap between each two — the block
   // and the status row are separate parts and the strip really carries the gap row
   // between them.

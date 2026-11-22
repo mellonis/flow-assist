@@ -571,6 +571,30 @@ test("a question's rows are counted exactly: at pendingChatRows height the block
   handle.unmount();
 });
 
+// The measures must count every row the render draws: under a watch the bottom row is
+// the notice (when a request waits elsewhere) AND the state row — two rows, not one.
+test('a watched child with a notice beside its block counts the notice row in the measures', () => {
+  const question = askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }] }] as never);
+  const watch = (notice?: string) => ({ path: ['outer'], rows: [], state: '⚙ read_file(a.ts)', ended: false, ask: null, question, ...(notice ? { notice } : {}) });
+  expect(room({ watch: watch('⏸ 1 waits') }).besides - room({ watch: watch() }).besides).toBe(1);
+});
+
+test("a watched child's block, its notice and its status stand whole at pendingChatRows height", async () => {
+  const question = askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }] }] as never);
+  const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  const height = pendingChatRows({ width: 80, question, watchNotice: true });
+  const backend = new TestBackend(80, height);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 80, height, messages: [], docked: true, fullscreen: true,
+    watch: { path: ['outer'], rows: chatRows([{ role: 'assistant', content: 'a child word' }], o), state: '⚙ read_file(a.ts)', ended: false, ask: null, question, notice: '⏸ 1 waiting' },
+  } as never), backend);
+  const frame = backend.lastFrame;
+  expect(frame).toContain('a child word');           // the one conversation row
+  expect(frame).toContain('⏸ 1 waiting');            // the notice row
+  expect(frame).toContain('x stop · Esc dismiss');   // the status row, not clipped
+  handle.unmount();
+});
+
 test('during a turn the queue line is above the field and the live status row is the strip\'s last', async () => {
   const backend = new TestBackend(100, 24);
   const handle = await render(h(renderChatModal, {
