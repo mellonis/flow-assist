@@ -347,7 +347,10 @@ test('a bottom panel grows by the notice line when a multi-line draft is in the 
   await ask(ui, '/subagent MULTI-ONE do it');
   await settleUntil(() => a!.child.held);
   await ui.type('one');
-  for (const w of ['two', 'three', 'four']) { ui.backend.press({ name: 'return', shift: true }); await ui.type(w); }
+  // Five rows of draft: with the notice line the state is then too tall for the panel's
+  // own rows, so the growth the test pins is real (at four it fits exactly and never
+  // grows).
+  for (const w of ['two', 'three', 'four', 'five']) { ui.backend.press({ name: 'return', shift: true }); await ui.type(w); }
   await settle(6);
   const without = chatTop(ui);
   a!.child.release();

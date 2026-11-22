@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
@@ -493,10 +493,105 @@ test('the hint row is the last row inside the box, under the field; the plan and
   expect(queue).toBeGreaterThan(plan);
   expect(field).toBeGreaterThan(queue);
   expect(hint).toBeGreaterThan(field);
-  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
-  // Nothing of the column is under the hint: every row down to the border carries nothing
-  // but the frame's own sides — the plan, the queue line and the field strip are all above it.
-  for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
+  expect(hint).toBe(border - 1); // the hint row goes to the frame's edge
+  // The one empty row stands ABOVE the hint, between it and the field — the swap of
+  // 2026-11-22: the hint hugs the border, the breathing room is under the field.
+  expect(rows.slice(field + 1, hint).map((r) => r.replace(/│/g, '').trim())).toEqual(['']);
+  handle.unmount();
+});
+
+test("the pager keys hug the border with the frame's one empty row above them", async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [], pager: { title: 'docs', rows: [] },
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const keys = rows.findLastIndex((r) => r.includes('Esc close'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(keys).toBe(border - 1);
+  expect(rows[keys - 1].replace(/│/g, '').trim()).toBe('');
+  handle.unmount();
+});
+
+test('with a y/n box up the empty row stands between the box and the key hint', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [],
+    pendingConfirm: { name: 'write_file', args: '{"path":"a.ts"}' },
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const hint = rows.findLastIndex((r) => r.includes('history · wheel'));
+  const boxHint = rows.findIndex((r) => r.includes('Press y to confirm'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(hint).toBe(border - 1);
+  expect(boxHint).toBeLessThan(hint - 1); // the box's own hint stays in the box
+  expect(rows[hint - 1].replace(/│/g, '').trim()).toBe('');
+  handle.unmount();
+});
+
+test('with a multi-row draft the one empty row still stands between the field and the hint', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [], input: 'top row\nlong draft line', cursor: 21,
+  }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const hint = rows.findLastIndex((r) => r.includes('history · wheel'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(hint).toBe(border - 1);
+  expect(rows[hint - 1].replace(/│/g, '').trim()).toBe('');
+  expect(rows[hint - 2]).toContain('long draft line'); // still exactly one empty row
+  handle.unmount();
+});
+
+test("a watched child's status hugs the border, its notice above it, one empty row above that", async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 100, messages: [], input: '',
+    watch: { path: ['outer'], rows: [], state: '⚙ read_file(a.ts)', ended: false, ask: null, notice: '⏸ 1 waiting' },
+  } as never), backend);
+  const rows = backend.lastFrame.split('\n');
+  const status = rows.findLastIndex((r) => r.includes('x stop · Esc back'));
+  const notice = rows.findLastIndex((r) => r.includes('⏸ 1 waiting'));
+  const border = rows.findLastIndex((r) => r.includes('╰'));
+  expect(status).toBe(border - 1);
+  expect(notice).toBe(status - 1); // the notice and the status stay together
+  expect(rows[notice - 1].replace(/│/g, '').trim()).toBe(''); // the one empty row above them
+  handle.unmount();
+});
+
+test("a question's rows are counted exactly: at pendingChatRows height the block stands whole", async () => {
+  const confirm = { name: 'write_file', args: '{"path":"a.ts"}' };
+  const height = pendingChatRows({ width: 80, confirm });
+  const backend = new TestBackend(80, height);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 80, height, messages: [], docked: true, fullscreen: true,
+    pendingConfirm: confirm,
+  }), backend);
+  expect(backend.lastFrame).toContain('Press y to confirm'); // the box is not clipped
+  handle.unmount();
+});
+
+// The measures must count every row the render draws: under a watch the bottom row is
+// the notice (when a request waits elsewhere) AND the state row — two rows, not one.
+test('a watched child with a notice beside its block counts the notice row in the measures', () => {
+  const question = askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }] }] as never);
+  const watch = (notice?: string) => ({ path: ['outer'], rows: [], state: '⚙ read_file(a.ts)', ended: false, ask: null, question, ...(notice ? { notice } : {}) });
+  expect(room({ watch: watch('⏸ 1 waits') }).besides - room({ watch: watch() }).besides).toBe(1);
+});
+
+test("a watched child's block, its notice and its status stand whole at pendingChatRows height", async () => {
+  const question = askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }] }] as never);
+  const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  const height = pendingChatRows({ width: 80, question, watchNotice: true });
+  const backend = new TestBackend(80, height);
+  const handle = await render(h(renderChatModal, {
+    ...baseChat, width: 80, height, messages: [], docked: true, fullscreen: true,
+    watch: { path: ['outer'], rows: chatRows([{ role: 'assistant', content: 'a child word' }], o), state: '⚙ read_file(a.ts)', ended: false, ask: null, question, notice: '⏸ 1 waiting' },
+  } as never), backend);
+  const frame = backend.lastFrame;
+  expect(frame).toContain('a child word');           // the one conversation row
+  expect(frame).toContain('⏸ 1 waiting');            // the notice row
+  expect(frame).toContain('x stop · Esc dismiss');   // the status row, not clipped
   handle.unmount();
 });
 
@@ -518,8 +613,8 @@ test('during a turn the queue line is above the field and the live status row is
   expect(queue).toBeGreaterThan(plan);
   expect(field).toBeGreaterThan(queue);
   expect(hint).toBeGreaterThan(field);
-  expect(hint).toBeLessThan(border); // inside the box, the last row before the border
-  for (const row of rows.slice(hint + 1, border)) expect(row.replace(/│/g, '').trim()).toBe('');
+  expect(hint).toBe(border - 1); // the live status row goes to the frame's edge
+  expect(rows.slice(field + 1, hint).map((r) => r.replace(/│/g, '').trim())).toEqual(['']);
   handle.unmount();
 });
 

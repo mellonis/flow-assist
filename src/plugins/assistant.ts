@@ -2838,6 +2838,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const w = watchRef.current;
             return w && w.ended === null ? convRef.current!.offeredWithin(w.node) : null;
           };
+          // A request parked OUTSIDE the watched node's subtree waits elsewhere: the watch
+          // strip carries its notice beside the state row — under its block too — so both
+          // the render's `notice` and `needRows` count that extra row from here.
+          const watchElsewhere = (): boolean => {
+            const w = watchRef.current;
+            const offered = w ? convRef.current!.offered() : null;
+            return !!offered && !!offered.path.length && !(() => { for (let a: Conversation | null = offered.owner; a; a = a.parent) if (a === w!.node) return true; return false; })();
+          };
           // The watch's request as a block, or as a notice where the block cannot be given the
           // rows a docked panel may have.
           const watchAskShape = (w: number): 'block' | 'notice' | null => {
@@ -2861,7 +2869,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `pendingChatRows`). Read from the refs: the App asks before this re-renders.
           const needRows = (w: number): number => {
             const asked = watchAskNow();
-            if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, ...blockOf(asked), todo: [], queued: 0 }) : 0;
+            if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, ...blockOf(asked), todo: [], queued: 0, watchNotice: watchElsewhere() }) : 0;
             const c = conv.confirm;
             const child = childAskNow();
             if (child) {
@@ -3525,7 +3533,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const watchAsk = watching ? watchAskNow() : null;
           const watchAskIsBlock = watchAsk ? watchAskShape(dock?.panel.width ?? width) === 'block' : false;
           const offeredNow = watching ? convRef.current!.offered() : null;
-          const elsewhere = offeredNow && offeredNow.path.length && !(() => { for (let a: Conversation | null = offeredNow.owner; a; a = a.parent) if (a === watching!.node) return true; return false; })();
+          const elsewhere = watchElsewhere();
           const watchView: WatchView | null = watching ? {
             // Read while the node lives: a task that ends hands its children up, and a child's
             // labels from the session change with it.
