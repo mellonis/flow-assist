@@ -160,12 +160,14 @@ test('typing starts the answer, the field takes a paste, and the model is sent t
 
   expect(model.requests).toHaveLength(2);
   const result = (model.requests[1]!.messages as { role: string; content?: string }[]).find((m) => m.role === 'tool');
-  // The paste went in whole — its line break a space, since the field is one line —
-  // and it neither answered the question by itself nor fired a binding.
-  expect(String(result?.content)).toContain('use feature/ABC-1 please now');
+  // The paste went in whole — its line break kept, as the chat's field keeps it (it
+  // used to be flattened to a space when the field was one line) — and it neither
+  // answered the question by itself nor fired a binding.
+  expect(String(result?.content)).toContain('use feature/ABC-1\nplease now');
   // Kept as it was answered, in the person's own words.
   expect(ui.backend.lastFrame).toContain('? Which branch?');
-  expect(ui.backend.lastFrame).toContain('→ use feature/ABC-1 please now');
+  expect(ui.backend.lastFrame).toContain('→ use feature/ABC-1');
+  expect(ui.backend.lastFrame).toContain('please now');
   ui.app.unmount();
 });
 

@@ -1422,6 +1422,22 @@ test("a group line's ✗ carries the trail's tone: warn when the same tool recov
   expect(markOf([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).toBe('error');
 });
 
+test("the question's own-words field takes a line break, and the hint names the key", async () => {
+  let state = askStart([{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] as never);
+  for (const c of 'alpha') state = askKey(state, { name: c } as never);
+  state = askKey(state, { name: 'return', shift: true } as never);
+  for (const c of 'bravo') state = askKey(state, { name: c } as never);
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 100, messages: [], pendingQuestion: state } as never), backend);
+  const rows = backend.lastFrame.split('\n');
+  const first = rows.findIndex((r) => r.includes('alpha'));
+  const second = rows.findIndex((r) => r.includes('bravo'));
+  expect(first).toBeGreaterThan(0);
+  expect(second).toBe(first + 1); // the break draws as its own row under the first
+  expect(backend.lastFrame).toContain('new line'); // the hint names the key, as the chat's does
+  handle.unmount();
+});
+
 // ─── The lead-in above a pending question (ticket 5) ─────────────────────────
 // The narration that led into an `ask_user` call is the context the question is read
 // against, so while the question waits its last run draws unfolded and at full ink. A

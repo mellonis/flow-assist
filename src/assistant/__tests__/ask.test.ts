@@ -153,32 +153,52 @@ test('typing starts the answer: a printable key opens the field with it in, a di
   expect(draft(askKey(askStart(one.questions), { name: 'r', ctrl: true })).typing).toBe(false);
 });
 
-test('the field is an editor: the caret moves, words are killed, and a paste goes in at it', () => {
+test('the field is an editor: the caret moves, words are killed, and a paste keeps its line breaks', () => {
   // A paste arrives as ONE key; dropping it whole would make it impossible to give a
   // pasted path as an answer at all.
   let s = type(askStart(one.questions), 'see ');
   s = askKey(s, { name: 'paste', text: '/tmp/a b/report.txt' });
   expect(draft(s).text).toBe('see /tmp/a b/report.txt');
   expect(draft(s).caret).toBe(draft(s).text.length);
-  // The field is one line: a pasted line break is a space, and nothing in a paste submits.
-  s = askKey(s, { name: 'paste', text: '\nline two\nline three\n' });
-  expect(draft(s).text).toBe('see /tmp/a b/report.txt line two line three ');
+  // The answer is the person's own words, line breaks included — the field is the chat's
+  // editor all the way (2026-11-22: before it, the field was one line and a pasted break
+  // was a space). Nothing in a paste submits.
+  s = askKey(s, { name: 'paste', text: '\nline two\nline three' });
+  expect(draft(s).text).toBe('see /tmp/a b/report.txt\nline two\nline three');
   expect(s.done).toBe(false);
-  // Caret motion and the kill bindings are flowtty's, not this file's.
+  // Caret motion and the kill bindings are flowtty's, not this file's: Home is the
+  // caret's own LINE in a multi-line field (the chat's rule), not the whole document.
+  const lineStart = draft(s).text.indexOf('line three');
   const home = askKey(s, { name: 'home' });
-  expect(draft(home).caret).toBe(0);
+  expect(draft(home).caret).toBe(lineStart);
   const typedAtCaret = type(home, 'I ');
-  expect(draft(typedAtCaret).text).toStartWith('I see ');
+  expect(draft(typedAtCaret).text).toBe('see /tmp/a b/report.txt\nline two\nI line three');
   const killedWord = askKey(s, { name: 'w', ctrl: true });
-  expect(draft(killedWord).text).toBe('see /tmp/a b/report.txt line two line ');
-  // A paste on the LIST starts the answer the same way a typed character does.
+  expect(draft(killedWord).text).toBe('see /tmp/a b/report.txt\nline two\nline ');
+  // A paste on the LIST starts the answer the same way a typed character does, breaks
+  // and all.
   const fromList = askKey(askStart(one.questions), { name: 'paste', text: 'ABC-1\nsecond line' });
   expect(draft(fromList).typing).toBe(true);
-  expect(draft(fromList).text).toBe('ABC-1 second line');
+  expect(draft(fromList).text).toBe('ABC-1\nsecond line');
   // Esc leaves the field for the list, the text kept; Esc on the list dismisses.
   expect(draft(press(s, 'escape')).typing).toBe(false);
   expect(press(s, 'escape').cancelled).toBe(false);
   expect(press(press(s, 'escape'), 'escape').cancelled).toBe(true);
+});
+
+test('the answer takes a line break on shift+Enter and Alt+Enter; Enter still sends', () => {
+  let s = type(askStart(one.questions), 'one');
+  s = askKey(s, { name: 'return', shift: true });
+  s = type(s, 'two');
+  expect(draft(s).text).toBe('one\ntwo');
+  // Alt+Enter arrives as `meta` — the newline keys are shift or meta with Return, as
+  // the chat's field gets them.
+  s = askKey(s, { name: 'return', meta: true });
+  s = type(s, 'three');
+  expect(draft(s).text).toBe('one\ntwo\nthree');
+  s = askKey(s, { name: 'return' });
+  expect(s.done).toBe(true);
+  expect(s.answers[0]!.other).toBe('one\ntwo\nthree');
 });
 
 test('the result names free text as the person\'s own words', () => {

@@ -1238,7 +1238,8 @@ there is no `/fullscreen`.
   code — do not re-add branches for them. The reducer answers `submit` for a plain
   Enter; what submit means (send, queue, run a `/command`) stays here. A field the
   host draws elsewhere takes the same reducer rather than a little editor of its own:
-  the `ask_user` block's free-text row does (single-line, `askFieldWidth` shared with
+  the `ask_user` block's free-text row does (multiline like this one — the answer is the
+   person's own words and a line break is part of them — `askFieldWidth` shared with
   its render the way `chatFieldWidth` is with this one).
   - `<TextArea>` itself is not mounted: the host has ONE key dispatcher
     (`useInputHandler`), and a mounted field would be a second listener.

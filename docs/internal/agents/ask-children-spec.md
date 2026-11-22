@@ -59,7 +59,8 @@
   (AGENTS.md (watching a child)); the session's list shows none.
   **A question from a subagent the person started** is the same request with another kind. With an empty field
   (bang level 0) it is drawn in the field's place as `ask_user`'s free-text block (`renderAsk`, `askBlockRows`)
-  titled `from «<label>»`, hint `⏎ submit · Esc dismiss` (the field is open from the start, so every printable key, digits and spaces included, is text); with a draft one line says `⏸ a question from
+  titled `from «<label>»`, hint `⏎ submit · ⇧⏎/⌥⏎ new line · Esc dismiss` (the field is open from the start, so every printable key, digits and spaces included, is text, and the
+  answer takes line breaks as the chat's field does); with a draft one line says `⏸ a question from
   «<label>» waits — clear the field to answer it` (`leave shell mode to answer it` in shell mode), the draft untouched;
   where the block has no room the notice reads `a question from «<label>» waits — no room to show it; /subagent stop <label> declines it`. The session's own y/n and its own
   question come first, then the oldest child request of either kind; an own request that takes the place of a drawn

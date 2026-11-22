@@ -3425,7 +3425,7 @@ function askView(state: AskState, wrap: number) {
   const hint = submitting
     ? `${pageKeys}${CAP.enter} submit · ${CAP.esc} dismiss`
     : d.typing
-      ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
+      ? `${CAP.enter} submit · ${NEWLINE_KEY} new line · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
       : q.multiSelect
         ? `${pageKeys}${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
         : `${pageKeys}${CAP.upDown} move · ${CAP.enter} ${many ? 'answer' : 'or a digit to answer'} · type your own words · ${CAP.esc} dismiss`;

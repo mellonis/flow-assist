@@ -111,7 +111,11 @@ const titled = (q: AskQuestion): string => (q.header ? `${q.header} — ${q.ques
 
 // One entry as the person is shown it and the model reads it: the picks and the text,
 // and the words for a question answered with nothing.
-const worded = (a: AskAnswer): string => [...a.labels, ...(a.other ? [a.other] : [])].join(', ') || '(not answered)';
+// The answer as ONE row — the submit page's summary of what Enter will send. The line
+// breaks in the person's own words are read in the field and sent whole; here they are
+// spaces, so the summary never spills past its one row (the count of the block's rows
+// answers on it).
+const worded = (a: AskAnswer): string => [...a.labels, ...(a.other ? [a.other.replace(/\s*\n\s*/g, ' ')] : [])].join(', ') || '(not answered)';
 
 export interface AskTab { label: string; answered: boolean; current: boolean }
 // The wizard's page strip (several questions only): one tab per question and "Submit"
@@ -206,13 +210,10 @@ const commitTyped = (state: AskState, multiSelect: boolean): AskState =>
 // A key as the chat hands it over — flowtty's, with a paste's text on it.
 export type AskKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; text?: string };
 
-// The field is ONE line, so a pasted line break is a space: a path or a ticket's text
-// pasted from anywhere else still goes in whole, and nothing in it can submit.
-const onePasteLine = (text: string) => String(text ?? '').replace(/\s*\n\s*/g, ' ');
-
-// The field's own key handling — flowtty's `editorReducer`, in its single-line mode.
-// So the caret moves by character and by word, Home/End and the kill bindings work,
-// and a PASTE goes in at the caret — it arrives as one key (`{ name: 'paste', text }`);
+// The field is the chat's own editor in its multiline mode, so the caret moves by
+// character and by word, Home/End and the kill bindings work, a line break is part of
+// the answer (Shift+Enter/Alt+Enter leave one; Enter still sends), and a PASTE goes in
+// at the caret keeping its breaks — it arrives as one key (`{ name: 'paste', text }`);
 // dropping it whole instead would make a pasted path impossible to give as an answer.
 // Every printable key is text here: `y`, `n` and the digits are not shortcuts while
 // the person is writing.
@@ -224,8 +225,11 @@ function fieldKey(state: AskState, key: AskKey, width: number): AskState {
   // dismisses the question (the whole call, as on any other page). The reducer would
   // answer `cancel` — the closest thing first is this file's rule.
   if (key.name === 'escape') return freeText(q) ? dismissed(state) : withDraft(state, { typing: false });
-  const k = key.name === 'paste' ? { ...key, text: onePasteLine(key.text ?? '') } : key;
-  const act = editorReducer({ value: d.text, cursor: d.caret }, k as Parameters<typeof editorReducer>[1], { multiline: false, width });
+  // Multiline, like the chat's own field: the answer is the person's own words and a
+  // line break is part of them (Shift+Enter and Alt+Enter leave one, Enter still sends,
+  // a paste keeps its breaks). It used to be one line with pastes flattened — the
+  // inverse of what the field is documented to be (2026-11-22).
+  const act = editorReducer({ value: d.text, cursor: d.caret }, key as Parameters<typeof editorReducer>[1], { multiline: true, width });
   if (act.kind === 'submit') {
     const other = d.text.trim();
     // An empty answer is not an answer: a single question waits for something to send.
@@ -304,7 +308,10 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
   // multi-select, and an answer that begins with a space is nobody's intent). Both
   // branches above come first, so neither is stolen from.
   if (name === 'paste') {
-    const pasted = onePasteLine(key.text ?? '').trim();
+    // A paste keeps its line breaks — the field is the chat's editor all the way — and
+    // the field opens on it the way a typed character opens it (its ends trimmed: an
+    // answer that begins or ends in blank lines is nobody's intent).
+    const pasted = String(key.text ?? '').trim();
     if (!pasted) return state;
     return d.text === ''
       ? withDraft(state, { typing: true, cursor: otherRow, text: pasted, caret: pasted.length })

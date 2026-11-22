@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The answer to a question takes your line breaks.** The `ask_user` block's own-words
+  field is the chat's editor all the way now: `⇧⏎` (or `⌥⏎`) leaves a line break, `⏎`
+  still submits, a paste keeps its breaks, and the hint rows say so. It used to be one
+  line, and a pasted break was turned into a space.
+
 - **The key hint and the empty row trade places.** The row that names the keys sits on the
   frame's bottom edge, and the one empty row that stood under it now stands above it —
   between the line you type and the hint. The same in every state: the pager's keys and a
