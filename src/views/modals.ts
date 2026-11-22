@@ -428,9 +428,10 @@ export const TRAIL_ROWS = 12;
 // line break is a soft one, so two typed lines were drawn as one, an indented command
 // lost its indent and `- a` became a bullet. It is laid out as the field laid it out
 // while they typed (`inputRows`): every line break kept, blank lines and leading
-// spaces too, a line wider than the chat cut at the column. A cut drops nothing, so
-// the row before it carries `continues` with `dropped: ''` — a drag rejoins the line
-// exactly — while a line break the person typed is left a line break in the copy.
+// spaces too, a line wider than the chat broken at words. What a break drops is only
+// ever spaces, so the row before it carries them in `continues.dropped` — `''` for
+// a cut through a word — and a drag rejoins the line exactly, as typed, while a
+// line break the person typed is left a line break in the copy.
 //
 // `images` — the numbers of the images the message carried: their `[Image #N]` tokens
 // are spans of their own marked `token`, which the view draws in the accent colour.
@@ -441,7 +442,8 @@ export function typedLines(text: string | null | undefined, wrap: number, images
   const tokens = images.length ? imageTokenRanges(value, (n) => images.includes(n)) : [];
   return rows.map((row, i) => {
     const line: Line = { spans: row.text ? splitTokens(row.text, row.start, tokens).map((p) => (p.token ? { text: p.text, token: true } : { text: p.text })) : [] };
-    if (rows[i + 1]?.continuation) line.continues = { dropped: '', textWidth: cellWidth(row.text) };
+    const next = rows[i + 1];
+    if (next?.continuation) line.continues = { dropped: value.slice(row.start + row.text.length, next.start), textWidth: cellWidth(row.text) };
     return line;
   });
 }
