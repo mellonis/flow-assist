@@ -326,8 +326,9 @@ session like a first message would; the line you typed is its first message.
 
 ### The hint row and the work strip
 
-The hint row is the last row of the field's strip, under the line you type in, and it
-carries the count of background work and the way in to it. `↓ N in background` says that `↓`
+The hint row is the last row of the field's strip, at the frame's bottom edge — one empty
+row stands between it and the line you type in — and it carries the count of background
+work and the way in to it. `↓ N in background` says that `↓`
 opens the work strip and counts the rows it opens: this chat's live subagents and tasks, and
 its background shells, running and the last ended ones. With nothing of this chat's, the
 badge is the registry's count — background tasks and the turns of sessions you left,
@@ -339,7 +340,8 @@ badge, the count included, turns the warn colour then.
 `↓` on an empty line opens the strip — `J` and `/work` too (see The work picker below). The
 field and its hint row keep their rows whatever the chat's height: the plan above them gives
 way first, down to one line, then not drawn at all, and a question or a y/n takes the field's
-place, its hint row staying under it, with `↓` opening nothing while one waits. `↑` on the
+place, its hint row staying at the frame's edge under it, past the empty row, with `↓`
+opening nothing while one waits. `↑` on the
 strip's first row closes it, as Esc does, while a deeper `↑` only moves the cursor; the
 strip's hint says which — `↑ close · ↓ pick` on the first row of a list of more than one,
 `↑↓ pick` below it, and neither on a list of one row, which has no move to pick from and no

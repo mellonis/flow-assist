@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The key hint and the empty row trade places.** The row that names the keys sits on the
+  frame's bottom edge, and the one empty row that stood under it now stands above it —
+  between the line you type and the hint. The same in every state: the pager's keys and a
+  watched child's status hug the edge too.
+
 - **A stretch of the work folds to one line that counts what is inside it.** Everything
   dim between two of your own rows or two answers — tool calls, the thoughts the model
   writes as it works, a command's block — is ONE line where the stretch began: `▸ + 3
