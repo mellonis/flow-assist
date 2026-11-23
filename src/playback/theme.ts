@@ -239,6 +239,7 @@ export function resolveAppTheme(
   }
   return resolved;
 }
+
 // The ABSTRACT base (`modals`' flat props), as the host's own screen reads it: the
 // start screen, the title bar, the `: ` line and the hint row are not a modal, so
 // nothing but this gave them a ground and an ink. A value the palette leaves to the

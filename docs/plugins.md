@@ -514,8 +514,8 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   did not ask to change.
 - `host.services.setThemeMode(mode)` pins the app's appearance for this run — `system`
   follows the terminal's light/dark scheme, `light` and `dark` hold one — and repaints
-  every window at once; it saves nothing (a choice the person keeps is
-  `config set ui.theme`, which only they may set).
+  the whole screen at once, the host's own side and every window included; it saves
+  nothing (a choice the person keeps is `config set ui.theme`, which only they may set).
 - The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
   secret — a token, a password, a header — says `history: false` and is never kept:
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of
@@ -618,6 +618,12 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   `accentBg` (a stronger highlight), `highlightText` (the ink on either), and the
   modal base under `theme.modals` (`bg`, `text`, `border`, `fieldBg`, …). Where the
   terminal has not said which it is, they are `'default'`: the terminal's own.
+- **A screen that paints its own ground names its own ink.** The host's own side paints
+  the palette's base ground and ink, and every surface inside it inherits that ink: a
+  text with no colour of its own, and a border with no `borderColor`. That is usually
+  right — a dark ground with the terminal's dark ink was the bug the chat window fixed
+  for itself — but a plugin that paints a ground of its own must set its ink with it,
+  or under `ui.theme light` it draws dark on dark.
 
 ## Screens the model can open
 

@@ -25,12 +25,12 @@ assistant may set or save".
   read live: `:config set ui.theme dark` in the running app repaints it at once; a value
   written into `config.local.json` from outside a running app is read at the next start —
   there is no file watcher. See [usage.md](usage.md), "The look". The key is the
-  person's — the assistant has no mark for it. The chat's own colours live at `theme.modals.chat`: `accent`, `shell`,
-  `assistantAccent`, `userBg` (the person's messages), `bgAccent`/`bgBg` (a background
-  result), `askBg`/`askInk` (a kept question and the answer it got), `fieldBg`, `warn`,
-  `ok` and `idleBorder`. A `theme` record cannot set a per-modal token — a value at
-  `theme.modals.chat.<key>` is inert (it nests one level down); `config.plugins.chat.colors`
-  is the path.
+  person's — the assistant has no mark for it. The chat's own colours live at
+  `theme.modals.chat`: `accent`, `shell`, `assistantAccent`, `userBg` (the person's
+  messages), `bgAccent`/`bgBg` (a background result), `askBg`/`askInk` (a kept question
+  and the answer it got), `fieldBg`, `warn`, `ok` and `idleBorder`. A `theme` record
+  cannot set a per-modal token — a value at `theme.modals.chat.<key>` is inert (it nests
+  one level down); `config.plugins.chat.colors` is the path.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

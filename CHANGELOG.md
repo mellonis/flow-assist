@@ -14,9 +14,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   and the panels over it; the screen around them — the start screen, the title bar, the
   `: ` line and the hint row — kept the terminal's ground and ink, so `dark` on a light
   terminal left a bright frame around a dark chat. The host's side now paints the
-  palette's base ground and ink, and the `: ` prompt and the start screen's keys take
-  the palette's colours instead of two literals. A person's own `theme` reaches the
-  host's side too, for the same reason.
+  palette's base ground and ink, and the `: ` prompt takes the palette's border colour
+  instead of a literal (blue under a light terminal, cyan under a dark one) while the
+  start screen's keys read the palette's `selected` (green in the shipped palettes). A
+  person's own `theme` reaches the host's side too, for the same reason.
 
 - **The field wraps at words.** What you type now breaks at spaces on screen, the same
   way the message breaks when it is printed — mid-word cuts while you write are gone,

@@ -113,7 +113,8 @@ export interface HostServices {
   // Pins the appearance the app draws in (src/playback/theme-mode.ts): `system` follows
   // the terminal's own light/dark scheme, `light` and `dark` hold one whatever the
   // terminal says. The palette is re-resolved in place at once — the same resolve the
-  // terminal's own scheme change does — so every window and plugin palette repaints.
+  // terminal's own scheme change does — so the whole screen repaints: the host's own
+  // side, every window and every plugin palette.
   // The default is a no-op; the App binds it (app.tsx).
   setThemeMode: (mode: import('../playback/theme-mode.js').ThemeMode) => void;
   // Puts a message into the chat from OUTSIDE the conversation — a plugin's press, a

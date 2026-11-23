@@ -1070,7 +1070,7 @@ there is no `/fullscreen`.
   it. `rows()` is read at every
   draw and a 1 s tick redraws it while up. A spec's `onCursor(id, index)` observes a
   cursor move and `onDrop()` a drop WITHOUT a decision (never a key's `run`), where a
-  preview laid on screen is put back (`/theme`). A key's `run(id)` may answer a line (the
+  preview laid on screen is put back. A key's `run(id)` may answer a line (the
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
   A spec's `look: 'bottom'` COMPOSES over the chat: the transcript, the queue and the plan

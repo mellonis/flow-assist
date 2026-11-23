@@ -411,7 +411,7 @@ export async function renderApp(
   const userTheme = config.theme as Theme | undefined;
   // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
   // the terminal's own light/dark scheme, `light` and `dark` pin one whatever the
-  // terminal says. `seenConfigMode` is what the config last said, so a mode a picker
+  // terminal says. `seenConfigMode` is what the config last said, so a mode a plugin
   // pinned (below) is not undone by the next render.
   const configThemeMode = (): ThemeMode | undefined => (config.ui as { theme?: ThemeMode } | undefined)?.theme;
   let seenConfigMode: ThemeMode | undefined = configThemeMode();
@@ -481,7 +481,7 @@ export async function renderApp(
     (services as unknown as ReactBoundServices).logs = services.log.read();
   };
   const redraw = () => (services as unknown as ReactBoundServices).notify();
-  // What a picker pins (`host.services.setThemeMode`, src/playback/theme-mode.ts): the
+  // What a plugin pins (`host.services.setThemeMode`, src/playback/theme-mode.ts): the
   // mode is stored and the palette re-resolved in place at once — the same resolve the
   // terminal's own scheme change does — then the screen is drawn again with it. A mode
   // set as a config value (`ui.theme`) reaches the same resolve through the App's own
@@ -607,12 +607,12 @@ export async function renderApp(
     // The terminal switched between light and dark (macOS does it by itself at
     // sunset and sunrise): lay the other scheme's palette into the SAME theme object
     // — a plugin may hold a reference to it — before anything below renders with it.
-    // A pinned mode (`ui.theme`, or a picker's `setThemeMode`) answers its own scheme
+    // A pinned mode (`ui.theme`, or a plugin's `setThemeMode`) answers its own scheme
     // whatever the terminal says.
     const { scheme } = useColorScheme();
     terminalScheme = scheme;
     // `ui.theme` is a live key: a value set while the app runs (`config set ui.theme
-    // light`) is read here and is the mode from then on. A mode a picker pinned is not
+    // light`) is read here and is the mode from then on. A mode a plugin pinned is not
     // undone by a render that follows it — the config still says what it said.
     const fromConfig = configThemeMode();
     if (fromConfig !== seenConfigMode) { seenConfigMode = fromConfig; pinnedScheme = fromConfig ?? 'system'; }
@@ -660,7 +660,7 @@ export async function renderApp(
       ui.overlay = overlay ?? undefined;
       notify();
     };
-    // The appearance channel (src/playback/theme-mode.ts): a picker pins `system`, `light`
+    // The appearance channel (src/playback/theme-mode.ts): a plugin pins `system`, `light`
     // or `dark`; the mode is stored and the palette re-resolved in place at once, then the
     // screen is drawn with it. `ui.theme` in the config reaches the same helper.
     (services as unknown as HostServices).setThemeMode = setThemeMode;

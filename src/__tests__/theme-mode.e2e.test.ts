@@ -32,7 +32,7 @@ test('a pinned scheme survives a terminal flip', async () => {
   await ui.press('F');
   await settle();
   // The terminal has not said: no ground of the app's own.
-  expect([undefined, 'default']).toContain(hintCell(ui).bg);
+  expect(NONE).toContain(hintCell(ui).bg);
 
   ui.services.setThemeMode('light');
   await settle();

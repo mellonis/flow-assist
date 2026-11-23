@@ -37,7 +37,6 @@ import type { ShellJob } from '../assistant/shell-job.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
-import { setConfigValue } from '../config/load.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentsPanelRows, stopQuestion } from '../assistant/agent-tree.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
