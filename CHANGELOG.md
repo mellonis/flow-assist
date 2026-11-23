@@ -10,6 +10,14 @@ What each version of flow-assist brought, newest first. The version is the one i
   repaints at once; `:config unset ui.theme` follows the terminal again. The chat's menu
   with the palette previewed as the cursor moved went with the command.
 
+- **The host's own screen takes the theme.** `ui.theme` used to repaint the chat window
+  and the panels over it; the screen around them — the start screen, the title bar, the
+  `: ` line and the hint row — kept the terminal's ground and ink, so `dark` on a light
+  terminal left a bright frame around a dark chat. The host's side now paints the
+  palette's base ground and ink, and the `: ` prompt and the start screen's keys take
+  the palette's colours instead of two literals. A person's own `theme` reaches the
+  host's side too, for the same reason.
+
 - **The field wraps at words.** What you type now breaks at spaces on screen, the same
   way the message breaks when it is printed — mid-word cuts while you write are gone,
   in the chat's field and in every question's own-words field (flowtty `1.0.0-alpha.38`).

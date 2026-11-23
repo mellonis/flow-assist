@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import {
+  baseInk,
   modalColorDefaults,
   resolveModalPalettes,
   resolveColorRefs,
   resolveAppTheme,
+  themeFor,
   DEFAULT_THEME,
   type Theme,
 } from '../theme';
@@ -143,4 +145,15 @@ test('the ask ground lands in every palette', () => {
   const mine = resolveAppTheme(undefined, [], { plugins: { chat: { colors: { askBg: 'red', askInk: 'white' } } } }, 'light');
   expect(modalsOf(mine).chat.askBg).toBe('red');
   expect(modalsOf(mine).chat.askInk).toBe('white');
+});
+
+test('baseInk takes the abstract base, and leaves the terminal what the palette left it', () => {
+  // `default` is the palette saying "the terminal's": nothing of the app's own is
+  // painted where it is — the honest ground for a scheme that was never said.
+  expect(baseInk(themeFor('unknown'))).toEqual({ bg: undefined, text: undefined, border: 'cyan', selected: 'green' });
+  expect(baseInk(themeFor('light'))).toEqual({ bg: '#f4f4f6', text: 'black', border: 'blue', selected: 'green' });
+  expect(baseInk(themeFor('dark'))).toEqual({ bg: 'black', text: 'white', border: 'cyan', selected: 'green' });
+  // A person's own value on top of a scheme reaches the host's side too.
+  expect(baseInk({ modals: { bg: 'blue' } })).toMatchObject({ bg: 'blue', border: undefined });
+  expect(baseInk(undefined)).toEqual({ bg: undefined, text: undefined, border: undefined, selected: undefined });
 });

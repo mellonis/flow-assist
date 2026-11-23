@@ -60,7 +60,7 @@ import { legacyRootsNote } from '../assistant/shell.js';
 import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
-import { resolveAppTheme } from '../playback/theme.js';
+import { baseInk, resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
 import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
 import type { Command } from '../loader/plugin.js';
@@ -1321,6 +1321,10 @@ export async function renderApp(
     // plugin's side — the title bar in the same colour.
     const pluginFocused = !!dock && !dock.collapsed && chat?.focus === 'plugin';
     const chatAccent = ((config.theme as Theme | undefined)?.modals as Record<string, { accent?: string }> | undefined)?.chat?.accent;
+    // The host's own side is not a modal: it reads the abstract base for its ground, its
+    // ink and its two accents, and `baseInk` leaves out what the palette left to the
+    // terminal — so `ui.theme` reaches the start screen and the `:` line too.
+    const base = baseInk(config.theme as Theme | undefined);
     const hints = composeFooterHints(plugins, apiMap, keys).join(' · ');
     const surfaceActive = (p: PluginShape): boolean => {
       const kc = (p as Plugin).keycaps;
@@ -1400,7 +1404,8 @@ export async function renderApp(
       h(AreaContext.Provider, { value: region },
       // The plugin's side of the screen. A drag that starts here stays here — never
       // into the panel beside it.
-      h(Box, { flexDirection: 'column', width: region.width, height: region.height, flexShrink: 0, overflow: 'hidden', selectionScope: true },
+      h(Box, { flexDirection: 'column', width: region.width, height: region.height, flexShrink: 0, overflow: 'hidden', selectionScope: true,
+        ...(base.bg ? { backgroundColor: base.bg } : {}), ...(base.text ? { color: base.text } : {}) },
       // The title bar names the app over a guest's screen; the start screen says it itself.
       // Chrome, not text: a drag that runs over the title bar or the footer copies
       // nothing from them.
@@ -1417,7 +1422,7 @@ export async function renderApp(
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote, starting: late?.starting(), untrusted, trustNotes }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, accent: base.selected ?? 'green', pluginsNote, starting: late?.starting(), untrusted, trustNotes }) : null),
       // The bottom row, and the one place on this screen a drag has something to
       // copy: the command the person typed. Marking the box `selectable: false`
       // whole would be right for what surrounds the command, but would swallow the
@@ -1438,14 +1443,14 @@ export async function renderApp(
               // The prompt, the inline offer and the candidate list are the host
               // speaking, not text anyone asked for: a copy of the command line is
               // what was typed and nothing else.
-              h(Text, { bold: true, color: 'cyan', selectable: false }, ': '),
+              h(Text, { bold: true, color: base.border ?? 'cyan', selectable: false }, ': '),
               lineCaret > 0 ? h(Text, null, lineInput.slice(0, lineCaret)) : null,
               // The caret sits ON the character under it — the whole cluster, a flag or
               // an emoji with its modifiers included — and on a space at the end of the
               // line. With an offer, it sits on the first offered character instead, as
               // in the chat's field.
               line.ghost
-                ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan', selectable: false }, line.ghost.slice(1))]
+                ? [h(Text, { key: 'g0', inverse: true, dim: true, color: base.border ?? 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: base.border ?? 'cyan', selectable: false }, line.ghost.slice(1))]
                 : h(Text, { inverse: true, ...(caretCell ? {} : { selectable: false }) }, caretCell || ' '),
               lineInput.length > lineCaret + caretCell.length ? h(Text, null, lineInput.slice(lineCaret + caretCell.length)) : null,
               // What the offered candidate's label says (a value declared as

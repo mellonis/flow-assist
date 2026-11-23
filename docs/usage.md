@@ -956,8 +956,8 @@ while `light` and `dark` pin one whatever the terminal says. It is set on the `:
 
     :config set ui.theme dark
 
-and it is read live: the screen repaints at once — the chat window and the panels over
-it. `:config unset ui.theme` follows the terminal again, and `:config get ui.theme` says
+and it is read live: the screen repaints at once — the host's own side and the chat
+alike. `:config unset ui.theme` follows the terminal again, and `:config get ui.theme` says
 what is in force. A value written into `config.local.json` from outside a running app is
 read at the next start — there is no file watcher.
 

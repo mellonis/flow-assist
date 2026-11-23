@@ -239,3 +239,23 @@ export function resolveAppTheme(
   }
   return resolved;
 }
+// The ABSTRACT base (`modals`' flat props), as the host's own screen reads it: the
+// start screen, the title bar, the `: ` line and the hint row are not a modal, so
+// nothing but this gave them a ground and an ink. A value the palette leaves to the
+// terminal (`default` — the scheme was never said, or a person's own `default`) is
+// `undefined`, so nothing is painted over the terminal's own colours.
+export interface BaseInk {
+  bg?: string;
+  text?: string;
+  border?: string;
+  selected?: string;
+}
+
+export function baseInk(theme: Theme | undefined): BaseInk {
+  const base = (theme?.modals ?? {}) as Record<string, unknown>;
+  const pick = (key: string): string | undefined => {
+    const value = base[key];
+    return typeof value === 'string' && value !== 'default' ? value : undefined;
+  };
+  return { bg: pick('bg'), text: pick('text'), border: pick('border'), selected: pick('selected') };
+}
