@@ -31,6 +31,18 @@ test('config write validation rejects an unknown key and a bad type', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', true).ok).toBe(true);
 });
 
+test('a mode typed at `theme` is pointed at `ui.theme`', () => {
+  // `theme` is the person's own palette record; the appearance (`system`, `light`,
+  // `dark`) is `ui.theme`. Someone who typed the first meant the second.
+  const refused = validateConfigWriteValue(hostConfigSchema, 'theme', 'dark') as { ok: false; error: string };
+  expect(refused.ok).toBe(false);
+  expect(refused.error).toContain('ui.theme');
+  // A real palette record still passes, and no other key's refusal carries the hint.
+  expect(validateConfigWriteValue(hostConfigSchema, 'theme', { modals: { bg: 'black' } }).ok).toBe(true);
+  const other = validateConfigWriteValue(hostConfigSchema, 'cache.enabled', 'yes') as { ok: false; error: string };
+  expect(other.error).not.toContain('ui.theme');
+});
+
 test('project.instructionsCap takes a non-negative integer — and the model may not set it', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 8192)).toEqual({ ok: true, value: 8192 });
   expect(validateConfigWriteValue(hostConfigSchema, 'project.instructionsCap', 0)).toEqual({ ok: true, value: 0 });

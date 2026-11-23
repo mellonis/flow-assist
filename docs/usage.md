@@ -957,9 +957,14 @@ while `light` and `dark` pin one whatever the terminal says. It is set on the `:
     :config set ui.theme dark
 
 and it is read live: the screen repaints at once — the host's own side and the chat
-alike. `:config unset ui.theme` follows the terminal again, and `:config get ui.theme` says
-what is in force. A value written into `config.local.json` from outside a running app is
-read at the next start — there is no file watcher.
+alike. `:config unset ui.theme` follows the terminal again, and `:config get ui.theme`
+says what is in force. A value written into `config.local.json` from outside a running
+app is read at the next start — there is no file watcher.
+
+The mode is `ui.theme` — not `theme`, which is your own palette record: a mode word at
+`theme` is refused with a pointer to `ui.theme`. The `:` line is the host's, so with the
+chat open it takes two keys to reach it: `Esc Esc` closes the window, then `:` opens the
+line.
 
 The setting is the person's: it has no mark for the assistant. A palette of your own is
 still `theme` (`config set theme …`), which lays its colours over either scheme — see

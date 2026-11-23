@@ -705,7 +705,11 @@ export function validateConfigWriteValue(rootSchema: any, key: string, value: un
   const res = node.safeParse(value);
   if (!res.success) {
     const want = describeSchema(node);
-    return { ok: false, error: `config: ${key} — expected ${want}, got ${JSON.stringify(value)}` };
+    // The one trap the two theme keys leave: `theme` is the person's own palette
+    // record, and the appearance (`system`/`light`/`dark`) is `ui.theme`. Whoever typed
+    // the first with a mode word meant the second — the refusal says where it lives.
+    const hint = key === 'theme' ? ' — the appearance (system, light, dark) is `ui.theme`' : '';
+    return { ok: false, error: `config: ${key} — expected ${want}, got ${JSON.stringify(value)}${hint}` };
   }
   return { ok: true, value: res.data };
 }

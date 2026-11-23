@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A mode typed at `theme` is pointed at `ui.theme`.** `theme` is your own palette
+  record and `ui.theme` the appearance, so `:config set theme dark` says where the mode
+  lives instead of only "expected object". The docs say the same, and how to reach the
+  `:` line from the chat (`Esc Esc`, then `:`).
+
 - **`/theme` is gone: the look is a config key.** `ui.theme` (`system`, `light`, `dark`)
   is set on the `:` line — `:config set ui.theme dark` — and read live, so the screen
   repaints at once; `:config unset ui.theme` follows the terminal again. The chat's menu
