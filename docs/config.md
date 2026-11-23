@@ -22,12 +22,10 @@ assistant may set or save".
 - **The look**: `ui.theme` is `system` (the default), `light` or `dark`. `system` follows
   the terminal's own light/dark scheme as it changes (macOS switches it by itself and
   the terminal follows); `light` and `dark` pin one whatever the terminal says. It is
-  read live: `:config set ui.theme dark` in the running app repaints it at once, and
-  `/theme` does the same through this key; a value written into `config.local.json` from
-  outside a running app is read at the next start — there is no file watcher. `/theme` in
-  the chat picks it with the palette previewed as the cursor moves — see
-  [usage.md](usage.md), "The look: `/theme`". The key is the person's — the assistant has
-  no mark for it. The chat's own colours live at `theme.modals.chat`: `accent`, `shell`,
+  read live: `:config set ui.theme dark` in the running app repaints it at once; a value
+  written into `config.local.json` from outside a running app is read at the next start —
+  there is no file watcher. See [usage.md](usage.md), "The look". The key is the
+  person's — the assistant has no mark for it. The chat's own colours live at `theme.modals.chat`: `accent`, `shell`,
   `assistantAccent`, `userBg` (the person's messages), `bgAccent`/`bgBg` (a background
   result), `askBg`/`askInk` (a kept question and the answer it got), `fieldBg`, `warn`,
   `ok` and `idleBorder`. A `theme` record cannot set a per-modal token — a value at

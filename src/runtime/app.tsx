@@ -489,7 +489,7 @@ export async function renderApp(
   const setThemeMode = (mode: ThemeMode) => {
     pinnedScheme = mode;
     // A mode the config names is the app's agreement with it: a preview of the config's
-    // own mode, and a save (`/theme` writes `ui.theme` before the pin). Recorded here so
+    // own mode, or a save that wrote `ui.theme` before the pin. Recorded here so
     // the reconcile below agrees with the write instead of reading it as an outside
     // change to pin over.
     if (configThemeMode() === mode) seenConfigMode = mode;

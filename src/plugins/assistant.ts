@@ -80,7 +80,6 @@ import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
 import { modelChoice, modelRows, roleStart } from '../assistant/model-roles.js';
-import { THEME_MODES, parseThemeArg, type ThemeMode } from '../playback/theme-mode.js';
 import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
@@ -128,9 +127,6 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'notes', description: 'how the steps between tool calls are drawn', values: NOTES_MODES },
   { name: 'mode', description: 'the chat\'s layout', values: CHAT_MODES },
   { name: 'model', description: 'the model this conversation runs' },
-  // A chosen theme is not worth recalling: the menu is one key away and ↑/↓ history is
-  // for the command's argument.
-  { name: 'theme', description: 'the look: system, light or dark', values: THEME_MODES, history: false },
   { name: 'log', description: 'share the tail of the host log' },
   { name: 'exit', description: 'close the chat' },
 ];
@@ -2092,60 +2088,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return;
                 }
                 set(name);
-                return;
-              }
-              case 'theme': {
-                // The person's own appearance. The menu marks the mode the config names;
-                // a cursor move previews it at once (`setThemeMode` pins the palette and
-                // saves nothing), Enter keeps it and saves it, Esc puts back the mode the
-                // config names then, and `/theme <mode>` applies and saves in one step.
-                const saved = (): ThemeMode => (host.config.ui as { theme?: ThemeMode } | undefined)?.theme ?? 'system';
-                const preview = (mode: ThemeMode) => (host.services as { setThemeMode: (m: ThemeMode) => void }).setThemeMode(mode);
-                const save = (mode: ThemeMode): boolean => {
-                  const res = setConfigValue(host.config as Record<string, unknown>, 'ui.theme', mode, { scope: 'saved' });
-                  if (!res.ok) { setError(`/theme: ${res.error}`); return false; }
-                  return true;
-                };
-                const set = (asked: string): boolean => {
-                  const got = parseThemeArg(asked);
-                  if (typeof got !== 'string') { setError(got.error); return false; }
-                  setField('');
-                  const was = saved();
-                  // A save that failed leaves nothing changed: the look goes back to what
-                  // it was, as `/model` leaves the model alone.
-                  if (!save(got)) { preview(was); return false; }
-                  // The config names the mode now, so the pin is its agreement with the
-                  // config (the app records it) and a drop that follows has nothing stale.
-                  preview(got);
-                  conv.pushNote(`theme: ${got}`);
-                  host.notify();
-                  return true;
-                };
-                if (arg.trim()) { set(arg.trim().toLowerCase()); return; }
-                setField('');
-                openPanel({
-                  title: 'Theme',
-                  rows: () => THEME_MODES.map((mode) => ({
-                    id: mode,
-                    text: mode,
-                    detail: [mode === 'system' ? 'follows the terminal' : '', mode === saved() ? 'current' : ''].filter(Boolean).join(' · ') || undefined,
-                    tone: mode === saved() ? 'ok' : undefined,
-                  })),
-                  onCursor: (id) => preview(id as ThemeMode),
-                  // The menu went WITHOUT a choice — Esc, the chat folding away, a session
-                  // change: the mode the config names is the one on screen again, not the one
-                  // the menu opened with (the config may have changed under it). `system` is
-                  // honest — it follows the terminal as it is now, not as it was at open. A
-                  // `⏎` that saves is a decision and closes without this.
-                  onDrop: () => preview(saved()),
-                  keys: [{ key: 'return', label: 'use', run: (id) => {
-                    // The same path as `/theme <mode>`: a save that fails keeps the menu up
-                    // with its error, as `/model` keeps its panel.
-                    if (set(id as ThemeMode)) setPanel(null);
-                    return undefined;
-                  } }],
-                });
-                host.notify();
                 return;
               }
               case 'log': {

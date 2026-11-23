@@ -25,6 +25,7 @@ async function command(ui: Awaited<ReturnType<typeof bootApp>>, line: string) {
 
 const LIGHT = { bg: '#f4f4f6', fg: 'black' };
 const DARK = { bg: 'black', fg: 'white' };
+const NONE = [undefined, 'default'];
 
 test('a pinned scheme survives a terminal flip', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { scheme: 'unknown' });
@@ -73,5 +74,20 @@ test('ui.theme set while the app runs repaints at once, and unsetting it follows
   await ui.press('F');
   await settle();
   expect(hintCell(ui)).toMatchObject(DARK);
+  ui.app.unmount();
+});
+
+test('/theme is gone — the look is a config key', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { scheme: 'unknown' });
+  await ui.press('F');
+  await settle();
+  await ui.type('/theme dark');
+  await ui.press('return');
+  await settle();
+  // The chat says the command is not there, and the list it names does not offer it.
+  expect(ui.backend.lastFrame).toContain('unknown command /theme');
+  expect(ui.backend.lastFrame).not.toContain('/theme,');
+  // Nothing was applied by the refused line: the terminal still has the say.
+  expect(NONE).toContain(hintCell(ui).bg);
   ui.app.unmount();
 });

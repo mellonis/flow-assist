@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/theme` is gone: the look is a config key.** `ui.theme` (`system`, `light`, `dark`)
+  is set on the `:` line — `:config set ui.theme dark` — and read live, so the screen
+  repaints at once; `:config unset ui.theme` follows the terminal again. The chat's menu
+  with the palette previewed as the cursor moved went with the command.
+
 - **The field wraps at words.** What you type now breaks at spaces on screen, the same
   way the message breaks when it is printed — mid-word cuts while you write are gone,
   in the chat's field and in every question's own-words field (flowtty `1.0.0-alpha.38`).

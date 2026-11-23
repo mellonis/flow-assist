@@ -60,13 +60,13 @@ export type PanelSpec = {
   // row does not, and its ↑ is the move that goes nowhere.
   upAtTopCloses?: boolean;
   // A cursor move, observed: the row under it now, and its index. A preview is laid on
-  // screen here (`/theme`), never a decision — a key's `run` is the only thing that
+  // screen here, never a decision — a key's `run` is the only thing that
   // decides, and it never calls this. A move between rows observes; a panel's cursor
   // reset (Esc back to the panel underneath, the last one closing) is not a move.
   onCursor?: (id: string, index: number) => void;
   // The panel went WITHOUT a decision, observed: Esc closing the last one, the chat
   // closing, a session change, another panel taking its place. What a preview put on
-  // screen is put back here (`/theme`). A key's `run` that closes the panel is a
+  // screen is put back here. A key's `run` that closes the panel is a
   // decision and never calls it; Esc back to a panel underneath is not a drop either.
   onDrop?: () => void;
 };
