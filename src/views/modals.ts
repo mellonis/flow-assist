@@ -3324,13 +3324,21 @@ export function diffPanelBody(p: {
       const width = Math.max(1, ...hunkRows.map((r) => r.no.length));
       hunkRows.forEach((r, ri) => {
         // The number is chrome — dim, out of a drag — and the line is coloured by what
-        // it does: what came in, what went out, or the context around it. A palette
-        // without `ok`/`warn` leaves those rows the terminal's own ink, never dim.
-        const changed = r.text.startsWith('+') || r.text.startsWith('-');
-        const color = r.text.startsWith('+') ? m.ok : r.text.startsWith('-') ? m.warn : undefined;
+        // it does: what came in (`add`), what went out (`del`), or the context around it.
+        // A palette without either key leaves those rows the terminal's own ink, never dim.
+        const out = r.text.startsWith('-');
+        const changed = r.text.startsWith('+') || out;
+        const color = r.text.startsWith('+') ? m.add : out ? m.del : undefined;
+        const band = r.text.startsWith('+') ? m.addBg : out ? m.delBg : undefined;
+        // The band covers the code area only — the number gutter keeps the panel's own
+        // ground — and is a box beside it rather than padded spaces, so it reaches the
+        // panel's right edge while a drag still copies the code alone.
+        const code = changed
+          ? h(Text, { color, wrap: 'truncate' }, r.text)
+          : h(Text, { dim: true, wrap: 'truncate' }, r.text);
         rows.push(h(Box, { key: `h${si}-${fi}-${ri}`, flexDirection: 'row', flexShrink: 0, ...fold },
           h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${r.no.padStart(width)} `),
-          changed ? h(Text, { color, wrap: 'truncate' }, r.text) : h(Text, { dim: true, wrap: 'truncate' }, r.text)));
+          band === undefined ? code : h(Box, { flexGrow: 1, backgroundColor: band }, code)));
       });
     });
   });

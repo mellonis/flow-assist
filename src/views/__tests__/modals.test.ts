@@ -2232,7 +2232,7 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   };
   const drawn = await diffFrame({
     sections: [section], collapsed: new Set(), cursor: diffFileKey('/r', 'src/app.ts'),
-    palette: { accent: 'cyan', ok: 'green', warn: 'yellow' },
+    palette: { accent: 'cyan', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
   });
   expect(drawn.frame).toContain('· +12 −3');
   const rows = drawn.frame.split('\n');
@@ -2243,15 +2243,41 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   };
   const fgAt = (text: string) => drawn.backend.lastBuffer!.get(rows[rowOf(text)]!.indexOf(text), rowOf(text)).style.fg;
   // The cursor's file is the lit one — its path in the accent — and a hunk row takes
-  // the palette's `ok` for what came in, `warn` for what went out.
+  // the palette's `add` for what came in, `del` for what went out: a deletion is not
+  // what waits on the person.
   expect(fgAt('src/app.ts')).toBe('cyan');
   expect(fgAt('+here')).toBe('green');
-  expect(fgAt('-gone')).toBe('yellow');
+  expect(fgAt('-gone')).toBe('red');
   // The line number is chrome: a drag over the row copies the code and not the gutter.
   const y = rowOf('-gone');
   const drag = drawn.handle.select({ x: 2, y }, { x: 30, y });
   expect(drag).not.toContain('1');
   expect(drag).toContain('-gone');
+  drawn.handle.unmount();
+});
+
+// The band is the palette's and covers the code area only: the line-number gutter keeps
+// the panel's own ground, the band runs past the end of the text to the panel's right
+// edge — and a drag over the row still copies the code alone.
+test('a diff row wears the palette band across the code area, never over the gutter', async () => {
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({
+    sections: [section], collapsed: new Set(), cursor: null,
+    palette: { bg: 'black', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
+  });
+  const rows = drawn.frame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-one'));
+  const x = rows[y]!.indexOf('-one');
+  const at = (col: number) => drawn.backend.lastBuffer!.get(col, y).style;
+  expect(at(x).bg).toBe('#3b0000');
+  expect(at(x + 20).bg).toBe('#3b0000'); // well past the text
+  expect(at(2).bg).toBe('black');        // the file's line number keeps the panel's ground
+  const drag = drawn.handle.select({ x: 2, y }, { x: 60, y });
+  expect(drag).toContain('-one');
+  expect(drag).not.toContain('1');
   drawn.handle.unmount();
 });
 
