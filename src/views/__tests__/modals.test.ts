@@ -2544,9 +2544,9 @@ test('a change block and a diff the model writes take the chat palette', async (
   handle.unmount();
 });
 
-// Review Focus: a palette that names no band draws the one the layout already had —
-// `undefined` is the band left out of the style, never an erased default.
-test('a palette without bands keeps the default band, and the ink is the palette\'s', async () => {
+// Review Focus: a palette that names no band draws NO band — the palette is the whole
+// word on what a changed row looks like, and the ink is still the palette's.
+test('a palette without bands draws no band, and the ink is the palette\'s', async () => {
   const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
   const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
   const backend = new TestBackend(80, 24);
@@ -2555,8 +2555,41 @@ test('a palette without bands keeps the default band, and the ink is the palette
   const y = rows.findIndex((r) => r.includes('-a'));
   const style = backend.lastBuffer!.get(rows[y]!.indexOf('-a'), y).style;
   expect(style.fg).toBe('magenta');
-  expect(style.bg).toBe('#3b0000');
+  // `default` is flowtty's "no background" sentinel — the writer drops it, so the row
+  // wears the ground it sits on and nothing else. Never the layout's dark fallback.
+  expect([undefined, 'default']).toContain(style.bg);
+  expect(style.bg).not.toBe('#3b0000');
   handle.unmount();
+});
+
+// Review Focus: the all-keys-missing palette (a panel's own object, a test's partial
+// one) draws the diff as it reads — the layout's own inks, no band of anyone's.
+test('a palette that names none of the diff keys draws no band in either drawer', async () => {
+  const chat = { accent: 'cyan', bg: 'black', text: 'white' };
+  const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const styleOf = (needle: string) => {
+    const row = rows.findIndex((r) => r.includes(needle));
+    expect(row).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(rows[row]!.indexOf(needle), row).style;
+  };
+  // The same in both drawers: no band of anyone's — `default` or nothing at all.
+  expect([undefined, 'default']).toContain(styleOf('-a').bg);
+  expect([undefined, 'default']).toContain(styleOf('+b').bg);
+  handle.unmount();
+
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, palette: chat });
+  const drows = drawn.frame.split('\n');
+  const dy = drows.findIndex((r) => r.includes('-one'));
+  // The row sits on the panel's own ground — `bg` from the palette — and on nothing else.
+  expect(drawn.backend.lastBuffer!.get(drows[dy]!.indexOf('-one'), dy).style.bg).toBe('black');
+  drawn.handle.unmount();
 });
 
 // Review Focus: a change block inside a stretch opened with `^o` is the same rows —

@@ -189,9 +189,9 @@ test('a change block and a diff the model writes take the chat palette', async (
   handle.unmount();
 });
 
-// Review Focus: working with a palette that names no band paints no band and never
-// an `undefined` — the ink is still the palette's.
-test('a palette without bands leaves the default bands out, not undefined', async () => {
+// Review Focus: a palette that names no band draws no band and never an `undefined`
+// — the ink is still the palette's.
+test('a palette without bands draws no band, and the ink is the palette\'s', async () => {
   const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
   const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
   const backend = new TestBackend(80, 24);
@@ -200,8 +200,10 @@ test('a palette without bands leaves the default bands out, not undefined', asyn
   const y = rows.findIndex((r) => r.includes('-a'));
   const style = backend.lastBuffer!.get(rows[y]!.indexOf('-a'), y).style;
   expect(style.fg).toBe('magenta');
-  // flowtty's own default band, not `undefined` and not the panel's.
-  expect(style.bg).toBe('#3b0000');
+  // `default` is flowtty's "no background" sentinel — the writer drops it. Never the
+  // layout's dark fallback under the chat's ink, and never the panel's ground.
+  expect([undefined, 'default']).toContain(style.bg);
+  expect(style.bg).not.toBe('#3b0000');
   handle.unmount();
 });
 

@@ -319,13 +319,15 @@ const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text ?? 'white'
 // only softens the heading marker below.
 
 // What a diff is drawn with in the chat: the palette's own inks and grounds, so the
-// `✎` block, a fence the model wrote and the `/diff` panel read alike. A style is
-// built field by field — `background: undefined` in a spread would erase the band the
-// layout already draws, which is the opposite of a palette that names none.
+// `✎` block, a fence the model wrote and the `/diff` panel read alike. A style names
+// exactly what the palette names: what it leaves out is not drawn — an unnamed ink
+// takes the layout's own, an unnamed band takes none at all (`default` is flowtty's
+// "no background" sentinel). The panel draws no band either in that case, so a palette
+// without a ground never leaves one drawer on flowtty's dark bands under the chat's ink.
 export function chatMarkdownOptions(m: Record<string, string | undefined>): MarkdownOptions {
   const style = (ink?: string, band?: string) => ({
     ...(ink === undefined ? {} : { color: ink }),
-    ...(band === undefined ? {} : { background: band }),
+    background: band ?? 'default',
   });
   return {
     tokenColors: {
