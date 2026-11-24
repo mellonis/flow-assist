@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A diff reads the same in the chat and in `/diff`.** A removed line is amber in the
+  panel — `warn`, the colour of what waits on you — and red in the change block, so the
+  same file tells two stories. Both now take the chat palette's `del` and its ground
+  `delBg` (`add`/`addBg` for what came in), and so does a ```diff the assistant writes
+  in an answer; the bands sit under the same inks in all three places and follow the
+  terminal's scheme, with nothing drawn where the scheme is unknown. `warn` is again
+  only what waits on the person.
+
 - **A mode typed at `theme` is pointed at `ui.theme`.** `theme` is your own palette
   record and `ui.theme` the appearance, so `:config set theme dark` says where the mode
   lives instead of only "expected object". The docs say the same, and how to reach the

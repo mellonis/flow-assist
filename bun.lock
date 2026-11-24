@@ -6,9 +6,9 @@
       "name": "flow-assist",
       "dependencies": {
         "@flow-assist/remote": "workspace:*",
-        "@flowtty/core": "^1.0.0-alpha.39",
-        "@flowtty/react": "^1.0.0-alpha.39",
-        "@flowtty/tty-backend": "^1.0.0-alpha.39",
+        "@flowtty/core": "^1.0.0-alpha.41",
+        "@flowtty/react": "^1.0.0-alpha.41",
+        "@flowtty/tty-backend": "^1.0.0-alpha.41",
         "react": "^19.2.8",
         "zod": "^4.6.5",
       },
@@ -27,11 +27,11 @@
   "packages": {
     "@flow-assist/remote": ["@flow-assist/remote@workspace:packages/remote"],
 
-    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.39", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-7ejgX/FwOJdloHGiZOXu0TVKzIhcXg77uWGxsJrmmXg80JDXy4m+8JpxDTTBJMXqmKyiJsRCRRtQKwKX89KMGQ=="],
+    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.41", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-Ai9tTYSUrrq7/PX42GNruA3cu7G33KKA0QIyx+RvsWp8TspXVlU+WnqHfTgOmkIhexqDlENnAcQNKlZBieahQw=="],
 
-    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.39", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.39" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-nQLc9uS/nTIs62I3KOUqkt1LwKGkH6FoK2wmh7w24D2gUOK5BpWJg95XhQdr+6d2/mr0bByO5fRyLLGa7GTisA=="],
+    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.41", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.41" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-1AAVELN18KuyJwie38WedtgAPeA3YW853w/lZIoVHp0N9XlIxzCDzw9CwHizi+uZktKaxCbIXRVZPLXZMWYLFg=="],
 
-    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.39", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.39" } }, "sha512-rDmEga4T5Rx8GgFs38CsMVrpsNfExsQr6e58k5mNWYJktgqeOBoA5Fy487PfmKrcON5FT0lXgSt1hDktPe6diQ=="],
+    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.41", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.41" } }, "sha512-dyAKeXyNqMOsrjUfZeZw/sCfEIIprju+q4pC35L61NyXLtu6ho1K82xptaAjOObxfkXj4wBUlvrIqMQILqRIhA=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 

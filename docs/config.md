@@ -28,7 +28,9 @@ assistant may set or save".
   person's — the assistant has no mark for it. The chat's own colours live at
   `theme.modals.chat`: `accent`, `shell`, `assistantAccent`, `userBg` (the person's
   messages), `bgAccent`/`bgBg` (a background result), `askBg`/`askInk` (a kept question
-  and the answer it got), `fieldBg`, `warn`, `ok` and `idleBorder`. A `theme` record
+  and the answer it got), `fieldBg`, `warn`, `ok`, `add`/`del` (a diff row: what came in,
+  what went out — the `✎` block, a diff the assistant writes and the `/diff` panel alike)
+  with `addBg`/`delBg` (the ground those rows sit on), and `idleBorder`. A `theme` record
   cannot set a per-modal token — a value at `theme.modals.chat.<key>` is inert (it nests
   one level down); `config.plugins.chat.colors` is the path.
 - **The model**: by default an OpenAI-compatible chat-completions API —

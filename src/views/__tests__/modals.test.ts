@@ -2074,22 +2074,26 @@ test('the chat draws a watched child: breadcrumb title, its rows, state and keys
 // one terminal line. A relative path repeats across two roots, so the fold and the
 // cursor are keyed `diffFileKey(root, path)` and each section folds on its own.
 
-// Draw the panel at the width the chat will hand it, and read back the frame.
+// Draw the panel at the width the chat will hand it, and read back the frame. A
+// narrow terminal is a real case — `width`/`wrap` draw the panel at one.
 async function diffFrame(props: {
   sections: DiffSection[];
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   palette?: Record<string, string | undefined>;
+  width?: number;
+  wrap?: number;
   loading?: boolean;
   gitless?: boolean;
   failed?: boolean;
 }) {
-  const backend = new TestBackend(80, 24);
+  const { width, wrap, ...rest } = props;
+  const backend = new TestBackend(width ?? 80, 24);
   const handle = await render(h(renderDiffPanel, {
-    ...props,
+    ...rest,
     gitless: props.gitless ?? false,
     failed: props.failed ?? false,
-    wrap: 74,
+    wrap: wrap ?? 74,
     bg: 'black',
   }), backend);
   const frame = backend.lastFrame ?? '';
@@ -2232,7 +2236,7 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   };
   const drawn = await diffFrame({
     sections: [section], collapsed: new Set(), cursor: diffFileKey('/r', 'src/app.ts'),
-    palette: { accent: 'cyan', ok: 'green', warn: 'yellow' },
+    palette: { accent: 'cyan', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
   });
   expect(drawn.frame).toContain('· +12 −3');
   const rows = drawn.frame.split('\n');
@@ -2243,15 +2247,64 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
   };
   const fgAt = (text: string) => drawn.backend.lastBuffer!.get(rows[rowOf(text)]!.indexOf(text), rowOf(text)).style.fg;
   // The cursor's file is the lit one — its path in the accent — and a hunk row takes
-  // the palette's `ok` for what came in, `warn` for what went out.
+  // the palette's `add` for what came in, `del` for what went out: a deletion is not
+  // what waits on the person.
   expect(fgAt('src/app.ts')).toBe('cyan');
   expect(fgAt('+here')).toBe('green');
-  expect(fgAt('-gone')).toBe('yellow');
+  expect(fgAt('-gone')).toBe('red');
   // The line number is chrome: a drag over the row copies the code and not the gutter.
   const y = rowOf('-gone');
   const drag = drawn.handle.select({ x: 2, y }, { x: 30, y });
   expect(drag).not.toContain('1');
   expect(drag).toContain('-gone');
+  drawn.handle.unmount();
+});
+
+// The band is the palette's and covers the code area only: the line-number gutter keeps
+// the panel's own ground, the band runs past the end of the text to the panel's right
+// edge — and a drag over the row still copies the code alone.
+test('a diff row wears the palette band across the code area, never over the gutter', async () => {
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({
+    sections: [section], collapsed: new Set(), cursor: null,
+    palette: { bg: 'black', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
+  });
+  const rows = drawn.frame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-one'));
+  const x = rows[y]!.indexOf('-one');
+  const at = (col: number) => drawn.backend.lastBuffer!.get(col, y).style;
+  expect(at(x).bg).toBe('#3b0000');
+  expect(at(x + 20).bg).toBe('#3b0000'); // well past the text
+  expect(at(2).bg).toBe('black');        // the file's line number keeps the panel's ground
+  const drag = drawn.handle.select({ x: 2, y }, { x: 60, y });
+  expect(drag).toContain('-one');
+  expect(drag).not.toContain('1');
+  drawn.handle.unmount();
+});
+
+// Review Focus: the band is width-relative — on a narrow panel it still covers the
+// code area alone, and the number beside the code still keeps the panel's ground.
+test('on a narrow panel the band still covers the code area alone', async () => {
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a-file.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one removed line\n+two' }],
+  };
+  const drawn = await diffFrame({
+    sections: [section], collapsed: new Set(), cursor: null,
+    palette: { bg: 'black', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
+    width: 40, wrap: 34,
+  });
+  const rows = drawn.frame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-one'));
+  expect(y).toBeGreaterThanOrEqual(0);
+  const x = rows[y]!.indexOf('-one');
+  const at = (col: number) => drawn.backend.lastBuffer!.get(col, y).style;
+  expect(at(x).bg).toBe('#3b0000');   // under the code
+  expect(at(x + 6).bg).toBe('#3b0000');
+  expect(at(x - 1).bg).toBe('black'); // the number beside it keeps the panel's ground
   drawn.handle.unmount();
 });
 
@@ -2488,4 +2541,97 @@ test('the ask box draws the tabs strip and the submit page', async () => {
   const title = narrow.lines.findIndex((l) => l.includes('? 1/3'));
   expect(title).toBeGreaterThanOrEqual(0);
   expect(narrow.lines[title + 2]).toContain('1. a');
+});
+
+// ─── one palette for a diff wherever the chat draws it ───────────────────────
+// The `✎` block of a write and a ```diff fence in an answer take the chat's own
+// `add`/`del` and their grounds — the same the `/diff` panel reads.
+
+test('a change block and a diff the model writes take the chat palette', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const messages = [{
+    role: 'assistant',
+    content: 'Here:\n```diff\n-old\n+new\n```',
+    parts: [{ kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }],
+  }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const lines = backend.lastFrame.split('\n');
+  const styleAt = (needle: string) => {
+    const y = lines.findIndex((r) => r.includes(needle));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(lines[y]!.indexOf(needle), y).style;
+  };
+  // The write's own block …
+  expect(styleAt('-a')).toMatchObject({ fg: 'redBright', bg: '#654321' });
+  expect(styleAt('+b')).toMatchObject({ fg: 'greenBright', bg: '#123456' });
+  // … and the fence the model wrote, which is laid out by the same helper.
+  expect(styleAt('-old')).toMatchObject({ fg: 'redBright', bg: '#654321' });
+  expect(styleAt('+new')).toMatchObject({ fg: 'greenBright', bg: '#123456' });
+  handle.unmount();
+});
+
+// Review Focus: a palette that names no band draws NO band — the palette is the whole
+// word on what a changed row looks like, and the ink is still the palette's.
+test('a palette without bands draws no band, and the ink is the palette\'s', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
+  const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-a'));
+  const style = backend.lastBuffer!.get(rows[y]!.indexOf('-a'), y).style;
+  expect(style.fg).toBe('magenta');
+  // `default` is flowtty's "no background" sentinel — the writer drops it, so the row
+  // wears the ground it sits on and nothing else. Never the layout's dark fallback.
+  expect([undefined, 'default']).toContain(style.bg);
+  expect(style.bg).not.toBe('#3b0000');
+  handle.unmount();
+});
+
+// Review Focus: the all-keys-missing palette (a panel's own object, a test's partial
+// one) draws the diff as it reads — the layout's own inks, no band of anyone's.
+test('a palette that names none of the diff keys draws no band in either drawer', async () => {
+  const chat = { accent: 'cyan', bg: 'black', text: 'white' };
+  const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const styleOf = (needle: string) => {
+    const row = rows.findIndex((r) => r.includes(needle));
+    expect(row).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(rows[row]!.indexOf(needle), row).style;
+  };
+  // The same in both drawers: no band of anyone's — `default` or nothing at all.
+  expect([undefined, 'default']).toContain(styleOf('-a').bg);
+  expect([undefined, 'default']).toContain(styleOf('+b').bg);
+  handle.unmount();
+
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, palette: chat });
+  const drows = drawn.frame.split('\n');
+  const dy = drows.findIndex((r) => r.includes('-one'));
+  // The row sits on the panel's own ground — `bg` from the palette — and on nothing else.
+  expect(drawn.backend.lastBuffer!.get(drows[dy]!.indexOf('-one'), dy).style.bg).toBe('black');
+  drawn.handle.unmount();
+});
+
+// Review Focus: a change block inside a stretch opened with `^o` is the same rows —
+// the fold is a filter over rows the palette already painted.
+test('a change block in an opened stretch takes the same palette', () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const changed = {
+    role: 'assistant', content: '',
+    parts: [
+      { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] },
+      { kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } },
+    ],
+  };
+  const rows = chatRows([changed] as never, { ...groupOpts(), notes: 'open', palette: chat });
+  const spans = rows.flatMap((r) => r.spans ?? []);
+  expect(spans.find((s) => s.text === '-a')).toMatchObject({ color: 'redBright', background: '#654321' });
+  expect(spans.find((s) => s.text === '+b')).toMatchObject({ color: 'greenBright', background: '#123456' });
 });

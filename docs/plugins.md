@@ -37,7 +37,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.39 <1.0.0-alpha.40",
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.41 <1.0.0-alpha.42",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -734,7 +734,7 @@ plugin (checked the same way — [Compatibility](#compatibility)) plus how its p
 reached:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.39 <1.0.0-alpha.40",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.41 <1.0.0-alpha.42",
   "run": ["bun", "src/index.ts"] }
 ```
 
@@ -1221,7 +1221,7 @@ one:
   single `ft` object, which has no `host` — `const api2 = 'host' in arg`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
   checked against the flowtty the host runs. While flowtty is in alpha, name the one
-  alpha you built against: `>=1.0.0-alpha.39 <1.0.0-alpha.40` — an alpha may change what the next one gives. A
+  alpha you built against: `>=1.0.0-alpha.41 <1.0.0-alpha.42` — an alpha may change what the next one gives. A
   prerelease is matched only by a range that names one: `^1.0.0`, and even `*`, do not
   take `1.0.0-alpha.37`. A plugin with no field is loaded unchecked, and the log says
   so — a plugin with no screens has nothing to check; the bundled ones declare it.

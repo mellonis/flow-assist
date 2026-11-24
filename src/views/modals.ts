@@ -54,6 +54,7 @@ import {
   caretPosition,
   inputRows,
   windowAround,
+  type MarkdownOptions,
   type ScrollBoxHandle,
   type ScrollMetrics,
   type WrapContinuation,
@@ -123,6 +124,7 @@ interface Span {
   dim?: boolean;
   underline?: boolean;
   color?: string;
+  background?: string;
   [k: string]: unknown;
 }
 // A laid-out row as flowtty's `layoutMarkdown` gives it. Besides the spans it says
@@ -315,10 +317,31 @@ const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text ?? 'white'
 // ─── Markdown → styled lines ──────────────────────────────────────────────────
 // flowtty's layoutMarkdown does the whole layout, GFM tables included; the host
 // only softens the heading marker below.
-export function mdLines(text: string | null | undefined, wrap: number): Line[] {
+
+// What a diff is drawn with in the chat: the palette's own inks and grounds, so the
+// `✎` block, a fence the model wrote and the `/diff` panel read alike. A style names
+// exactly what the palette names: what it leaves out is not drawn — an unnamed ink
+// takes the layout's own, an unnamed band takes none at all (`default` is flowtty's
+// "no background" sentinel). The panel draws no band either in that case, so a palette
+// without a ground never leaves one drawer on flowtty's dark bands under the chat's ink.
+export function chatMarkdownOptions(m: Record<string, string | undefined>): MarkdownOptions {
+  const style = (ink?: string, band?: string) => ({
+    ...(ink === undefined ? {} : { color: ink }),
+    background: band ?? 'default',
+  });
+  return {
+    tokenColors: {
+      added: style(m.add, m.addBg),
+      removed: style(m.del, m.delBg),
+      ...(m.accent === undefined ? {} : { hunk: m.accent }),
+    },
+  };
+}
+
+export function mdLines(text: string | null | undefined, wrap: number, palette?: Record<string, string | undefined>): Line[] {
   if (!text) return [{ spans: [] }];
   try {
-    const out = layoutMarkdown(text, wrap) as Line[];
+    const out = layoutMarkdown(text, wrap, palette ? chatMarkdownOptions(palette) : undefined) as Line[];
     // Quiet the `###`-heading noise: layoutMarkdown renders them as dim-`###` + bold
     // colored text. Replace the hashes with a soft `▍` marker instead.
     return out.map((r) => {
@@ -349,10 +372,10 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
 // is not code at all): a long line is hard-wrapped into several rows, and both the
 // line numbers of a diff and the click target of a folded console block have to know
 // where one source line ends and the next begins.
-function blockLines(md: string, width: number): { lines: Line[]; src: number[] } {
+function blockLines(md: string, width: number, palette?: Record<string, string | undefined>): { lines: Line[]; src: number[] } {
   let laid: { lines: Line[]; codeBlocks: { startLine: number; endLine: number }[] };
   try {
-    laid = layoutMarkdownDetailed(md, Math.max(1, width)) as unknown as typeof laid;
+    laid = layoutMarkdownDetailed(md, Math.max(1, width), palette ? chatMarkdownOptions(palette) : undefined) as unknown as typeof laid;
   } catch {
     return { lines: [{ spans: [{ text: md }] }], src: [-1] };
   }
@@ -375,7 +398,7 @@ function blockLines(md: string, width: number): { lines: Line[]; src: number[] }
 // accent colour — over the hunks in a ```diff fence carrying the FILE's line numbers.
 // The numbers are chrome: dim, right-aligned in a narrow gutter before the `│ `, and
 // out of a selection, so a drag copies the code alone.
-function changeLines(v: ChangeView, inner: number): Line[] {
+function changeLines(v: ChangeView, inner: number, palette?: Record<string, string | undefined>): Line[] {
   const title: Line = {
     spans: [{ text: '✎ ' }, { text: cutLeft(v.title, Math.max(8, inner - changeCounts(v).length - 3)), accent: true }, { text: ` ${changeCounts(v)}`, dim: true }],
   };
@@ -383,7 +406,7 @@ function changeLines(v: ChangeView, inner: number): Line[] {
   if (!md) return [title];
   const rows = diffRows(v.diff);
   const width = Math.max(1, ...rows.map((r) => r.no.length));
-  const { lines, src } = blockLines(md, inner - width - 1);
+  const { lines, src } = blockLines(md, inner - width - 1, palette);
   const numbered = lines.map((line, i) => {
     const at = src[i] ?? -1;
     // Only the row a source line STARTS on takes its number; a wrapped continuation
@@ -1274,7 +1297,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
         const foldable = notes !== 'open';
         const opened = !foldable || isOpen(folds, id);
         rows.push({ role, reasonHeader: true, open: opened, label: 'thinking', ...(foldable ? { fold: id, foldLine: true } : {}) });
-        if (opened) for (const line of mdLines(reasoning, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
+        if (opened) for (const line of mdLines(reasoning, inner, o.palette)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
         rows.push({ gap: true });
       }
       // Calls: one quiet line (`▸ 2 tools: read_file ×2`) that opens to the trail, a
@@ -1328,7 +1351,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
           const summary = reasoningSummary(seg.text);
           const label = `${done ? 'thought' : 'thinking'}${summary.title ? `: ${summary.title}` : ''}`;
           rows.push({ role, reasonHeader: true, open: opened, label, ...(foldable ? { fold: id, foldLine: true } : {}) });
-          if (opened) for (const line of mdLines(summary.body, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
+          if (opened) for (const line of mdLines(summary.body, inner, o.palette)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
           rows.push({ gap: true });
           continue;
         }
@@ -1337,7 +1360,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
           // turn the person most needs to see. The hunks are laid out as markdown, so
           // the ```diff fence is coloured, wrapped and copied like any other; the
           // title and the line numbers are the chat's own.
-          changeLines(seg.change, inner).forEach((line, li) => rows.push(row(line, li === 0 ? { changeTitle: true } : {})));
+          changeLines(seg.change, inner, o.palette).forEach((line, li) => rows.push(row(line, li === 0 ? { changeTitle: true } : {})));
           rows.push({ gap: true });
           continue;
         }
@@ -1378,7 +1401,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
             // The mark lands on the step's first row only: its other rows are the
             // answer's own text.
             const steerAnswer = si === steerRun && step === steer?.step;
-            mdLines(text, inner).forEach((line, li) => rows.push(row(line, {
+            mdLines(text, inner, o.palette).forEach((line, li) => rows.push(row(line, {
               ...(notes === 'step' ? { fold: id, ...(lit ? {} : { quiet: true }) } : {}),
               ...(steerAnswer && li === 0 ? { steerAnswer: true } : {}),
             })));
@@ -1401,7 +1424,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       // The round being written, while nobody knows yet what it is: in full, dim, a
       // live mark in the gutter and never the answer's `ƒ` — a round that turns out
       // to carry a tool call must not have been drawn as the answer.
-      if (live && !liveStep) mdLines(live, inner).forEach((line, li) => rows.push(row(line, { quiet: true, ...(li === 0 ? { liveMark: true } : {}) })));
+      if (live && !liveStep) mdLines(live, inner, o.palette).forEach((line, li) => rows.push(row(line, { quiet: true, ...(li === 0 ? { liveMark: true } : {}) })));
       // A turn that ran out of rounds says so where the answer would be: a dim line
       // under the field would instead be hidden by a wall of grey tool lines.
       const answer = answerText(String(m.content ?? ''));
@@ -1415,7 +1438,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       // The answer, exactly as written — the rows the round was drawn with while it
       // streamed (a `Next:` it held reflows by a word), now in the normal colour
       // under `ƒ`.
-      if (answer) mdLines(answer, inner).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
+      if (answer) mdLines(answer, inner, o.palette).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
       // The answer fell into a loop and the host stopped it: said in the warn colour
       // right under the head the person read, where the round-cap line is — the
       // dropped repetition is the journal's, never the model's history.
@@ -1429,7 +1452,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       const id = foldId(at, 'summary');
       const opened = isOpen(folds, id);
       rows.push({ role, first: true, fold: id, foldLine: true, spans: [{ text: cutStep(String(m.content ?? ''), Math.max(1, inner - 10)) }, { text: ` ${opened ? '▾' : '▸'} summary`, dim: true }] });
-      if (opened) for (const line of mdLines(m.summary, inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, fold: id });
+      if (opened) for (const line of mdLines(m.summary, inner, o.palette)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, fold: id });
     } else if (role === 'ask') {
       // A question the person answered stays where it was asked: the title the block
       // was shown under, then the answer under it. Display only — the model already has
@@ -1450,7 +1473,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, lead: boolean, 
       // `!!command`) is theirs in the conversation but not their words: it steps back,
       // dim, gutter and all.
       const hostAsk = role === 'user' && m.hostAsk === true;
-      (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame, ...(hostAsk ? { quiet: true } : {}) }));
+      (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner, o.palette)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame, ...(hostAsk ? { quiet: true } : {}) }));
     }
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // What the turn cost, where it is read after the fact — the status line said it
@@ -1625,7 +1648,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
           }, String(s.text ?? '')))));
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
         gutter(row),
-        content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
+        content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, backgroundColor: s.background, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
       if (row.toolRun) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0 },
         h(Text, null, ' '.repeat(GUTTER)),
         (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, underline: lit, wrap: 'truncate' }, String(s.text ?? ''))));
@@ -1669,6 +1692,10 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
             // Lit, the text is underlined and a code block's bar (chrome) is not.
             underline: s.underline || (lit && j >= (row.chrome ?? 0)),
             color: s.token || s.accent ? m.accent : s.color ?? ink,
+            // A diff row's band, from the palette the row was laid out with. It wins
+            // over the ground of the message it sits in: a change reads the same in a
+            // background result's bubble as on the assistant's own rows.
+            backgroundColor: s.background,
             selectable: j < (row.chrome ?? 0) ? false : undefined,
           }, String(s.text ?? ''))));
       }
@@ -3301,13 +3328,21 @@ export function diffPanelBody(p: {
       const width = Math.max(1, ...hunkRows.map((r) => r.no.length));
       hunkRows.forEach((r, ri) => {
         // The number is chrome — dim, out of a drag — and the line is coloured by what
-        // it does: what came in, what went out, or the context around it. A palette
-        // without `ok`/`warn` leaves those rows the terminal's own ink, never dim.
-        const changed = r.text.startsWith('+') || r.text.startsWith('-');
-        const color = r.text.startsWith('+') ? m.ok : r.text.startsWith('-') ? m.warn : undefined;
+        // it does: what came in (`add`), what went out (`del`), or the context around it.
+        // A palette without either key leaves those rows the terminal's own ink, never dim.
+        const out = r.text.startsWith('-');
+        const changed = r.text.startsWith('+') || out;
+        const color = r.text.startsWith('+') ? m.add : out ? m.del : undefined;
+        const band = r.text.startsWith('+') ? m.addBg : out ? m.delBg : undefined;
+        // The band covers the code area only — the number gutter keeps the panel's own
+        // ground — and is a box beside it rather than padded spaces, so it reaches the
+        // panel's right edge while a drag still copies the code alone.
+        const code = changed
+          ? h(Text, { color, wrap: 'truncate' }, r.text)
+          : h(Text, { dim: true, wrap: 'truncate' }, r.text);
         rows.push(h(Box, { key: `h${si}-${fi}-${ri}`, flexDirection: 'row', flexShrink: 0, ...fold },
           h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${r.no.padStart(width)} `),
-          changed ? h(Text, { color, wrap: 'truncate' }, r.text) : h(Text, { dim: true, wrap: 'truncate' }, r.text)));
+          band === undefined ? code : h(Box, { flexGrow: 1, backgroundColor: band }, code)));
       });
     });
   });
