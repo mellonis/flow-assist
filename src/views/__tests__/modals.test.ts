@@ -2074,22 +2074,26 @@ test('the chat draws a watched child: breadcrumb title, its rows, state and keys
 // one terminal line. A relative path repeats across two roots, so the fold and the
 // cursor are keyed `diffFileKey(root, path)` and each section folds on its own.
 
-// Draw the panel at the width the chat will hand it, and read back the frame.
+// Draw the panel at the width the chat will hand it, and read back the frame. A
+// narrow terminal is a real case — `width`/`wrap` draw the panel at one.
 async function diffFrame(props: {
   sections: DiffSection[];
   collapsed: ReadonlySet<string>;
   cursor: string | null;
   palette?: Record<string, string | undefined>;
+  width?: number;
+  wrap?: number;
   loading?: boolean;
   gitless?: boolean;
   failed?: boolean;
 }) {
-  const backend = new TestBackend(80, 24);
+  const { width, wrap, ...rest } = props;
+  const backend = new TestBackend(width ?? 80, 24);
   const handle = await render(h(renderDiffPanel, {
-    ...props,
+    ...rest,
     gitless: props.gitless ?? false,
     failed: props.failed ?? false,
-    wrap: 74,
+    wrap: wrap ?? 74,
     bg: 'black',
   }), backend);
   const frame = backend.lastFrame ?? '';
@@ -2278,6 +2282,29 @@ test('a diff row wears the palette band across the code area, never over the gut
   const drag = drawn.handle.select({ x: 2, y }, { x: 60, y });
   expect(drag).toContain('-one');
   expect(drag).not.toContain('1');
+  drawn.handle.unmount();
+});
+
+// Review Focus: the band is width-relative — on a narrow panel it still covers the
+// code area alone, and the number beside the code still keeps the panel's ground.
+test('on a narrow panel the band still covers the code area alone', async () => {
+  const section: DiffSection = {
+    root: '/r',
+    files: [{ status: 'M', path: 'a-file.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one removed line\n+two' }],
+  };
+  const drawn = await diffFrame({
+    sections: [section], collapsed: new Set(), cursor: null,
+    palette: { bg: 'black', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
+    width: 40, wrap: 34,
+  });
+  const rows = drawn.frame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-one'));
+  expect(y).toBeGreaterThanOrEqual(0);
+  const x = rows[y]!.indexOf('-one');
+  const at = (col: number) => drawn.backend.lastBuffer!.get(col, y).style;
+  expect(at(x).bg).toBe('#3b0000');   // under the code
+  expect(at(x + 6).bg).toBe('#3b0000');
+  expect(at(x - 1).bg).toBe('black'); // the number beside it keeps the panel's ground
   drawn.handle.unmount();
 });
 

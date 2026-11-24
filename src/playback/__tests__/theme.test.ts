@@ -16,6 +16,22 @@ type Palette = Record<string, string>;
 const modalsOf = (theme: Theme): Record<string, Palette> => theme.modals as Record<string, Palette>;
 const baseOf = (theme: Theme): Palette => theme.modals as Palette;
 
+// A pairing's readability is a relation: on a light terminal the band is the paler of
+// the two, on a dark one the deeper. A named terminal colour gets a stand-in hex —
+// near enough for a relation, and the named inks the palettes use are far from their
+// bands in lightness either way.
+const NAMED: Record<string, string> = {
+  black: '#000000', red: '#800000', green: '#008000', yellow: '#808000',
+  blue: '#0000ff', magenta: '#800080', cyan: '#008080', white: '#c0c0c0', gray: '#808080',
+};
+function luminance(color: string): number {
+  const hex = /^#([0-9a-f]{6})$/i.exec(NAMED[color] ?? color);
+  if (!hex) throw new Error(`no luminance stand-in for ${color}`);
+  const n = parseInt(hex[1]!, 16);
+  const chan = (v: number) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * chan((n >> 16) & 255) + 0.7152 * chan((n >> 8) & 255) + 0.0722 * chan(n & 255);
+}
+
 test('resolveModalPalettes merges base + modal default + plugin colors + override', () => {
   const theme = { modals: { bg: 'black', border: 'cyan' } };
   const out = resolveModalPalettes(theme, [{ name: 'chat', colors: { userBg: '#000' } }], {});
@@ -160,10 +176,14 @@ test('the diff inks and their bands land in every palette', () => {
   // A deletion is not what waits on the person: the two are told apart in both schemes.
   expect(light.del).not.toBe(light.warn);
   expect(dark.del).not.toBe(dark.warn);
-  // A pale band under dark ink on a light terminal, a dark one under bright ink.
+  // A pale band under dark ink on a light terminal, a dark one under bright ink — the
+  // relation, not just "a different value": a swapped pair (a pale ink on its own pale
+  // band) keeps every inequality and still reads as mud.
   expect(light.delBg).not.toBe(dark.delBg);
-  expect(light.del).not.toBe(light.delBg);
-  expect(dark.del).not.toBe(dark.delBg);
+  expect(luminance(light.add)).toBeLessThan(luminance(light.addBg));
+  expect(luminance(light.del)).toBeLessThan(luminance(light.delBg));
+  expect(luminance(dark.add)).toBeGreaterThan(luminance(dark.addBg));
+  expect(luminance(dark.del)).toBeGreaterThan(luminance(dark.delBg));
   // Every colour is the person's like every other chat colour: the override reaches it
   // through the same palette path, with no value baked into the render.
   const mine = resolveAppTheme(undefined, [], { plugins: { chat: { colors: { del: 'blue', delBg: 'black' } } } }, 'light');
