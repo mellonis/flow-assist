@@ -2489,3 +2489,63 @@ test('the ask box draws the tabs strip and the submit page', async () => {
   expect(title).toBeGreaterThanOrEqual(0);
   expect(narrow.lines[title + 2]).toContain('1. a');
 });
+
+// ─── one palette for a diff wherever the chat draws it ───────────────────────
+// The `✎` block of a write and a ```diff fence in an answer take the chat's own
+// `add`/`del` and their grounds — the same the `/diff` panel reads.
+
+test('a change block and a diff the model writes take the chat palette', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const messages = [{
+    role: 'assistant',
+    content: 'Here:\n```diff\n-old\n+new\n```',
+    parts: [{ kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }],
+  }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const lines = backend.lastFrame.split('\n');
+  const styleAt = (needle: string) => {
+    const y = lines.findIndex((r) => r.includes(needle));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(lines[y]!.indexOf(needle), y).style;
+  };
+  // The write's own block …
+  expect(styleAt('-a')).toMatchObject({ fg: 'redBright', bg: '#654321' });
+  expect(styleAt('+b')).toMatchObject({ fg: 'greenBright', bg: '#123456' });
+  // … and the fence the model wrote, which is laid out by the same helper.
+  expect(styleAt('-old')).toMatchObject({ fg: 'redBright', bg: '#654321' });
+  expect(styleAt('+new')).toMatchObject({ fg: 'greenBright', bg: '#123456' });
+  handle.unmount();
+});
+
+// Review Focus: a palette that names no band draws the one the layout already had —
+// `undefined` is the band left out of the style, never an erased default.
+test('a palette without bands keeps the default band, and the ink is the palette\'s', async () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
+  const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const rows = backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes('-a'));
+  const style = backend.lastBuffer!.get(rows[y]!.indexOf('-a'), y).style;
+  expect(style.fg).toBe('magenta');
+  expect(style.bg).toBe('#3b0000');
+  handle.unmount();
+});
+
+// Review Focus: a change block inside a stretch opened with `^o` is the same rows —
+// the fold is a filter over rows the palette already painted.
+test('a change block in an opened stretch takes the same palette', () => {
+  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const changed = {
+    role: 'assistant', content: '',
+    parts: [
+      { kind: 'tools', runs: [{ name: 'git_status', outcome: 'ok' }] },
+      { kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } },
+    ],
+  };
+  const rows = chatRows([changed] as never, { ...groupOpts(), notes: 'open', palette: chat });
+  const spans = rows.flatMap((r) => r.spans ?? []);
+  expect(spans.find((s) => s.text === '-a')).toMatchObject({ color: 'redBright', background: '#654321' });
+  expect(spans.find((s) => s.text === '+b')).toMatchObject({ color: 'greenBright', background: '#123456' });
+});
