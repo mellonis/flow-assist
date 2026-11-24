@@ -150,13 +150,16 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
   //   warn     — things waiting on the person (the queue)
   //   ok       — finished work, and a command's marker on exit 0
+  //   add / del     — a diff row: what came in, what went out — in the `✎` block, in a
+  //              diff the model writes, and in the `/diff` panel alike
+  //   addBg / delBg — the ground those rows sit on
   //   idleBorder — the frame of a docked chat while the plugin has the keyboard; with
   //              it, the frame is in `accent`
   //   askBg    — the ground under a kept question and the answer it got: a quiet
   //              slate-teal tint on black, its own band apart from the person's
   //              violet bubble and a background result's plum ground
   //   askInk   — the ink of those rows; a dismissed answer keeps the ground and dims it
-  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', idleBorder: 'gray', askBg: '#243036', askInk: '#dfe8e6' },
+  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000', idleBorder: 'gray', askBg: '#243036', askInk: '#dfe8e6' },
 };
 
 // The same for a light terminal (light grounds; accents dark enough to read on them) —
@@ -166,11 +169,14 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
 // ask rows keep the terminal's own).
 const LIGHT_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},
-  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', idleBorder: '#a0a0b0', askBg: '#e3eeec', askInk: '#2b3f3b' },
+  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', add: 'green', del: '#a40000', addBg: '#e6f4e6', delBg: '#fce8e8', idleBorder: '#a0a0b0', askBg: '#e3eeec', askInk: '#2b3f3b' },
 };
 const UNKNOWN_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},
-  chat: { ...MODAL_COLOR_DEFAULTS.chat, userBg: 'default', fieldBg: 'default', bgBg: 'default', askBg: 'default', askInk: 'default' },
+  // On a terminal whose scheme nobody knows, the DIFF bands are not drawn either:
+  // `default` is flowtty's "no background" sentinel, so those rows keep the ground
+  // they sit on and the `+`/`-` glyphs carry the meaning.
+  chat: { ...MODAL_COLOR_DEFAULTS.chat, userBg: 'default', fieldBg: 'default', bgBg: 'default', addBg: 'default', delBg: 'default', askBg: 'default', askInk: 'default' },
 };
 
 export function modalColorDefaults(scheme: ColorScheme): Record<string, Record<string, string>> {

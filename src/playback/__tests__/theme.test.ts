@@ -147,6 +147,30 @@ test('the ask ground lands in every palette', () => {
   expect(modalsOf(mine).chat.askInk).toBe('white');
 });
 
+// A diff's two inks and the grounds they sit on are the palette's, in every scheme:
+// the `✎` block, a fence the model wrote and the `/diff` panel all read them, and
+// none of the three falls back to a colour of its own.
+test('the diff inks and their bands land in every palette', () => {
+  for (const scheme of ['light', 'dark', 'unknown'] as const) {
+    const chat = modalColorDefaults(scheme).chat;
+    for (const key of ['add', 'del', 'addBg', 'delBg'] as const) expect(chat[key]).toBeString();
+  }
+  const light = modalsOf(resolveAppTheme(undefined, [], {}, 'light')).chat;
+  const dark = modalsOf(resolveAppTheme(undefined, [], {}, 'dark')).chat;
+  // A deletion is not what waits on the person: the two are told apart in both schemes.
+  expect(light.del).not.toBe(light.warn);
+  expect(dark.del).not.toBe(dark.warn);
+  // A pale band under dark ink on a light terminal, a dark one under bright ink.
+  expect(light.delBg).not.toBe(dark.delBg);
+  expect(light.del).not.toBe(light.delBg);
+  expect(dark.del).not.toBe(dark.delBg);
+  // Every colour is the person's like every other chat colour: the override reaches it
+  // through the same palette path, with no value baked into the render.
+  const mine = resolveAppTheme(undefined, [], { plugins: { chat: { colors: { del: 'blue', delBg: 'black' } } } }, 'light');
+  expect(modalsOf(mine).chat.del).toBe('blue');
+  expect(modalsOf(mine).chat.delBg).toBe('black');
+});
+
 test('baseInk takes the abstract base, and leaves the terminal what the palette left it', () => {
   // `default` is the palette saying "the terminal's": nothing of the app's own is
   // painted where it is — the honest ground for a scheme that was never said.
