@@ -1692,7 +1692,9 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
             // Lit, the text is underlined and a code block's bar (chrome) is not.
             underline: s.underline || (lit && j >= (row.chrome ?? 0)),
             color: s.token || s.accent ? m.accent : s.color ?? ink,
-            // A diff row's band, from the palette the row was laid out with.
+            // A diff row's band, from the palette the row was laid out with. It wins
+            // over the ground of the message it sits in: a change reads the same in a
+            // background result's bubble as on the assistant's own rows.
             backgroundColor: s.background,
             selectable: j < (row.chrome ?? 0) ? false : undefined,
           }, String(s.text ?? ''))));
