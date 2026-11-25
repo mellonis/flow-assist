@@ -1389,8 +1389,12 @@ export async function renderApp(
     // component that moved from one parent to another would be mounted anew, and the
     // chat would lose the turn it is writing, the draft and the queue with every
     // `/mode`; so would a plugin's screen.
+    // Docked, the chat's slot is ABSOLUTE at the panel's own rect: the plugin's side is
+    // sized and placed by itself, and the chat's own overlays (a bottom strip) resolve
+    // against the nearest positioned box — which must be the chat's area, not the
+    // terminal's origin.
     const panelBox = dock
-      ? { width: dock.panel.width, height: dock.panel.height, flexShrink: 0, overflow: 'hidden' as const }
+      ? { position: 'absolute' as const, top: dock.panel.top, left: dock.panel.left, width: dock.panel.width, height: dock.panel.height, overflow: 'hidden' as const, zIndex: 5 }
       // Over everything: the chat's own window is laid out over the whole terminal
       // (and steps the screen behind it back). Closed, it takes no room at all.
       : chat?.open
