@@ -35,6 +35,14 @@ try {
     // test holds back streamed output here: a tail that could still grow into it is
     // never emitted — a command's single-character chunk being the clearest case.
     setActiveSecrets(null);
+    // And with the pristine fetch. Replacing the process's fetch is a test's own act, so
+    // a double that outlives its test is a bug and is NAMED — at the start of the test
+    // that follows it, which is where it is still visible. (A unnoticed double is what
+    // every later capture of "the real one" takes as real — the drift engine of
+    // diag-fetch-chain.md.)
+    if (globalThis.fetch !== nativeFetch) {
+      throw new Error('globalThis.fetch is still replaced at the start of this test: the previous test left a mock installed. Restore it to nativeFetch or close what installed it (`close()` / `closeRigs()`); the seam is helpers/test-setup.ts.');
+    }
   });
 
   afterEach(async () => {

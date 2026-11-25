@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { ChatMessage } from '../../assistant/agent.ts';
 import type { ConfirmPolicy } from '../../assistant/confirm-policy.ts';
 import { Conversation } from '../../assistant/conversation.ts';
+import { nativeFetch } from './test-setup.ts';
 import { pluginItem, type ConversationKind, type PendingConfirm, ViewPort } from '../../assistant/conversation-types.ts';
 import { readJournal, type JournalEvent } from '../../assistant/journal.ts';
 import { firstStart, firstStartPending } from '../../assistant/memory-trust.ts';
@@ -57,12 +58,15 @@ const rigDirs: string[] = [];
 let tokenBefore: { value: string | undefined } | null = null;
 
 // Cancels every background task still waiting on its delay, closes every conversation a
-// rig made (their timers go, the 250 ms save among them) and puts LLM_TOKEN back as it
-// was. A rig test file calls it in its `afterEach`.
+// rig made (their timers go, the 250 ms save among them), puts LLM_TOKEN back as it was
+// and the process's fetch back to the pristine one the preload snapshotted — the mocked
+// model is the test's own thing and none of it may outlive the file. A rig test file
+// calls it in its `afterEach`.
 export function closeRigs(): void {
   for (const r of registries.splice(0)) r.children.cancelArmed();
   for (const c of made.splice(0)) c.close('exit');
   for (const d of rigDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  globalThis.fetch = nativeFetch;
   if (!tokenBefore) return;
   if (tokenBefore.value === undefined) delete process.env.LLM_TOKEN; else process.env.LLM_TOKEN = tokenBefore.value;
   tokenBefore = null;
