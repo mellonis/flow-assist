@@ -98,16 +98,19 @@ const holders: Holder[] = [
     open: async (rig) => {
       // The command is a record inside its stretch: a click opens that level, and the
       // click that opens the pager is on the record's own line.
+      await settleUntil(() => rowsOf(rig.ui).some((r) => r.includes('+ 1 command')));
       const group = rowsOf(rig.ui).findIndex((r) => r.includes('+ 1 command'));
+      expect(group, 'the command group line is drawn').toBeGreaterThanOrEqual(0);
       rig.ui.backend.mouse('down', 12, group);
       rig.ui.backend.mouse('up', 12, group);
-      await settle(6);
+      await settleUntil(() => rowsOf(rig.ui).some((r) => r.includes('seq 1 300 ·')));
       const rows = rowsOf(rig.ui);
       const at = rows.findIndex((r) => r.includes('seq 1 300 ·'));
+      expect(at, 'the command record row is drawn').toBeGreaterThanOrEqual(0);
       const x = rows[at]!.indexOf('seq 1 300 ·');
       rig.ui.backend.mouse('down', x, at);
       rig.ui.backend.mouse('up', x, at);
-      await settle(6);
+      await settleUntil(() => frameOf(rig.ui).includes('the wheel scroll · Esc close'));
       expect(frameOf(rig.ui)).toContain('the wheel scroll · Esc close');
     },
     close: escapes(1),

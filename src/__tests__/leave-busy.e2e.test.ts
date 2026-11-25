@@ -331,14 +331,25 @@ test('a pager open when the settings y/n is asked is still open under it', async
   await settleUntil(() => frameOf(ui).includes('Confirm write'));
   await ui.press('y');
   await settleUntil(() => sub.held);
-  // A click on the block's fold line opens it in the pager.
-  const at = frameOf(ui).split('\n').findIndex((r) => r.includes('seq 1 300'));
-  expect(at).toBeGreaterThanOrEqual(0);
-  const x = frameOf(ui).split('\n')[at]!.indexOf('seq 1 300');
+  // Two clicks read the block: the first opens the stretch to its records, the second
+  // is on the record's own line and opens its too-tall body in the pager. The running
+  // status repeats the command's words — it is chrome, not a row of the conversation.
+  await settleUntil(() => frameOf(ui).split('\n').some((r) => r.includes('+ 1 command')));
+  const rowsOf = frameOf(ui).split('\n');
+  const group = rowsOf.findIndex((r) => r.includes('+ 1 command'));
+  expect(group, 'the command stretch line is drawn').toBeGreaterThanOrEqual(0);
+  const gx = rowsOf[group]!.indexOf('▸');
+  ui.backend.mouse('down', gx, group);
+  ui.backend.mouse('up', gx, group);
+  await settleUntil(() => frameOf(ui).split('\n').some((r) => r.includes('seq 1 300 ·')));
+  const rows = frameOf(ui).split('\n');
+  const at = rows.findIndex((r) => r.includes('seq 1 300 ·'));
+  expect(at, 'the record row of the command is drawn').toBeGreaterThanOrEqual(0);
+  const x = rows[at]!.indexOf('seq 1 300 ·');
   ui.backend.mouse('down', x, at);
   ui.backend.mouse('up', x, at);
-  await settle(6);
   const hint = 'the wheel scroll · Esc close';
+  await settleUntil(() => frameOf(ui).includes(hint));
   expect(frameOf(ui)).toContain(hint);
   // The file changes outside the app; the held round goes on and the next request is
   // preceded by the guard's y/n. The pager stays open.
