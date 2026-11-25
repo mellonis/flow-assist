@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { journalPath, projectHome } from '../assistant/sessions';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { isSessionFile, listTree, sessionFiles } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -17,13 +17,7 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-  if (cond()) return;
-  throw new Error(`settleUntil: the condition never held in ${ms} ms: ${String(cond)}`);
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up, and the session files under its mirror', async () => {
   const root = tmp('fa-start-root-');

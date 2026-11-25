@@ -8,13 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJournal } from '../assistant/journal.ts';
 import { activeSecrets, setActiveSecrets } from '../assistant/secrets.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
-const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 300) => settleUntilShared(ok, n);
 type Msg = { role: string; content: unknown };
 
 const SECRET = 'roundcap-secret-7777-value';

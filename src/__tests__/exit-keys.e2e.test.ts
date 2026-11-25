@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -16,10 +16,7 @@ type UI = Awaited<ReturnType<typeof bootApp>>;
 // A ctrl key as a terminal delivers it; the answer is whether the app consumed it —
 // what a TTY backend reads to skip its own exit / suspend.
 const ctrl = async (ui: UI, name: string) => { const consumed = ui.backend.press({ name, ctrl: true }); await settle(); return consumed; };
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 test('Ctrl+C while an answer is coming stops it, as Esc does — the app lives, nothing is armed', async () => {
   const model = new ScriptedModel();

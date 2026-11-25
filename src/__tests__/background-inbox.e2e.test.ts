@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { listTree } from './helpers/session-files';
@@ -26,7 +26,7 @@ afterEach(() => {
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
 
-const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 300) => settleUntilShared(ok, n);
 // Past the inbox's own 400 ms tick: a turn it would start has started by then.
 const pastTick = () => new Promise((r) => setTimeout(r, 500)).then(() => settle(10));
 type Msg = { role: string; content: unknown; tool_calls?: unknown[] };

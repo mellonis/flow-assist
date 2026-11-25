@@ -7,7 +7,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 import type { Make } from '../loader/plugin';
 import { sessionFiles } from './helpers/session-files';
@@ -16,7 +16,7 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 // A fenced block is drawn as rows behind a dim `│ `; strip the bar to read the lines.
 const screen = (frame: string) => frame.split('\n').map((r) => r.replace(/│ /g, '')).join('\n');
 // What the chat SAYS the mode is: the hint line inside the window, not the toast that
@@ -267,10 +267,7 @@ test('the mode set right before a kill is kept: the save is not left to a turn',
 
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-autorun-')));
 // A real process finishes on its own clock, not the test backend's.
-const settleReal = async (ok: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end && !ok()) { await settle(2); await new Promise((r) => setTimeout(r, 20)); }
-};
+const settleReal = async (ok: () => boolean, ms = 3000) => settleUntilShared(ok, { ms }, 'the real process');
 const styleAt = (ui: Awaited<ReturnType<typeof boot>>, text: string) => {
   const rows = ui.backend.lastFrame.split('\n');
   const y = rows.findIndex((r) => r.includes(text));

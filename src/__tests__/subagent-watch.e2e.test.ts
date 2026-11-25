@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil, type Turn } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
 
@@ -18,7 +18,6 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -121,7 +120,9 @@ test('Esc steps back to the session with its scroll where it was and the field\'
   const tall = Array.from({ length: 40 }, (_, i) => `Session line ${i + 1}.`).join('\n\n');
   const { children: [a], ui } = await boot([{ mark: 'WATB' }], { cols: 120, rows: 26, main: [[{ text: tall }]] });
   await ask(ui, 'say lines');
-  await settleUntil(() => frameOf(ui).includes('Session line 40.'));
+  // The answer is 40 paragraphs: the view lands on its FIRST row (the eye-landing rule),
+  // so the drawn evidence is line 1 — line 40 is below the window by design.
+  await settleUntil(() => frameOf(ui).includes('Session line 1.'));
   await ask(ui, '/subagent WATB do it');
   await settleUntil(() => a!.held);
   await started(ui, 'watb-do-it');
@@ -168,8 +169,10 @@ test('a watch started from /agents (⏎ closes the panel); an ended row says the
   await settleUntil(() => a!.held);
   a!.release();
   await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
+  // A subagent between its turns is stopped by closing it, with nothing toasted: the
+  // `/agents` row opened next is what says it ended. `stop` runs in the key's own turn,
+  // so the panel that opens after it reads the tree it left.
   await ask(ui, '/subagent stop aaa-go');
-  await settleUntil(() => frameOf(ui).includes('aaa-go stopped'));
   await ask(ui, '/agents');
   await settleUntil(() => frameOf(ui).includes('Flow Assist · Agents'));
   await ui.press('down');
@@ -385,8 +388,12 @@ test('a grandchild\'s breadcrumb has two labels', async () => {
   await settleUntil(() => outer!.held);
   outer!.release();
   await settleUntil(() => inner!.held);
-  await settleUntil(() => frameOf(ui).includes('inner (task)'));
+  // The row is drawn by the work panel, which the first ↓ opens: the strip is what
+  // says the children are there while the panel is closed.
+  await settleUntil(() => frameOf(ui).includes('in background'));
   await ui.press('down');
+  // The work panel draws the path, not the /agents panel's `(task)` suffix.
+  await settleUntil(() => frameOf(ui).includes('outer-go › inner'));
   await ui.press('down');
   await ui.press('return');
   await settle(4);
@@ -420,7 +427,9 @@ test('the watched rows follow their end while the list rests there', async () =>
   expect(frameOf(ui)).not.toContain('word0 ');
   expect(frameOf(ui)).toContain('▸ + 1 tool');
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  // A subagent the person started STAYS after its answer, so the watch shows it idle
+  // (`◦ idle`) rather than an ended node — the answer below is the row that arrived.
+  await settleUntil(() => frameOf(ui).includes('◦ idle'));
   expect(frameOf(ui)).toContain('ARRIVED-LATER');
   ui.app.unmount();
 }, 20_000);
@@ -430,7 +439,8 @@ test('scrolled up the watched rows stay where they are as rows arrive, and End b
   for (let i = 0; i < 6 && !frameOf(ui).includes('word0 '); i++) { ui.backend.press(PAGE_UP); await settle(2); }
   expect(frameOf(ui)).toContain('word0 ');
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  // A staying subagent ends its turn idle, not as an ended node (see above).
+  await settleUntil(() => frameOf(ui).includes('◦ idle'));
   expect(frameOf(ui)).toContain('word0 ');
   expect(frameOf(ui)).not.toContain('ARRIVED-LATER');
   await ui.press('end');
@@ -502,6 +512,20 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
 const COLLAPSE = { name: '\\', ctrl: true };
 test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on the session', async () => {
   const { children: [a], ui } = await oneHeldTask('WATG', { cols: 160, rows: 40, mode: 'panel' });
+  // A docked chat draws the strip INSIDE its own area: its heading and its bottom border
+  // are the pane's rows, not the terminal's corner (where an absolute strip would be
+  // clipped by the pane's rect).
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  const paneRows = frameOf(ui).split('\n');
+  const tab = paneRows.findIndex((r) => r.includes('Flow Assist · Work'));
+  const bottom = paneRows.findIndex((r, i) => i > tab && r.includes('╰'));
+  expect(tab).toBeGreaterThan(0);
+  expect(paneRows[bottom]).toContain('╰');
+  expect(bottom).toBe(paneRows.length - 1);
+  expect(paneRows.slice(tab + 1, bottom).join('\n')).toContain('watg-do-it');
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
   await watchFromStrip(ui);
   ui.backend.press(COLLAPSE);
   await settle();
@@ -514,7 +538,6 @@ test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on 
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('wata') || true, 4);
   await settle(10);
   ui.backend.press(COLLAPSE);
   await settle();
@@ -568,7 +591,8 @@ test('a watched child\'s write is a y/n block at the bottom of the watch; a y in
   await ui.press('y');
   await settleUntil(() => fs.existsSync(file));
   expect(fs.existsSync(file)).toBe(true);
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  // Its turn ends with the write: a staying subagent rests (`◦ idle`), it does not end.
+  await settleUntil(() => frameOf(ui).includes('◦ idle'));
   expect(frameOf(ui)).not.toContain(BLOCK);
   ui.app.unmount();
 });
@@ -583,7 +607,7 @@ test('n declines the watched child\'s write after the pause, and a y or n with c
   expect(frameOf(ui)).toContain(BLOCK);
   clock.t += 700;
   await ui.press('n');
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  await settleUntil(() => frameOf(ui).includes('◦ idle'));
   expect(fs.existsSync(file)).toBe(false);
   expect(frameOf(ui)).not.toContain(BLOCK);
   ui.app.unmount();
@@ -736,8 +760,10 @@ test('a stop question up when the child\'s request lands is dropped: a y inside 
   clock.t += 700;
   await ui.press('y');
   await settleUntil(() => fs.existsSync(file));
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
-  expect(frameOf(ui)).not.toContain('ended: stopped');
+  // A subagent the person started stays after its answer: its row in the tree says how it
+  // ended (`done` for an answer), while the watch pane keeps showing it idle.
+  await settleUntil(() => frameOf(ui).includes('wre-do-it done'));
+  expect(frameOf(ui)).not.toContain('wre-do-it stopped');
   ui.app.unmount();
 });
 
@@ -986,8 +1012,12 @@ test('the breadcrumb follows a task that hands its child up while the child is w
   await settleUntil(() => outer!.held);
   outer!.release();
   await settleUntil(() => inner!.held);
-  await settleUntil(() => frameOf(ui).includes('innq (task)'));
+  // The row is drawn by the work panel, which the first ↓ opens: the strip is what
+  // says the children are there while the panel is closed.
+  await settleUntil(() => frameOf(ui).includes('in background'));
   await ui.press('down');
+  // The work panel draws the path, not the /agents panel's `(task)` suffix.
+  await settleUntil(() => frameOf(ui).includes('outq-go › innq'));
   await ui.press('down');
   await ui.press('return');
   await settle(4);

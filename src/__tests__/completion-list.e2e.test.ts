@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -119,8 +119,8 @@ test('in shell mode `!echo a` with several matches runs on Enter', async () => {
   await ui.type('!echo a');
   expect(ui.backend.lastFrame).toContain('apple/');
   await ui.press('return');
-  const end = Date.now() + 3000;
-  while (Date.now() < end && ui.backend.lastFrame.includes('Esc stops')) { await settle(2); await new Promise((r) => setTimeout(r, 20)); }
+  // A real command finishes on its own clock; the drawn fact is the list's hint going.
+  await settleUntil(() => !ui.backend.lastFrame.includes('Esc stops'), { ms: 3000 }, 'the command to end');
   // The command ran as typed: the list is gone and the field holds neither `alpha/` nor the line.
   expect(ui.backend.lastFrame).not.toContain('apple/');
   expect(ui.backend.lastFrame).not.toContain('echo alpha');

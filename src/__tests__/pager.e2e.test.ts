@@ -8,14 +8,14 @@
 //
 // These tests drive the REAL chat on a test backend, as folds.e2e.test.ts does.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared, type WaitBudget } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, budget: WaitBudget = 200) => settleUntilShared(ok, budget);
 
 function rowOf(ui: Ui, needle: string): number {
   const at = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
@@ -67,7 +67,9 @@ async function commandThenTalk(command: string, cols = 100, rows = 24) {
   await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
   await ui.type('and remark on it');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 12.'));
+  // The answer is 12 paragraphs: the view lands on its FIRST row (the eye-landing rule;
+  // the tail is below the window), so the drawn evidence is remark 1.
+  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 1.'));
   await settle(8);
   // Up to the stretch: the command's line is one record inside it now, so the group is
   // opened first, and the record's line is where the click lands.
@@ -293,11 +295,14 @@ test('a turn of dozens of calls opens into one record per call, many at once', a
     ...Array.from({ length: 12 }, () => ({ tool: 'datetime', args: {} })),
     ...Array.from({ length: 24 }, (_, i) => ({ tool: i % 2 ? 'config_schema' : 'datetime', args: {} })),
   ], [{ text: 'Done at last.' }]);
-  const ui = await bootApp(model, 110, 34);
+  // Automatic compaction is another mechanism, with its own tests: this turn's 36 calls
+  // would pass the window and be folded into a handoff before its last answer.
+  const ui = await bootApp(model, 110, 34, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', autoCompact: { enabled: false } } });
   await ui.press('F');
   await ui.type('do a lot');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
+  // Thirty-six rounds: a real budget, not a hop count.
+  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'), { ms: 15_000 });
   await settle(8);
   // Folded, one stretch line that says how many calls there are. Opened, every call is a
   // record: the stretch's own line is the cap now, and no tall single block is left for a
@@ -352,7 +357,9 @@ test('a y/n arriving while the pager is up closes it and is answered; while it w
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   const asked = model.requests.length;
   await ui.press('n');
-  await settleUntil(() => ui.backend.lastFrame.includes('Declined, fine.'));
+  // The list is scrolled up to the record the pager was opened from, so the answer lands
+  // below the window and is not drawn: the request it answers is the fact here.
+  await settleUntil(() => model.requests.length === asked + 1);
   expect(model.requests.length).toBe(asked + 1);
   ui.app.unmount();
 });
@@ -447,7 +454,8 @@ test('an answer arriving while the pager is up over a list scrolled up: Esc give
   await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
   await ui.type('and remark on it');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 12.'));
+  // As above: the long answer is drawn from its first row.
+  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 1.'));
   await ui.type('go on');
   await ui.press('return');
   await settle(8);

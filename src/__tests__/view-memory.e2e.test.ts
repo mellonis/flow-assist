@@ -9,13 +9,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { allFolded } from '../assistant/folds.ts';
 import { recalledFolds, rememberView } from '../assistant/view-memory.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-view-memory-'));
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
@@ -172,7 +171,9 @@ async function leftInPlace(scrolled: boolean) {
   await settleUntil(() => frameOf(ui).includes('A first.'));
   await settle(6);
   await ask(ui, 'session A remarks');
-  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  // The answer is 30 lines: the view lands on its FIRST row (the eye-landing rule — the
+  // last line is below the window), so the drawn evidence is remark 1, not remark 30.
+  await settleUntil(() => frameOf(ui).includes('Remark number 1.'));
   await settle(6);
   await ask(ui, 'session A again');
   await settleUntil(() => aSub.held);
@@ -244,7 +245,7 @@ async function leftAtItsEnd(away: boolean) {
   await ask(ui, 'session A one');
   await settleUntil(() => frameOf(ui).includes('A first.'));
   await ask(ui, 'session A two');
-  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  await settleUntil(() => frameOf(ui).includes('Remark number 1.'));
   await ask(ui, 'session A three');
   // Away: the turn is held and ends while the session is left, so it is put away. Not away:
   // its answer starts a task, which keeps the session loaded and quiet.
@@ -260,7 +261,7 @@ async function leftAtItsEnd(away: boolean) {
   await ask(ui, 'session B two');
   await settleUntil(() => frameOf(ui).includes('B second.'));
   await ask(ui, 'session B three');
-  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  await settleUntil(() => frameOf(ui).includes('Remark number 1.'));
   await settle(6);
   // One page up reaches the top of the long answer; two down leave it paged up.
   await ui.press('pageup');

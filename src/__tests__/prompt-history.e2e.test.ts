@@ -6,20 +6,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { sessionFiles } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
 // A real process finishes on its own clock, not the test backend's.
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 const promptsIn = (dir: string): string[] => {
   const name = sessionFiles(dir)[0]!;
   return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')).prompts;

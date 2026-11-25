@@ -12,7 +12,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil, type Turn } from './helpers/scripted';
 import { openStrip } from './helpers/work-panel';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -21,7 +21,6 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -74,6 +73,10 @@ const spawn = async (rig: Rig, i: number) => {
 };
 // The request of a kind is on screen (the y/n block or the question's block).
 const shows = (ui: UI, kid: Kid) => frameOf(ui).includes(kid.kind === 'yn' ? `⚠ ${labelOf(kid.mark)} · ${BLOCK}` : title(labelOf(kid.mark)));
+// A question is offered as soon as the holder is gone, but the typing grace (measured on
+// the frozen askClock here) keeps its block out of the field's place until a pause: the
+// strip is what is drawn while it waits, so "it is there" reads as either.
+const offered = (ui: UI, kid: Kid) => shows(ui, kid) || (kid.kind === 'ask' && frameOf(ui).includes(STRIP));
 const answered = (rig: Rig, i: number): boolean => rig.kids[i]!.kind === 'yn' ? fs.existsSync(rig.file(rig.kids[i]!.mark)) : rig.children[i]!.requests.length >= 2;
 const askedOf = (rig: Rig, i: number) => results(rig.children[i]!.requests[1]);
 // The turn of a subagent that wants its request: the request is made once released.
@@ -91,7 +94,7 @@ const escapes = (n: number) => async (rig: Rig) => { for (let i = 0; i < n; i++)
 const SEQ = [[{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Counted.' }]];
 const holders: Holder[] = [
   { name: 'the watch of another subagent', kids: (k) => [k, { mark: 'BYST', kind: 'idle' }], open: async (rig) => { await rig.ui.press('down', 'down', 'return'); await settleUntil(() => frameOf(rig.ui).includes('Esc')); }, close: escapes(2) },
-  { name: 'the /context panel', kids: (k) => [k], open: async (rig) => { await ask(rig.ui, '/context'); await settleUntil(() => frameOf(rig.ui).includes('on screen')); }, close: escapes(1) },
+  { name: 'the /context panel', kids: (k) => [k], open: async (rig) => { await ask(rig.ui, '/context'); await settleUntil(() => /Context\s+\d+%/.test(frameOf(rig.ui)), 400, 'the context panel'); }, close: escapes(1) },
   { name: 'the session picker', kids: (k) => [k], open: async (rig) => { rig.ui.backend.press({ name: 's', ctrl: true }); await settle(4); }, close: escapes(2) /* the first clears the filter the letters made */ },
   {
     name: 'a pager over the chat', kids: (k) => [k], main: SEQ,
@@ -144,13 +147,13 @@ for (const holder of holders) {
       expect(rig.children[0]!.requests.length).toBe(1);
       expect(shows(rig.ui, kid)).toBe(false);
       await holder.close(rig);
-      await settleUntil(() => shows(rig.ui, kid));
+      await settleUntil(() => offered(rig.ui, kid));
       // The key right after the holder went is a letter of the field, never an answer.
       if (kind === 'yn') await rig.ui.press('y'); else await rig.ui.press('z');
       await settle(4);
       expect(answered(rig, 0)).toBe(false);
       await rig.ui.press('backspace');
-      await settleUntil(() => shows(rig.ui, kid));
+      await settleUntil(() => offered(rig.ui, kid));
       pause();
       if (kind === 'yn') {
         await rig.ui.press('y');
@@ -256,7 +259,7 @@ test('a docked plugin panel over a subagent\'s question: the panel keeps the key
   await settle(4);
   expect(answered(rig, 0)).toBe(false);
   await rig.ui.press('backspace');
-  await settleUntil(() => shows(rig.ui, rig.kids[0]!));
+  await settleUntil(() => offered(rig.ui, rig.kids[0]!));
   pause();
   await rig.ui.type('ok');
   await rig.ui.press('return');
@@ -561,14 +564,14 @@ for (const [older, newer] of [['yn', 'ask'], ['ask', 'yn']] as const) {
     pause();
     if (older === 'yn') await rig.ui.press('y'); else { await rig.ui.type('first'); await rig.ui.press('return'); }
     await settleUntil(() => answered(rig, 0));
-    await settleUntil(() => shows(rig.ui, rig.kids[1]!));
+    await settleUntil(() => offered(rig.ui, rig.kids[1]!));
     expect(answered(rig, 1)).toBe(false);
     // The pause starts when the newer's block comes: the key right behind is a letter.
     await rig.ui.press(newer === 'yn' ? 'y' : 'z');
     await settle(4);
     expect(answered(rig, 1)).toBe(false);
     await rig.ui.press('backspace');
-    await settleUntil(() => shows(rig.ui, rig.kids[1]!));
+    await settleUntil(() => offered(rig.ui, rig.kids[1]!));
     pause();
     if (newer === 'yn') await rig.ui.press('y'); else { await rig.ui.type('second'); await rig.ui.press('return'); }
     await settleUntil(() => answered(rig, 1));

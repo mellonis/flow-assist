@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 import type { ClipboardImage } from '../assistant/images';
 import { sessionFiles } from './helpers/session-files';
@@ -14,7 +14,7 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 type Msg = { role: string; content: unknown };
 const userMessages = (model: ScriptedModel, i: number) => (model.requests[i]!.messages as Msg[]).filter((m) => m.role === 'user');
 const b64 = (file: string) => fs.readFileSync(file).toString('base64');
@@ -338,16 +338,27 @@ test('/compact sends the text only, and the image leaves the model\'s view with 
   await settle(5);
   await ui.type('/compact');
   await ui.press('return');
-  await settleUntil(() => model.requests.length === 2);
+  // The count is not the signal: the compaction's own model call may go out more than
+  // once (a summary read as incomplete is asked for again), so a `=== 2` never holds
+  // once the second summary request lands. The drawn line is what the wait names, and
+  // the summary request is found by what it asks, not by its index.
+  await settleUntil(() => ui.backend.lastFrame.includes('── compacted'));
   await settle(10);
-  const compact = JSON.stringify(model.requests[1]);
+  const asked = (r: { messages: { role: string; content?: unknown }[] }) => String(textOf(r.messages.find((m) => m.role === 'user')?.content) ?? '');
+  const summary = model.requests.filter((r) => asked(r).startsWith('The conversation:')).at(-1);
+  expect(summary, 'a compaction request went out').toBeDefined();
+  const compact = JSON.stringify(summary);
   expect(compact).not.toContain('image_url');
   expect(compact).not.toContain('base64');
   expect(compact).toContain('[image: shot.png]');
+  // The turn's own request, not a summary the compaction may ask for again: a summary is
+  // image-free by design and would pass for the wrong reason.
+  const turns = () => model.requests.filter((r) => !asked(r).startsWith('The conversation:'));
+  const before = turns().length;
   await ui.type('next');
   await ui.press('return');
-  await settleUntil(() => model.requests.length === 3);
-  expect(JSON.stringify(model.requests[2])).not.toContain('image_url');
+  await settleUntil(() => turns().length > before);
+  expect(JSON.stringify(turns().at(-1))).not.toContain('image_url');
   ui.app.unmount();
 });
 

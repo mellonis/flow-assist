@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -16,8 +16,8 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 const until = async (ui: Ui, ok: () => boolean, what: string, n = 200) => {
-  for (let i = 0; i < n && !ok(); i++) await settle(1);
-  if (!ok()) throw new Error(`never: ${what}\n${ui.backend.lastFrame}`);
+  try { await settleUntilShared(ok, n, what); }
+  catch (e) { throw new Error(`${(e as Error).message}\n${ui.backend.lastFrame}`); }
 };
 
 // What the model was sent as the last tool result of request `i`.

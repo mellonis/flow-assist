@@ -6,7 +6,7 @@
 // in React commits, from the frame meter's every frame (its own window keeps only the
 // last ones), never in wall time.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 import { createFrameMeter } from '../runtime/frame-stats.ts';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -47,7 +47,8 @@ async function streamed(n: number, chunked: boolean) {
   await ui.type('go');
   const before = commits;
   await ui.press('return');
-  for (let i = 0; i < 500 && !ui.backend.lastFrame.includes(`w${n - 1}`); i++) await settle(2);
+  // The old loop hopped two settles at a time; the count keeps that wall time.
+  await settleUntil(() => ui.backend.lastFrame.includes(`w${n - 1}`), 1000, 'the stream to end');
   await settle(10);
   expect(ui.backend.lastFrame).toContain(`w${n - 1}`);
   const drawn = commits - before;

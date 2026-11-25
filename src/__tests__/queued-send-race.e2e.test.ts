@@ -10,18 +10,14 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 const realSetTimeout = globalThis.setTimeout;
 afterEach(() => { globalThis.fetch = realFetch; globalThis.setTimeout = realSetTimeout; });
 
-const wait = (ms: number) => new Promise((r) => realSetTimeout(r, ms));
-const settleUntil = async (cond: () => boolean, ms = 4000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 4000) => settleUntilShared(cond, { ms });
 // Zero-delay timers jump ahead of the render; every other timer is left alone.
 const armRace = () => {
   globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {

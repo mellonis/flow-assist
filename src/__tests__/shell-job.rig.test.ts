@@ -23,12 +23,12 @@ afterEach(() => {
 });
 
 const groupAlive = (pid: number): boolean => { try { process.kill(-pid, 0); return true; } catch { return false; } };
-const until = async (cond: () => boolean, ms = 4000) => {
+const heldWithin = async (cond: () => boolean, ms = 4000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (cond()) return true; await new Promise((r) => setTimeout(r, 10)); }
   return cond();
 };
-const gone = (pid: number, ms = 1500) => until(() => !groupAlive(pid), ms);
+const gone = (pid: number, ms = 1500) => heldWithin(() => !groupAlive(pid), ms);
 const lockOf = (rig: Rig, id: string) => path.join(homeIn(rig.sessionsDir!, id), `${id}.lock`);
 const rigWith = (shell: Record<string, unknown> = {}) => conversationRig(new ScriptedModel(), { shell });
 
@@ -37,7 +37,7 @@ async function start(c: Conversation, command: string, by: 'model' | 'person' = 
   const r = c.startJob({ command, cwd: c.shell.cwd(), by });
   if (!('job' in r)) throw new Error(r.refused);
   strays.push(r.job.pid!);
-  expect(await until(() => groupAlive(r.job.pid!))).toBe(true);
+  expect(await heldWithin(() => groupAlive(r.job.pid!))).toBe(true);
   return r.job;
 }
 const jobEvents = (rig: Rig, c: Conversation, t: string) => rig.journal(c.sessionId).filter((e) => e.t === t);

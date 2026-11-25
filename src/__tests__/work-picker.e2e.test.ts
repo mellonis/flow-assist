@@ -12,7 +12,7 @@ import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { hostStateDir } from '../config/load.ts';
 import { keyGlyph } from '../playback/keys.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil, type Turn } from './helpers/scripted';
 import { closeStrip, openStrip, stripRows, stripUp } from './helpers/work-panel';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -30,7 +30,6 @@ afterEach(() => {
   } catch { /* no state file */ }
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');

@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { closeStrip, openStrip, stripRow, stripRows, stripUp } from './helpers/work-panel';
 
@@ -29,7 +29,6 @@ afterEach(() => {
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
@@ -157,22 +156,26 @@ test('a y/n of a later turn is offered like a first turn\'s: labelled, armed by 
   pause();
   await ui.press('y');
   await settleUntil(() => fs.existsSync(path.join(root, 'later.txt')));
-  // The told turn's answer is unread: the hint counts it, and the strip's row says answered.
-  await settleUntil(() => frameOf(ui).includes('● 1'));
-  expect(await stripRow(ui, 'later-one-go')).toContain('answered');
+  // The told turn's answer is unread: the strip's row says answered. The hint's `●` counts
+  // OTHER sessions, and this session is on screen — it never counts itself.
+  await openStrip(ui);
+  await settleUntil(() => stripRows(ui).some((r) => r.includes('later-one-go') && r.includes('answered')));
+  await closeStrip(ui);
   expect(a!.requests).toHaveLength(3);
   ui.app.unmount();
 });
 
 test('an n declines a later turn\'s write', async () => {
-  const { root, ui } = await boot((r) => [{ mark: 'LATER-NO', turns: [[{ text: 'first' }], touch(r, 'no.txt'), [{ text: 'second' }]] }]);
+  const { root, children: [a], ui } = await boot((r) => [{ mark: 'LATER-NO', turns: [[{ text: 'first' }], touch(r, 'no.txt'), [{ text: 'second' }]] }]);
   await startIdle(ui, 'LATER-NO', 'later-no-go');
   await ask(ui, '/subagent tell later-no-go write it');
   await settleUntil(() => frameOf(ui).includes(BLOCK));
   pause();
   await ui.press('n');
-  await settleUntil(() => frameOf(ui).includes('● 1'));
-  expect(await stripRow(ui, 'later-no-go')).toContain('answered');
+  // As above: the row says answered once the declined turn has ended.
+  await openStrip(ui);
+  await settleUntil(() => stripRows(ui).some((r) => r.includes('later-no-go') && r.includes('answered')));
+  await closeStrip(ui);
   expect(fs.existsSync(path.join(root, 'no.txt'))).toBe(false);
   ui.app.unmount();
 });
@@ -185,7 +188,8 @@ test('a tell to a stopped node is refused: it has ended', async () => {
   await settleUntil(() => stripUp(ui));
   await ui.backend.press({ name: 'd', ctrl: true });
   await ui.press('y');
-  await settleUntil(() => frameOf(ui).includes('rows-one-go stopped'));
+  // An idle subagent is ended by closing it, with nothing toasted: its row leaves the strip.
+  await settleUntil(() => !stripRows(ui).some((r) => r.includes('rows-one-go')));
   // It is ended: a tell is refused.
   await ui.press('escape');
   await settleUntil(() => !stripUp(ui));

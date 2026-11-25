@@ -16,7 +16,7 @@
 // `hold` that freezes the stream until the scenario releases it — which is how a
 // frame is taken "while the answer is still coming".
 
-import { ScriptedModel, bootApp, settle } from '../src/__tests__/helpers/scripted.ts';
+import { ScriptedModel, bootApp, settle, settleUntil } from '../src/__tests__/helpers/scripted.ts';
 import type { Make } from '../src/loader/plugin.ts';
 
 const argv = process.argv.slice(2);
@@ -315,7 +315,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const model = new ScriptedModel();
     model.script([{ tool: 'run_command', args: { command: 'echo one; sleep 1; echo two' } }], [{ text: 'Both printed.' }]);
     const ui = await boot(model);
-    const until = async (ok: () => boolean) => { for (let i = 0; i < 400 && !ok(); i++) await settle(1); };
+    const until = async (ok: () => boolean) => settleUntil(ok);
     await ui.press('F');
     await ui.type('run it');
     await ui.press('return');

@@ -5,13 +5,13 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
+import { closeStrip, openStrip, stripRows } from './helpers/work-panel';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const frameOf = (ui: { backend: { lastFrame?: string } }) => ui.backend.lastFrame ?? '';
 type UI = Awaited<ReturnType<typeof bootApp>>;
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
@@ -60,7 +60,10 @@ test('a session left with an idle subagent keeps it: the picker reads the sessio
   await ask(ui, '/subagent tell keep-one-go anything new?');
   await settleUntil(() => child.requests.length === 2);
   expect(frameOf(ui)).toContain('message sent to «keep-one-go»');
-  // Its later answer waits unread: the hint counts it.
-  await settleUntil(() => frameOf(ui).includes('● 1'));
+  // Its later answer waits unread in the subagent: the strip's row says answered (`●`
+  // counts OTHER sessions, and this one is on screen).
+  await openStrip(ui);
+  await settleUntil(() => stripRows(ui).some((r) => r.includes('keep-one-go') && r.includes('answered')));
+  await closeStrip(ui);
   ui.app.unmount();
 });

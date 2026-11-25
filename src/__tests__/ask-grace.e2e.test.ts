@@ -9,7 +9,7 @@
 // to fire.
 import { afterEach, expect, test } from 'bun:test';
 import { ASK_GRACE_MS, askClock } from '../assistant/child-ask-guard.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared, type Turn } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -17,7 +17,7 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 600) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 600) => settleUntilShared(ok, n);
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');

@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The work strip is drawn in a docked chat.** With the chat beside a plugin's screen
+  (`panel` mode), `↓` drew nothing: the strip's panel was laid at the terminal's corner
+  and the chat's area clipped it. The chat's area is now the box its overlays are placed
+  in, so the strip takes its twelve rows at the bottom of the pane, as it does in a
+  window.
+
 - **A diff reads the same in the chat and in `/diff`.** A removed line is amber in the
   panel — `warn`, the colour of what waits on you — and red in the change block, so the
   same file tells two stories. Both now take the chat palette's `del` and its ground

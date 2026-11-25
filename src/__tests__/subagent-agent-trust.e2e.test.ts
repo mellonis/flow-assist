@@ -9,7 +9,7 @@ import { Conversation } from '../assistant/conversation.ts';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import { agentHash, parseAgentFile, type Agent } from '../assistant/agent-file.ts';
 import { agentChanged, agentTrusted, agentTrustPath, recordAgentStart } from '../assistant/agent-trust.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 
 const made: string[] = [];
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -25,7 +25,6 @@ const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file),
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const toolNames = (req: { tools?: unknown; [k: string]: unknown }): string[] => ((req.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
 
 const BAND = { type: 'function' as const, function: { name: 'band_look', description: 'Looks at the band.', parameters: { type: 'object', properties: {} } } };

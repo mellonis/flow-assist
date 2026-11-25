@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TestBackend } from '@flowtty/core/testing';
 import { askClock } from '../assistant/child-ask-guard';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { loadPlugins } from '../loader/build';
@@ -24,8 +24,8 @@ afterEach(() => { globalThis.fetch = realFetch; askClock.now = realAskNow; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 const until = async (ui: { backend: TestBackend }, ok: () => boolean, what: string, n = 300) => {
-  for (let i = 0; i < n && !ok(); i++) await settle(1);
-  if (!ok()) throw new Error(`never: ${what}\n${ui.backend.lastFrame}`);
+  try { await settleUntilShared(ok, n, what); }
+  catch (e) { throw new Error(`${(e as Error).message}\n${ui.backend.lastFrame}`); }
 };
 const flat = (s: string) => s.replace(/\s+/g, ' ');
 // The panel's row of a plugin: its name, then what the panel says of it.

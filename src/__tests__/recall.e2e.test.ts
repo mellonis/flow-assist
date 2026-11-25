@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 import { sessionFiles } from './helpers/session-files';
 
@@ -20,7 +20,7 @@ afterEach(() => {
   if (realKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = realKey;
 });
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 type Part = { type: string; text?: string; image_url?: { url: string } };
 type Msg = { role: string; content: string | Part[] | null; tool_call_id?: string };
 type Req = { messages: Msg[] };

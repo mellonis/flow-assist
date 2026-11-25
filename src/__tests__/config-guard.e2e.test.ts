@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -20,7 +20,7 @@ afterEach(() => {
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 const autoRun = (c: Record<string, unknown>) => (c.shell as { autoRun?: unknown } | undefined)?.autoRun;
 
 async function commandRewritesConfig() {
@@ -98,8 +98,9 @@ test('a person\'s own editor change made while the app was off is asked about at
   expect(autoRun(config)).toBeUndefined();
   guardConfigFiles();
   const ui = await bootApp(new ScriptedModel(), 120, 34);
-  await settleUntil(() => ui.backend.lastFrame.includes('changed outside flow-assist'));
+  // The question lives in the chat: it cannot be on screen before the chat is opened.
   await ui.press('F');
+  await settleUntil(() => ui.backend.lastFrame.includes('changed outside flow-assist'));
   await settleUntil(() => ui.backend.lastFrame.includes('shell.autoRun: (unset) → true'));
   expect(ui.backend.lastFrame).toContain('config.local.json changed outside flow-assist — apply? (y/n)');
   await ui.press('y');

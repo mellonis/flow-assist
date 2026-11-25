@@ -289,6 +289,27 @@ describe('the protocol answer', () => {
     await expect(c.initialize()).rejects.toThrow(/not a JSON-RPC answer/);
   });
 
+  test('a reply with neither `result` nor `error` is not an answer — an id alone does not make it one', async () => {
+    // A JSON-RPC reply carries `result` or `error`; its `id` only says which request it
+    // answers. Reading `result` out of an `{ id }`-only body is an empty success — the
+    // same "connected, 0 tools" the garbage-body case pins. A non-object body (a bare
+    // string) and a batch array are no answer to a single request either.
+    const bodies: Array<{ what: string; body: (id: unknown) => unknown }> = [
+      { what: 'an id and nothing else', body: (id) => ({ jsonrpc: '2.0', id }) },
+      { what: 'a null error', body: (id) => ({ jsonrpc: '2.0', id, error: null }) },
+      { what: 'a bare string', body: () => 'ok' },
+      { what: 'a batch array', body: () => [] },
+    ];
+    for (const { what, body } of bodies) {
+      const fetcher: Fetcher = async (_url, init) => {
+        const sent = JSON.parse(String(init.body)) as { id?: unknown };
+        return new Response(JSON.stringify(body(sent.id)), { headers: { 'content-type': 'application/json' } });
+      };
+      const c = createMcpClient({ url: 'http://x/mcp', fetch: fetcher });
+      await expect(c.initialize(), what).rejects.toThrow(/not a JSON-RPC answer/);
+    }
+  });
+
   test('`result: null` is a real answer; an empty body is no answer at all', async () => {
     const nullResult: Fetcher = async (_url, init) => {
       const body = JSON.parse(String(init.body)) as { id?: number };

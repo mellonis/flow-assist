@@ -8,7 +8,7 @@ import { agentTrustPath, skillChanged, skillTrusted } from '../assistant/agent-t
 import { loadSkillFresh } from '../assistant/skill-file.ts';
 import { readJournal, exportMarkdown, type JournalEvent } from '../assistant/journal.ts';
 import { hostStateDir } from '../config/load.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 const made: string[] = [];
@@ -26,7 +26,6 @@ const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file),
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const lastUser = (model: ScriptedModel, at = -1): string => {
   const users = (model.requests.at(at)?.messages ?? []).filter((m) => m.role === 'user');
   return String(users.at(-1)?.content ?? '');

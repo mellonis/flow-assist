@@ -2,7 +2,7 @@
 // conversation is compacted first — the same handoff and the same row as /compact,
 // marked `auto` — at a request boundary, so a call is never parted from its result.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, handoff, longText, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, longText, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -19,7 +19,7 @@ const long = (mark: string) => handoff(`${mark} ${'f'.repeat(1500)}`);
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const body = (model: ScriptedModel, i: number) => JSON.stringify(model.requests[i]);
 const streamed = (model: ScriptedModel, i: number) => (model.requests[i] as { stream?: boolean }).stream === true;
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 
 async function boot(model: ScriptedModel, wire: 'openai' | 'anthropic', autoCompact?: Record<string, unknown>) {
   model.wire = wire;
