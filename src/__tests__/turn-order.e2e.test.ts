@@ -14,7 +14,8 @@ import type { Make } from '../loader/plugin';
 import { SESSION_VERSION, newSessionId, type Session } from '../assistant/sessions.ts';
 import { hereHome, hereProject, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;

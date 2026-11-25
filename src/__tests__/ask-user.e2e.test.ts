@@ -13,7 +13,8 @@ import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../
 import { ScriptedModel, bootApp, settle as settleUi } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 // The plan is module-level state: leave none behind for the suites that follow.
 afterEach(() => { globalThis.fetch = realFetch; });
 

@@ -19,7 +19,8 @@ import { HOST_API } from '../version';
 import { ScriptedModel } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realToken = process.env.LLM_TOKEN;
 afterEach(() => {
   globalThis.fetch = realFetch;

@@ -12,7 +12,8 @@ import { getDeep, hostStateDir, loadConfig, resetSessionConfig, saveConfigUnset 
 import { modelMaySave, modelMaySet } from '../config/schema';
 import type { Make } from '../loader/plugin';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   resetSessionConfig();

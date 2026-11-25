@@ -6,7 +6,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, firstUser } from './helpers/scripted';
 import { closeRigs, conversationRig } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 test('a turn goes through the host\'s services: the answer, the history, the journal, the saved file', async () => {

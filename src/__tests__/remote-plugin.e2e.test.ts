@@ -5,7 +5,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 // Waits for what a test is about, and FAILS when it never comes — a wait that returned

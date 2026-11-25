@@ -9,7 +9,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { createFrameMeter } from '../runtime/frame-stats.ts';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // Boots the chat with an answer of `n` deltas scripted, a counter of every commit, and —

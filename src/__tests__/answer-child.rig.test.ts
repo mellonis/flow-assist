@@ -9,7 +9,8 @@ import { exportMarkdown } from '../assistant/journal.ts';
 import { ScriptedModel, type RecordedRequest, type Step } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const children: Conversation[] = [];
 afterEach(() => { globalThis.fetch = realFetch; for (const c of children.splice(0)) c.close('exit'); closeRigs(); });
 

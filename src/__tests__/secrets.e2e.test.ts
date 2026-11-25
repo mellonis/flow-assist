@@ -11,7 +11,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { listTree, sessionFiles } from './helpers/session-files';
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.e2e-wiki-token-body.signature-part';
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env.WIKI_TOKEN;

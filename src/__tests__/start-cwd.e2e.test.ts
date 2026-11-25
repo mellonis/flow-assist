@@ -12,7 +12,8 @@ import { journalPath, projectHome } from '../assistant/sessions';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { isSessionFile, listTree, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
@@ -20,6 +21,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settleUntil = async (cond: () => boolean, ms = 3000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
+  if (cond()) return;
+  throw new Error(`settleUntil: the condition never held in ${ms} ms: ${String(cond)}`);
 };
 
 test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up, and the session files under its mirror', async () => {
@@ -36,7 +39,7 @@ test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up
   expect(ui.backend.lastFrame).not.toContain('outside shell.roots');
   await ui.type('!pwd');
   await ui.press('return');
-  await settleUntil(() => /pwd\s*·/.test(ui.backend.lastFrame));
+  await settleUntil(() => /pwd · (?:✓|✗)/.test(ui.backend.lastFrame));
   // The command actually ran in the repo — not the root, not the default.
   const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('! pwd'))!;
   expect(cmdLine).toContain(repo);
@@ -63,13 +66,13 @@ test('started outside every root: the first one takes over, and the chat says so
   const root = tmp('fa-start-root-');
   const outside = tmp('fa-start-outside-');
   const model = new ScriptedModel();
-  const ui = await bootApp(model, 140, 32, undefined, { shell: { roots: [root] } }, { startDir: outside });
+  const ui = await bootApp(model, 140, 32, undefined, { shell: { roots: [root] } }, { startDir: outside, toastMs: 10_000 });
   await ui.press('F');
-  await settle(6);
+  await settleUntil(() => ui.backend.lastFrame.includes('outside shell.roots'));
   expect(ui.backend.lastFrame).toContain('outside shell.roots');
   await ui.type('!pwd');
   await ui.press('return');
-  await settleUntil(() => /pwd\s*·/.test(ui.backend.lastFrame));
+  await settleUntil(() => /pwd · (?:✓|✗)/.test(ui.backend.lastFrame));
   // The command itself ran in the first root, not the start directory — the note
   // above is the only place `outside` legitimately appears.
   const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('! pwd'))!;
@@ -143,7 +146,7 @@ test('a background task starts where its parent conversation\'s shell currently 
   await ui.press('F');
   await ui.type('go to sub');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('now in'));
+  await settleUntil(() => JSON.stringify(model.requests).includes('now in'));
   await ui.type('find out where in the background');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Started it in the background.'));

@@ -11,7 +11,8 @@ import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig } from './helpers/conversation';
 import { png } from './helpers/image-fixtures';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 type Msg = { role: string; content: unknown };
 

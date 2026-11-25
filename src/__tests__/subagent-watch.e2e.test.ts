@@ -12,7 +12,8 @@ import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/
 import { askUp } from './helpers/ask-block';
 import { isSessionFile } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });

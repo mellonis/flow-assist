@@ -1,6 +1,7 @@
 // A session the chat leaves while it has work of its own stays loaded and locked, and the
 // registry puts it away only once nothing of its own is left (sessions-journal-spec.md (a host makes its
 // conversations through one registry)).
+import { nativeFetch } from './helpers/test-setup.ts';
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -189,7 +190,7 @@ class DraftPort extends FakePort {
 }
 
 test('a left turn that fails with a queued message puts the queue into the saved draft and is parked', async () => {
-  const realFetch = globalThis.fetch;
+  const realFetch = nativeFetch;
   try {
     const { sub, rig } = await heldTurnInA();
     rig.conv.enqueue('queued while it ran');
@@ -206,7 +207,7 @@ test('a left turn that fails with a queued message puts the queue into the saved
 });
 
 test('a left turn that fails puts the queue ahead of the draft kept at the leave', async () => {
-  const realFetch = globalThis.fetch;
+  const realFetch = nativeFetch;
   try {
     const { sub, rig } = await heldTurnInA();
     const a = rig.conv;

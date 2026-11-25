@@ -6,7 +6,8 @@ import { transportFor } from '../remote/transports';
 import { socketPath } from '../remote/sockets';
 import manifest from '../../examples/remote-login/manifest.json';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 const until = async (ok: () => boolean, label: string, n = 300) => {
   for (let i = 0; i < n && !ok(); i++) await settle(1);

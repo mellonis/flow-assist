@@ -10,7 +10,8 @@ import { SESSION_VERSION, newSessionId } from '../assistant/sessions.ts';
 import type { Make } from '../loader/plugin.ts';
 import { hereHome, hereProject, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };

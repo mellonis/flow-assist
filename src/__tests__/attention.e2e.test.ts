@@ -10,7 +10,8 @@ import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { acquireLock } from '../assistant/sessions.ts';
 import { homeIn, listTree, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   unguardConfigFiles();

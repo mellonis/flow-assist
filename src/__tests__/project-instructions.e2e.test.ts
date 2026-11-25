@@ -8,7 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

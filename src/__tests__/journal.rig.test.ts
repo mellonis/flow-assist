@@ -10,7 +10,8 @@ import { ScriptedModel, handoff, longText } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { sessionIdOf } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 // A foreign write to a session's state file — a hand edit, an older host: the next save forks.

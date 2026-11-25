@@ -15,7 +15,8 @@ import { stopRemotePlugins } from '../remote/lifecycle';
 import type { TransportClose } from '../remote/transport';
 import { createPeer } from '@flow-assist/remote';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 const until = async (ok: () => boolean, label: string, n = 600) => {
   for (let i = 0; i < n && !ok(); i++) await settle(1);

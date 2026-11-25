@@ -9,7 +9,8 @@ import { SESSION_VERSION, newSessionId, saveSession } from '../assistant/session
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 import { hereHome, hereProject } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type UI = Awaited<ReturnType<typeof bootApp>>;

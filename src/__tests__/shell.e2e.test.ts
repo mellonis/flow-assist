@@ -11,7 +11,8 @@ import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { Sent as WireMessage } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
@@ -23,6 +24,8 @@ const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 const settleUntil = async (cond: () => boolean, ms = 3000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
+  if (cond()) return;
+  throw new Error(`settleUntil: the condition never held in ${ms} ms: ${String(cond)}`);
 };
 
 async function boot(model: ScriptedModel, root: string, extra: Record<string, unknown> = {}, cols = 110) {
@@ -250,6 +253,7 @@ test("a background task's command waits for the person, and their yes runs it", 
   await ui.press('y');
   await settleUntil(() => fs.existsSync(path.join(root, 'made.txt')));
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  await settleUntil(() => ui.backend.lastFrame.includes('Made it.'));
   ui.app.unmount();
 });
 
@@ -266,10 +270,6 @@ test('a `writes: \'deny\'` background task cannot run a command — it is read-o
   const ui = await boot(model, root);
   await ui.type('make a file in the background');
   await ui.press('return');
-  await settleUntil(() => model.requests.length === 5);
-  await settle(20);
-  await wait(100);
-  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
   // What the model is told per call it made — one call's own result, not the whole
   // transcript. Call ids repeat across rounds, so each request's results are paired
   // with its calls in order rather than by id.
@@ -287,6 +287,9 @@ test('a `writes: \'deny\'` background task cannot run a command — it is read-o
     }
     return out.join('\n');
   };
+  // Both attempted calls are answered in full before the words below are read.
+  await settleUntil(() => resultOf('run_command').includes('Unknown tool: run_command') && resultOf('config_set').includes(READ_ONLY_TASK_DECLINE));
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
   // (a) The read-only task is offered no write tools at all: its run_command call is
   // answered as one to a tool that does not exist, and nothing runs.
   expect(resultOf('run_command')).toContain('Unknown tool: run_command');
@@ -641,7 +644,9 @@ test('a read-only background task leaves the chat\'s directory where it is', asy
   await bang(ui, 'cd sub');
   await ui.type('go elsewhere in the background');
   await ui.press('return');
-  await settleUntil(() => model.requests.length === 4);
+  // The task's end line is what says its rounds ran to their last answer — a count of
+  // mock arrivals races the follow-up turn that the end itself starts (it goes by).
+  await settleUntil(() => ui.backend.lastFrame.includes('finished: Could not.'));
   await settle(20);
   await ui.press('escape');
   await bang(ui, 'touch still-here.txt');

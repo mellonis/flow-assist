@@ -11,7 +11,8 @@ import { makeFactory } from '../../loader/plugin';
 import { assembleToolRegistry } from '../../loader/tools';
 import { createServices } from '../services';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 function setup() {

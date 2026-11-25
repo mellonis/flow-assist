@@ -278,3 +278,32 @@ test('connecting gives up quickly; a call may take long', async () => {
   expect(Date.now() - t0).toBeLessThan(1000);
   expect(status[0]).toMatchObject({ ok: false, detail: 'no answer in 80 ms' });
 });
+
+describe('the protocol answer', () => {
+  test('a 2xx body that is not a JSON-RPC answer fails the call loudly', async () => {
+    // The body a chat server returns where an MCP answer belongs: a client reading
+    // `result` out of it gets `undefined` and reports a connected, empty server. The
+    // failure says what arrived instead.
+    const garbage: Fetcher = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }), { headers: { 'content-type': 'application/json' } });
+    const c = createMcpClient({ url: 'http://x/mcp', fetch: garbage });
+    await expect(c.initialize()).rejects.toThrow(/not a JSON-RPC answer/);
+  });
+
+  test('`result: null` is a real answer; an empty body is no answer at all', async () => {
+    const nullResult: Fetcher = async (_url, init) => {
+      const body = JSON.parse(String(init.body)) as { id?: number };
+      return body.id === undefined
+        ? new Response(null, { status: 202 })
+        : new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: null }), { headers: { 'content-type': 'application/json' } });
+    };
+    const c = createMcpClient({ url: 'http://x/mcp', fetch: nullResult });
+    expect((await c.initialize()).protocolVersion).toBe(PROTOCOL_VERSION);
+
+    // The empty body is the reply that does not exist: it rejects exactly as it did
+    // before this validation, a `lost` read of "nothing arrived".
+    const empty: Fetcher = async () => new Response(null, { status: 204 });
+    const err = await createMcpClient({ url: 'http://x/mcp', fetch: empty }).initialize().catch((e: McpError) => e);
+    expect(err).toBeInstanceOf(McpError);
+    expect((err as McpError).lost).toBe(true);
+  });
+});

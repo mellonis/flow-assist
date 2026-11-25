@@ -10,7 +10,8 @@ import { SESSION_VERSION, journalPath, newSessionId, projectHome, saveSession, t
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { isSessionFile, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));

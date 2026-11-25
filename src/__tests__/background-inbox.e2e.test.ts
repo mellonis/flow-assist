@@ -13,7 +13,8 @@ import type { Make } from '../loader/plugin';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { listTree } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const local = () => path.join(hostStateDir(), 'config.local.json');
 afterEach(() => {
   globalThis.fetch = realFetch;

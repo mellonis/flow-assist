@@ -29,6 +29,9 @@ import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
 import { setStartDirForTests, shellRoots } from '../../assistant/shell.ts';
+import { closeRegistriesForTests } from '../../plugins/assistant.ts';
+import { trackDisposable } from './disposal.ts';
+import { nativeFetch } from './test-setup.ts';
 import type { ClipboardImage } from '../../assistant/images.ts';
 import type { InteractiveDeps } from '../../assistant/interactive.ts';
 import type { RestartingTransport } from '../../remote/transport.ts';
@@ -323,6 +326,22 @@ export function anthropicRefusal(req: Record<string, unknown>, headers: Record<s
 
 export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await flush(); await new Promise((r) => setTimeout(r, 4)); } };
 
+// A wait for a state instead of a number of hops — one that never gives up quietly: a
+// condition that never held fails the wait, naming itself in the error. A silent
+// give-up reads as success until some later assertion fails on a frame no reader can
+// connect to the wait that actually gave up.
+export const settleUntil = async (ok: () => boolean, n = 400): Promise<void> => {
+  for (let i = 0; i < n; i++) {
+    if (ok()) return;
+    await settle(1);
+  }
+  if (ok()) return;
+  throw new Error(`settleUntil: the condition never held in ${n} settles: ${String(ok)}`);
+};
+
+// The process-global fetch as the preload snapshotted it — a test's restore target.
+export const restoreFetch = (): void => { globalThis.fetch = nativeFetch; };
+
 // `guests` adds plugins that are not the host's own — built with the same `make` the
 // loader uses, so they are namespaced exactly as an installed plugin is.
 // `extra` is merged into the config — e.g. `{ memory: { file } }` to name the memory
@@ -450,7 +469,24 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const type = async (text: string) => { backend.type(text); await settle(); };
   // `services` is the app's own host services — the live object plugins read through
   // `host.services` — so a test reaches a channel the way a plugin does (`setThemeMode`).
-  return { backend, app, press, type, exits: () => exits, config, tools, plugins, site, trust, services: app.services };
+  // `close()` is what the test's end looks like: the chat's conversations closed as at
+  // a program exit (children stop, turns abort), the app unmounted, and the
+  // process-global fetch back to the pristine one. A test that never calls it is
+  // closed all the same by the disposal between tests (helpers/disposal.ts).
+  let closed = false;
+  const handle = {
+    backend, app, press, type, exits: () => exits, config, tools, plugins, site, trust, services: app.services,
+    get closed() { return closed; },
+    async close() {
+      if (closed) return;
+      closed = true;
+      closeRegistriesForTests();
+      app.unmount();
+      restoreFetch();
+    },
+  };
+  trackDisposable(handle);
+  return handle;
 }
 
 // A summary in the shape a compaction accepts (src/assistant/compaction.ts): every

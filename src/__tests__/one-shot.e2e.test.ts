@@ -10,7 +10,8 @@ import path from 'node:path';
 import { ScriptedModel } from './helpers/scripted';
 import { parseCli, runPrompt } from '../main';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Sent = { role: string; content: unknown }[];

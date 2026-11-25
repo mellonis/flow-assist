@@ -1,3 +1,4 @@
+import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
 import { expect, test } from 'bun:test';
 import { createPeer, PeerError, PROTOCOL_HOST_API, type Peer } from '@flow-assist/remote';
 import { makeFactory } from '../../loader/plugin';
@@ -307,7 +308,7 @@ test('host.chatLLM declines every write the model calls', async () => {
   const { assembleToolRegistry } = await import('../../loader/tools');
   const { createServices } = await import('../../runtime/services');
   const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
-  const realFetch = globalThis.fetch;
+  const realFetch = nativeFetch;
   try {
     process.env.LLM_TOKEN = 'scripted';
     const ran: string[] = [];

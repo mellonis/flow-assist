@@ -11,7 +11,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { ContextItem, Make } from '../loader/plugin';
 import { sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
 beforeEach(() => { process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted'; });
 afterEach(() => {

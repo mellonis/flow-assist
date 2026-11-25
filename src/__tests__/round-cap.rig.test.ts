@@ -6,7 +6,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig, type Sent } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 test('a turn stopped at ai.maxRounds closes in the model\'s history with where it stopped, and continue carries it on', async () => {

@@ -8,10 +8,11 @@ import path from 'node:path';
 import { workHome } from '../assistant/conversation.ts';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const localConfig = () => path.join(hostStateDir(), 'config.local.json');
 afterEach(() => {
   globalThis.fetch = realFetch;
@@ -23,7 +24,6 @@ afterEach(() => {
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-leave-busy-'));
 type Saved = { id: string; messages: { role: string; content: unknown }[]; draft: string; answeredAt?: string; seenAt?: string };
 const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)
@@ -39,11 +39,14 @@ const frameOf = (ui: { backend: { lastFrame?: string } }) => ui.backend.lastFram
 
 type UI = Awaited<ReturnType<typeof bootApp>>;
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
+// The picker's rows are read from disk before they are drawn: a key or a click on a
+// list that is not there yet acts on nothing. Both helpers below wait for the rows.
+const pickerRows = (ui: UI) => frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
 // Opens the picker, walks the cursor to the row holding `text`, and takes it with ⏎.
 async function pick(ui: UI, text: string) {
   ui.backend.press({ name: 's', ctrl: true });
-  await settle(3);
-  const rows = frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
+  await settleUntil(() => pickerRows(ui).some((r) => r.includes(text)));
+  const rows = pickerRows(ui);
   const at = rows.findIndex((r) => r.includes(text));
   if (at < 0) throw new Error(`pick: no row with ${text}`);
   for (let i = 0; i < at; i++) { await ui.press('down'); await settle(1); }
@@ -52,7 +55,7 @@ async function pick(ui: UI, text: string) {
 }
 async function pickerFrame(ui: UI): Promise<string> {
   ui.backend.press({ name: 's', ctrl: true });
-  await settle(3);
+  await settleUntil(() => pickerRows(ui).length > 0);
   const f = frameOf(ui);
   await ui.press('escape');
   await settle(2);
@@ -103,6 +106,8 @@ for (const how of ['/resume', '/new'] as const) {
 
     aSub.release();
     await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+    // The file's last save is debounced: the answer reaches it whenever the write does.
+    await settleUntil(() => saved(dir, 'session A question')?.messages.some((m) => m.content === 'A final answer.') === true);
     expect(fs.existsSync(lockOf(dir, idA))).toBe(false);
     expect(saved(dir, 'session A question')!.messages.map((m) => m.content)).toContain('A final answer.');
     expect(frameOf(ui)).not.toContain('A final answer.');
@@ -113,6 +118,7 @@ for (const how of ['/resume', '/new'] as const) {
 
     // Attached: the answer on screen; and once left again, no longer `done`.
     await pick(ui, 'session A question');
+    await settleUntil(() => frameOf(ui).includes('A final answer.'));
     expect(frameOf(ui)).toContain('A final answer.');
     await pick(ui, 'session B question');
     await settle(4);
@@ -330,20 +336,35 @@ test('a pager open when the settings y/n is asked is still open under it', async
   await settleUntil(() => frameOf(ui).includes('Confirm write'));
   await ui.press('y');
   await settleUntil(() => sub.held);
-  // A click on the block's fold line opens it in the pager.
-  const at = frameOf(ui).split('\n').findIndex((r) => r.includes('seq 1 300'));
-  expect(at).toBeGreaterThanOrEqual(0);
-  const x = frameOf(ui).split('\n')[at]!.indexOf('seq 1 300');
+  // Two clicks read the block: the first opens the stretch to its records, the second
+  // is on the record's own line and opens its too-tall body in the pager. The running
+  // status repeats the command's words — it is chrome, not a row of the conversation.
+  await settleUntil(() => frameOf(ui).split('\n').some((r) => r.includes('+ 1 command')));
+  const rowsOf = frameOf(ui).split('\n');
+  const group = rowsOf.findIndex((r) => r.includes('+ 1 command'));
+  expect(group, 'the command stretch line is drawn').toBeGreaterThanOrEqual(0);
+  const gx = rowsOf[group]!.indexOf('▸');
+  ui.backend.mouse('down', gx, group);
+  ui.backend.mouse('up', gx, group);
+  await settleUntil(() => frameOf(ui).split('\n').some((r) => r.includes('seq 1 300 ·')));
+  const rows = frameOf(ui).split('\n');
+  const at = rows.findIndex((r) => r.includes('seq 1 300 ·'));
+  expect(at, 'the record row of the command is drawn').toBeGreaterThanOrEqual(0);
+  const x = rows[at]!.indexOf('seq 1 300 ·');
   ui.backend.mouse('down', x, at);
   ui.backend.mouse('up', x, at);
-  await settle(6);
   const hint = 'the wheel scroll · Esc close';
+  await settleUntil(() => frameOf(ui).includes(hint));
   expect(frameOf(ui)).toContain(hint);
   // The file changes outside the app; the held round goes on and the next request is
   // preceded by the guard's y/n. The pager stays open.
   fs.writeFileSync(localConfig(), '{"shell":{"autoRun":true}}');
   sub.release();
-  await settleUntil(() => sub.requests.length >= 2 && frameOf(ui).includes('changed outside flow-assist') || !frameOf(ui).includes(hint), 100);
+  // The guard's y/n is not drawn while the pager stands in the conversation's place,
+  // so what this window buys is negative: time for the released round to LEAK past the
+  // guard — a third request, or the pager coming down — which the two lines below say
+  // it did not. The guard's own arrival is waited for after Esc, where it is drawn.
+  await settle(120);
   await settle(20);
   expect(sub.requests).toHaveLength(2);
   expect(frameOf(ui)).toContain(hint);

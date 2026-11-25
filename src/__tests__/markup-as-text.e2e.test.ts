@@ -3,7 +3,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const DSML = 'Let me check the time.\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="clock">\n</｜DSML｜invoke>\n</｜DSML｜function_calls>';

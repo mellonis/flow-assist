@@ -8,7 +8,8 @@ import path from 'node:path';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const local = () => path.join(hostStateDir(), 'config.local.json');
 afterEach(() => {
   globalThis.fetch = realFetch;

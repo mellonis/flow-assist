@@ -12,7 +12,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 const made: string[] = [];
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   for (const d of made.splice(0)) fs.rmSync(d, { recursive: true, force: true });

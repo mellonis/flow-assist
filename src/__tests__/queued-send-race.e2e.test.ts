@@ -12,7 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realSetTimeout = globalThis.setTimeout;
 afterEach(() => { globalThis.fetch = realFetch; globalThis.setTimeout = realSetTimeout; });
 

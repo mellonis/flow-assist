@@ -8,7 +8,8 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
 beforeEach(() => { process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted'; });
 afterEach(() => {

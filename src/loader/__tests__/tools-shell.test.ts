@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createShellState } from '../../assistant/shell.ts';
 import { commandCwd, platformLine, probePrograms, runCommandDescription, shellTools } from '../tools-shell.ts';
+import { settleUntil } from '../../__tests__/helpers/scripted';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-runcmd-')));
 
@@ -88,7 +89,7 @@ test('every call is a write — it pauses for the y/n', () => {
 
 test('the description tells the model the machine: platform, default cwd, what is installed', () => {
   const root = tmp();
-  const d = runCommandDescription({ fs: { roots: [root] } });
+  const d = runCommandDescription({ fs: { roots: [root] } }, ['git', 'bun']);
   expect(d).toContain(platformLine());
   expect(d).toContain(`It starts at ${root}`);
   expect(d).toContain('remembered between calls');
@@ -112,8 +113,18 @@ test('the description says the true default — the app\'s start directory when 
 });
 
 test('the probe finds programs on PATH and does not throw on an empty PATH', () => {
-  expect(probePrograms()).toContain('git');
-  expect(probePrograms({ PATH: '' })).toEqual([]);
+  // Deterministic: the PATH is a directory of this test's own with a planted `git`, so
+  // the answer cannot depend on the machine's own PATH or on when the probe's shell gets
+  // scheduled under load. What must hold on the empty PATH is that it answers "none",
+  // not an error.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-probe-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'git'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    expect(probePrograms({ PATH: dir })).toContain('git');
+    expect(probePrograms({ PATH: '' })).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('run_command opens its view and fills it as the command prints', async () => {
@@ -125,7 +136,24 @@ test('run_command opens its view and fills it as the command prints', async () =
       return { update: (d: { text: string; exitCode?: number | null }) => states.push(d), discard() {} };
     },
   };
-  const out = await shellTools({}).exec('run_command', { command: 'printf a; sleep 0.2; printf b' }, ctx as never);
+  const gate = path.join(tmp(), 'gate');
+  // The second print is behind a gate this test opens, not behind a sleep: two prints
+  // separated in TIME give the reader's pipe one event `"ab"` whenever its scheduling
+  // gap exceeds the separation, and no wait in the test can tell the two apart. The
+  // gate makes `'a'` arrive alone by construction.
+  const run = shellTools({}).exec('run_command', { command: `printf a; while [ ! -f '${gate}' ]; do sleep 0.02; done; printf b` }, ctx as never);
+  try {
+    await settleUntil(() => states.some((s) => s.text === 'a'));
+  } catch (e) {
+    // On failure say WHAT arrived: this test's subject is the pipe's chunk boundary, "the
+    // state never said `a`" is only useful together with the chunks that came instead.
+    throw new Error(`${(e as Error).message} — states: ${JSON.stringify(states)}`);
+  } finally {
+    // Unlatch whatever happened: a command left waiting for the gate keeps its `while`
+    // loop alive past this test until its time limit kills it.
+    fs.writeFileSync(gate, '');
+  }
+  const out = await run;
   expect(states[0]!.text).toBe('');
   expect(states.some((s) => s.text === 'a')).toBe(true);
   expect(states.at(-1)).toMatchObject({ text: 'ab', exitCode: 0 });
