@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { sessionFiles } from './helpers/session-files';
 import { resetSessionConfig } from '../config/load';
 
@@ -37,8 +37,9 @@ const press = async (ui: UI, key: { name: string; ctrl?: boolean }) => { ui.back
 // How many rows of the frame say this — a note is said once.
 const said = (ui: UI, text: string) => ui.backend.lastFrame.split('\n').filter((l) => l.includes(text)).length;
 // Wait for a state the app reaches, rather than for a number of ticks: a loaded machine
-// makes a ticking wait a flake. `settle(1)` is well under a millisecond of work, so the
-// bound is generous.
+// makes a ticking wait a flake. `settle(1)` is a few milliseconds of work, so the bound
+// is deliberately generous.
+const settleUntil = async (ok: () => boolean, n = 2000) => settleUntilShared(ok, n);
 const command = async (ui: UI, text: string) => { await ui.type(text); await ui.press('return'); await settle(); };
 // A question: wait for the request it sends, so nothing below races the stream's end.
 const ask = async (model: ScriptedModel, ui: UI, text: string) => {

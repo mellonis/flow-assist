@@ -512,6 +512,20 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
 const COLLAPSE = { name: '\\', ctrl: true };
 test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on the session', async () => {
   const { children: [a], ui } = await oneHeldTask('WATG', { cols: 160, rows: 40, mode: 'panel' });
+  // A docked chat draws the strip INSIDE its own area: its heading and its bottom border
+  // are the pane's rows, not the terminal's corner (where an absolute strip would be
+  // clipped by the pane's rect).
+  await ui.press('down');
+  await settleUntil(() => stripUp(ui));
+  const paneRows = frameOf(ui).split('\n');
+  const tab = paneRows.findIndex((r) => r.includes('Flow Assist · Work'));
+  const bottom = paneRows.findIndex((r, i) => i > tab && r.includes('╰'));
+  expect(tab).toBeGreaterThan(0);
+  expect(paneRows[bottom]).toContain('╰');
+  expect(bottom).toBe(paneRows.length - 1);
+  expect(paneRows.slice(tab + 1, bottom).join('\n')).toContain('watg-do-it');
+  await ui.press('escape');
+  await settleUntil(() => !stripUp(ui));
   await watchFromStrip(ui);
   ui.backend.press(COLLAPSE);
   await settle();
@@ -524,7 +538,6 @@ test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on 
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('wata') || true, 4);
   await settle(10);
   ui.backend.press(COLLAPSE);
   await settle();

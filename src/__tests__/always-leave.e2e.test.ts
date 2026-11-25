@@ -12,7 +12,6 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const ctrl = async (ui: UI, name: string) => { const consumed = ui.backend.press({ name, ctrl: true }); await settle(); return consumed; };
 const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });

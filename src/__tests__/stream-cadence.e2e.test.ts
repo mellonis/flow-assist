@@ -47,7 +47,8 @@ async function streamed(n: number, chunked: boolean) {
   await ui.type('go');
   const before = commits;
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes(`w${n - 1}`), 500, 'the stream to end');
+  // The old loop hopped two settles at a time; the count keeps that wall time.
+  await settleUntil(() => ui.backend.lastFrame.includes(`w${n - 1}`), 1000, 'the stream to end');
   await settle(10);
   expect(ui.backend.lastFrame).toContain(`w${n - 1}`);
   const drawn = commits - before;

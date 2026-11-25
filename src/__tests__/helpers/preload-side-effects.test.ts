@@ -1,11 +1,11 @@
 // The preload's side effects must not travel with a module tests import. `helpers/scripted.ts`
 // is also reachable from a plain `bun` process — signal-exit's host boots the real app that
-// way — and it imports the harness for the pristine fetch. Registration of `bun:test` hooks
-// there used to throw (no runner to attach to), and the fix for that was a catch broad
-// enough to hide any other failure of the registration. The split puts every side effect in
-// a module only the preload loads; this test pins the other half of it: the importable
-// module leaves the process as it found it. The retry no-op is the visible one — a host
-// started this way must still wait between a failed request's repeats.
+// way — and it imports the harness for the pristine fetch. `bun:test` hooks registered on
+// that path have no runner to attach to, and a catch broad enough to hide that hides any
+// other failure of the registration too. Every side effect therefore lives in a module only
+// the preload loads; this test pins the other half: the importable module leaves the process
+// as it found it. The retry no-op is the visible one — a host started this way must still
+// wait between a failed request's repeats.
 import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';

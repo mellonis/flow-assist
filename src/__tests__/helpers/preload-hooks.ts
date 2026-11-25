@@ -9,8 +9,8 @@
 // and it is a preload only. `helpers/scripted.ts` is reachable from a plain `bun` process
 // (signal-exit's host boots the app that way), so a side effect written in a module it
 // imports travels there: `bun:test`'s hooks have no runner to attach to, and the test-time
-// retry no-op would make a real host retry with no pause. Guarding that with a catch is
-// what this split removes — nothing here needs one.
+// retry no-op would make a real host retry with no pause. Every side effect lives here,
+// where only the preload loads it, and nothing here needs a guard.
 import { afterEach, beforeEach } from 'bun:test';
 import fs from 'node:fs';
 import { drainDisposables } from './disposal.ts';

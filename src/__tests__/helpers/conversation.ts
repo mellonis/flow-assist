@@ -19,7 +19,7 @@ import { setStartDirForTests } from '../../assistant/shell.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { createServices } from '../../runtime/services.ts';
-import type { ScriptedModel } from './scripted.ts';
+import { settleUntil, type ScriptedModel } from './scripted.ts';
 import { homeIn, isSessionFile, listTree } from './session-files.ts';
 
 export interface RigOptions {
@@ -170,13 +170,10 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     },
     // A session's state file as a start reads it; null with none.
     sessionFile(id = conv.sessionId): Session | null { return sessionsDir && id ? loadSession(homeOf(id), id) : null; },
-    // Waits, a few milliseconds at a time, until `ok()` holds; fails after `ms`.
+    // Until `ok()` holds: the shared wait, so a condition that never holds fails naming
+    // itself and the budget.
     async until(ok: () => boolean, ms = 10_000): Promise<void> {
-      const end = Date.now() + ms;
-      while (!ok()) {
-        if (Date.now() > end) throw new Error('rig.until: the condition never held');
-        await new Promise((r) => setTimeout(r, 5));
-      }
+      await settleUntil(ok, { ms });
     },
     // Until nothing runs, and what the end of work sends from a zero-delay timer has gone.
     async idle(): Promise<void> {

@@ -17,7 +17,6 @@ const realFetch = nativeFetch;
 const realSetTimeout = globalThis.setTimeout;
 afterEach(() => { globalThis.fetch = realFetch; globalThis.setTimeout = realSetTimeout; });
 
-const wait = (ms: number) => new Promise((r) => realSetTimeout(r, ms));
 const settleUntil = async (cond: () => boolean, ms = 4000) => settleUntilShared(cond, { ms });
 // Zero-delay timers jump ahead of the render; every other timer is left alone.
 const armRace = () => {

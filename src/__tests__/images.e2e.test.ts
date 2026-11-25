@@ -351,11 +351,14 @@ test('/compact sends the text only, and the image leaves the model\'s view with 
   expect(compact).not.toContain('image_url');
   expect(compact).not.toContain('base64');
   expect(compact).toContain('[image: shot.png]');
-  const before = model.requests.length;
+  // The turn's own request, not a summary the compaction may ask for again: a summary is
+  // image-free by design and would pass for the wrong reason.
+  const turns = () => model.requests.filter((r) => !asked(r).startsWith('The conversation:'));
+  const before = turns().length;
   await ui.type('next');
   await ui.press('return');
-  await settleUntil(() => model.requests.length > before);
-  expect(JSON.stringify(model.requests.at(-1))).not.toContain('image_url');
+  await settleUntil(() => turns().length > before);
+  expect(JSON.stringify(turns().at(-1))).not.toContain('image_url');
   ui.app.unmount();
 });
 

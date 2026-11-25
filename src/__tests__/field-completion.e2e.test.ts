@@ -12,7 +12,6 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-field-complete-')));
 // A real process finishes on its own clock, not the test backend's (see shell.e2e.test.ts).
 const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });

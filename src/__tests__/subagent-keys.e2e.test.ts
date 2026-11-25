@@ -158,8 +158,9 @@ test('a y/n of a later turn is offered like a first turn\'s: labelled, armed by 
   await settleUntil(() => fs.existsSync(path.join(root, 'later.txt')));
   // The told turn's answer is unread: the strip's row says answered. The hint's `●` counts
   // OTHER sessions, and this session is on screen — it never counts itself.
-  await settleUntil(() => a!.requests.length === 3);
-  expect(await stripRow(ui, 'later-one-go')).toContain('answered');
+  await openStrip(ui);
+  await settleUntil(() => stripRows(ui).some((r) => r.includes('later-one-go') && r.includes('answered')));
+  await closeStrip(ui);
   expect(a!.requests).toHaveLength(3);
   ui.app.unmount();
 });
@@ -172,8 +173,9 @@ test('an n declines a later turn\'s write', async () => {
   pause();
   await ui.press('n');
   // As above: the row says answered once the declined turn has ended.
-  await settleUntil(() => a!.requests.length === 3);
-  expect(await stripRow(ui, 'later-no-go')).toContain('answered');
+  await openStrip(ui);
+  await settleUntil(() => stripRows(ui).some((r) => r.includes('later-no-go') && r.includes('answered')));
+  await closeStrip(ui);
   expect(fs.existsSync(path.join(root, 'no.txt'))).toBe(false);
   ui.app.unmount();
 });

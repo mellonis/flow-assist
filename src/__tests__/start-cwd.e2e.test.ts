@@ -17,7 +17,6 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up, and the session files under its mirror', async () => {

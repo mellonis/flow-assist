@@ -223,7 +223,8 @@ test('a write’s y/n that arrives while the picker is up is drawn over it and a
   await settle();
   expect(ui.backend.lastFrame).toContain('Sessions ·');
   model.release();
-  await settleUntil(() => ui.backend.lastFrame!.includes('echo hi'), 100, 'the command\'s block');
+  // The old loop hopped two settles at a time; the count keeps that wall time.
+  await settleUntil(() => ui.backend.lastFrame!.includes('echo hi'), 200, 'the command\'s block');
   expect(ui.backend.lastFrame).toContain('echo hi');
   expect(ui.backend.lastFrame).not.toContain('Sessions ·');
   await ui.press('n'); // declines the write
