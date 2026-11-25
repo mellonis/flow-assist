@@ -69,6 +69,14 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
+
+// Every chat's registry this module made, for a test's teardown. A component unmount
+// is not the chat's end — `/clear` and `/resume` leave work alive on purpose — so a
+// test closes them the way a program exit does (`closeAll('exit')`).
+const registries: ConversationRegistry[] = [];
+export const closeRegistriesForTests = (): void => {
+  for (const r of registries.splice(0)) r.closeAll('exit');
+};
 import { startStateFiles, stateSources, type StateFileInput } from '../assistant/state-file.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
@@ -346,6 +354,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               pluginToken: host.pluginToken,
               exitHook: !!sessionsDir(host.config),
             });
+            registries.push(registryRef.current);
           }
           const registry = registryRef.current;
           const lockToken = registry.lockToken;

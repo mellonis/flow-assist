@@ -9,13 +9,23 @@
 // waits for them. The wait resolves at once unless a test sets its own `retryClock.sleep`
 // (the ones that end a wait by an abort use the real one, `sleepFor`).
 retryClock.sleep = async () => {};
-import { beforeEach } from 'bun:test';
+import { afterEach, beforeEach } from 'bun:test';
 import fs from 'node:fs';
+import { drainDisposables } from './disposal.ts';
 import { pluginTrustPath } from '../../loader/trust.ts';
 import { memoryTrustPath } from '../../assistant/memory-trust.ts';
 import { retryClock } from '../../assistant/llm-retry.ts';
 
+// The real fetch, snapshotted before any test module loads: a test's restore target.
+// A test that leaves the scripted mock installed would otherwise hand the next file a
+// double to capture as "the real one".
+export const nativeFetch = globalThis.fetch;
+
 beforeEach(() => {
   fs.rmSync(pluginTrustPath(), { force: true });
   fs.rmSync(memoryTrustPath(), { force: true });
+});
+
+afterEach(async () => {
+  await drainDisposables();
 });
