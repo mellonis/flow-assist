@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { diffFileKey, diffScopeOf, workingTreeDiff, type FileDiff } from '../working-tree.ts';
+import { defaultBaseRef, diffFileKey, diffScopeOf, listBaseRefs, workingTreeDiff, type FileDiff } from '../working-tree.ts';
 
 // ── scratch repositories, made by the test itself ───────────────────────────
 // Nothing here reaches a repository of the person's: every root is a fresh
@@ -22,9 +22,12 @@ const write = (dir: string, name: string, body: string | Buffer) => {
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, body);
 };
-const makeRepo = (dir: string, files: Record<string, string> = { 'a.txt': 'one\ntwo\n' }) => {
+// The branch is named, never read from the machine's `init.defaultBranch`: a test's
+// `vs <ref>` strings and its base resolution must not answer for the person's git
+// config.
+const makeRepo = (dir: string, files: Record<string, string> = { 'a.txt': 'one\ntwo\n' }, branch = 'main') => {
   fs.mkdirSync(dir, { recursive: true });
-  git(dir, 'init', '-q');
+  git(dir, 'init', '-q', '-b', branch);
   git(dir, 'config', 'user.name', 'Test');
   git(dir, 'config', 'user.email', 'test@example.com');
   // The person's own git config may sign commits; a scratch repository never
@@ -35,6 +38,36 @@ const makeRepo = (dir: string, files: Record<string, string> = { 'a.txt': 'one\n
   git(dir, 'commit', '-qm', 'init');
 };
 const byPath = (files: FileDiff[]) => Object.fromEntries(files.map((f) => [f.path, f]));
+
+// A repository whose BRANCH holds a second commit and whose worktree holds an edit,
+// made without ever switching branches: the starting branch keeps the second commit
+// and `main` is branched at the first one (the base these tests compare against).
+// `a.txt` carries each change as its own marked line, so a mode's hunks say which of
+// the two it shows; `committed.txt` is added and `gone.txt` is deleted BY THE COMMIT,
+// so their rows exist only where commits show.
+const makeFeatureRepo = () => {
+  const root = tmpRoot();
+  git(root, 'init', '-q', '-b', 'feature');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  write(root, 'a.txt', 'one\ntwo\nthree\nfour\nfive\n');
+  write(root, 'gone.txt', 'bye\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'base');
+  git(root, 'branch', 'main');
+  write(root, 'a.txt', 'one\nTWO\nthree\nfour\nfive\n'); // the branch commit's line
+  write(root, 'committed.txt', 'kept\n');
+  fs.rmSync(path.join(root, 'gone.txt'));
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'branch commit');
+  write(root, 'a.txt', 'one\nTWO\nthree\nFOUR\nfive\n'); // the uncommitted edit's line
+  return root;
+};
+
+// A fixture ref name by its commit — a test plants `refs/remotes/...` as plain files,
+// never with a write of git's own.
+const shaOf = (cwd: string, ref: string): string => git(cwd, 'for-each-ref', '--format=%(objectname)', ref).trim();
 
 test('diffFileKey names a file by its root and path, since one path repeats across roots', () => {
   expect(diffFileKey('/w/a', 'src/x.ts')).toBe('/w/a\u0000src/x.ts');
@@ -116,7 +149,7 @@ test('a top git cannot read answers failed, never a clean tree', async () => {
   expect(res.sections).toEqual([]);
 });
 
-test('a git root diffs against HEAD: modified, untracked, deleted, ignored', async () => {
+test('a git root diffs against its base: modified, untracked, deleted, ignored', async () => {
   const root = tmpRoot();
   makeRepo(root, { 'a.txt': 'one\ntwo\n', 'c.txt': 'gone\n', '.gitignore': 'ignored.log\n' });
   write(root, 'a.txt', 'one\nTWO\n');
@@ -224,14 +257,34 @@ test('a tracked file grown past 2 MiB is noted as too large instead of diffed', 
 test('a repository with no commit yet still lists what is not tracked', async () => {
   const root = tmpRoot();
   fs.mkdirSync(root, { recursive: true });
-  git(root, 'init', '-q');
+  git(root, 'init', '-q', '-b', 'main');
   git(root, 'config', 'user.name', 'Test');
   git(root, 'config', 'user.email', 'test@example.com');
   write(root, 'first.txt', 'hello\n');
 
-  const { sections } = await workingTreeDiff([root]);
+  // The working-tree source compares against the last commit and needs no base: an
+  // unborn HEAD is honest there, and the untracked pile is what it draws.
+  const { sections } = await workingTreeDiff([root], { mode: 'worktree' });
   expect(sections).toHaveLength(1);
+  expect(sections[0]!.base).toBe('HEAD');
   expect(byPath(sections[0]!.files)['first.txt']!.status).toBe('A');
+});
+
+// A source that names a base cannot run on a repository that names no default branch
+// — and it never pretends HEAD is the base. The section is answered with an empty base
+// and no files, and the panel words it (`pick a base to compare against`).
+test('a top with no resolvable base answers an empty section, never a silent HEAD', async () => {
+  const root = tmpRoot();
+  fs.mkdirSync(root, { recursive: true });
+  git(root, 'init', '-q', '-b', 'main');
+  write(root, 'first.txt', 'hello\n');
+
+  const res = await workingTreeDiff([root]);
+  expect(res.gitless).toBe(false);
+  expect(res.failed).toBe(false);
+  expect(res.sections).toHaveLength(1);
+  expect(res.sections[0]!.base).toBe('');
+  expect(res.sections[0]!.files).toEqual([]);
 });
 
 test('a repo holding a nested repo: the folder is never an added file of the outer one', async () => {
@@ -330,4 +383,114 @@ test('a long walk yields to the event loop', async () => {
   };
 
   expect(await firstMove(workingTreeDiff([root]), 'walk')).toEqual(['loop', 'walk']);
+});
+
+// ── a base and three modes ──────────────────────────────────────────────────
+
+test('each mode is one walk against its own base', async () => {
+  const root = makeFeatureRepo();
+
+  // `branch-local`: the local changes AND the commits since the base — the branch
+  // commit's two rows and both of `a.txt`'s change pairs.
+  const all = await workingTreeDiff([root], { base: 'main', mode: 'branch-local' });
+  expect(all.sections).toHaveLength(1);
+  expect(all.sections[0]!.base).toBe('main');
+  expect(all.sections[0]!.kind).toBeUndefined();
+  const byAll = byPath(all.sections[0]!.files);
+  expect(Object.keys(byAll).sort()).toEqual(['a.txt', 'committed.txt', 'gone.txt']);
+  expect(byAll['a.txt']!.hunks).toContain('+TWO');
+  expect(byAll['a.txt']!.hunks).toContain('+FOUR');
+  expect(byAll['committed.txt']!.status).toBe('A');
+  expect(byAll['committed.txt']!.hunks).toContain('+kept');
+  expect(byAll['gone.txt']!.status).toBe('D');
+  expect(byAll['gone.txt']!.hunks).toContain('-bye');
+
+  // `committed`: only the branch commit — the uncommitted edit's line is hidden.
+  const committedOnly = await workingTreeDiff([root], { base: 'main', mode: 'committed' });
+  expect(committedOnly.sections).toHaveLength(1);
+  expect(committedOnly.sections[0]!.base).toBe('main');
+  const byCommitted = byPath(committedOnly.sections[0]!.files);
+  expect(Object.keys(byCommitted).sort()).toEqual(['a.txt', 'committed.txt', 'gone.txt']);
+  expect(byCommitted['a.txt']!.hunks).toContain('+TWO');
+  expect(byCommitted['a.txt']!.hunks).not.toContain('+FOUR');
+  expect(byCommitted['committed.txt']!.status).toBe('A');
+  expect(byCommitted['gone.txt']!.status).toBe('D');
+
+  // `worktree`: only the uncommitted edit — the branch commit's lines are hidden.
+  const worktreeOnly = await workingTreeDiff([root], { mode: 'worktree' });
+  expect(worktreeOnly.sections).toHaveLength(1);
+  expect(worktreeOnly.sections[0]!.base).toBe('HEAD');
+  const byWorktree = byPath(worktreeOnly.sections[0]!.files);
+  expect(Object.keys(byWorktree)).toEqual(['a.txt']);
+  expect(byWorktree['a.txt']!.hunks).toContain('+FOUR');
+  expect(byWorktree['a.txt']!.hunks).not.toContain('+TWO');
+});
+
+test('untracked files stay added where local changes show and are absent from committed', async () => {
+  const root = makeFeatureRepo();
+  write(root, 'fresh.txt', 'new\n');
+
+  // The default source is `branch-local`; untracked files ride along as added.
+  const all = await workingTreeDiff([root], { base: 'main' });
+  expect(byPath(all.sections[0]!.files)['fresh.txt']).toMatchObject({ status: 'A', added: 1 });
+  const worktreeOnly = await workingTreeDiff([root], { mode: 'worktree' });
+  expect(byPath(worktreeOnly.sections[0]!.files)['fresh.txt']!.status).toBe('A');
+  // The committed source never lists one: it is not part of any commit.
+  const committedOnly = await workingTreeDiff([root], { base: 'main', mode: 'committed' });
+  expect(byPath(committedOnly.sections[0]!.files)['fresh.txt']).toBeUndefined();
+});
+
+test('a nested repository is its own top with its own base', async () => {
+  const root = tmpRoot();
+  makeRepo(root, { 'notes.txt': 'kept by the outer repository\n' });
+  makeRepo(path.join(root, 'sub', 'app'), { 'x.txt': 'one\n' }, 'appmain');
+  write(path.join(root, 'sub', 'app'), 'x.txt', 'two\n');
+  write(root, 'notes.txt', 'changed\n');
+
+  // The lookup is asked once per top — a nested repository resolves its own base —
+  // and each walk compares against only the ref its top answered.
+  const asked: string[] = [];
+  const { sections } = await workingTreeDiff([root], {
+    base: (top) => {
+      asked.push(top);
+      return path.basename(top) === 'app' ? 'appmain' : 'main';
+    },
+  });
+  expect(asked).toEqual([real(root), real(path.join(root, 'sub', 'app'))]);
+  expect(sections.map((s) => s.files.map((f) => f.path))).toEqual([['notes.txt'], ['sub/app/x.txt']]);
+  expect(sections.map((s) => s.base)).toEqual(['main', 'appmain']);
+});
+
+test('defaultBaseRef resolves the default branch and admits when it cannot', async () => {
+  // A clone's `origin/HEAD` naming `origin/main` answers its tail.
+  const cloned = tmpRoot();
+  makeRepo(cloned);
+  write(cloned, '.git/refs/remotes/origin/main', `${shaOf(cloned, 'refs/heads/main')}\n`);
+  write(cloned, '.git/refs/remotes/origin/HEAD', 'ref: refs/remotes/origin/main\n');
+  expect(await defaultBaseRef(real(cloned))).toBe('main');
+
+  // No `origin/HEAD`: `main` when it exists, else `master` when it exists.
+  const oldStyle = tmpRoot();
+  makeRepo(oldStyle, { 'a.txt': 'one\n' }, 'master');
+  expect(await defaultBaseRef(real(oldStyle))).toBe('master');
+
+  // An unborn `main` (zero commits) is not a ref.
+  const unborn = tmpRoot();
+  fs.mkdirSync(unborn, { recursive: true });
+  git(unborn, 'init', '-q', '-b', 'main');
+  expect(await defaultBaseRef(real(unborn))).toBe(null);
+
+  // Neither name exists — it admits that, and never shrugs to HEAD.
+  const trunk = tmpRoot();
+  makeRepo(trunk, { 'a.txt': 'one\n' }, 'trunk');
+  expect(await defaultBaseRef(real(trunk))).toBe(null);
+});
+
+test('listBaseRefs lists local and remote branches', async () => {
+  const root = tmpRoot();
+  makeRepo(root, { 'a.txt': 'one\n' });
+  git(root, 'branch', 'feature');
+  write(root, '.git/refs/remotes/origin/other', `${shaOf(root, 'refs/heads/main')}\n`);
+
+  expect(await listBaseRefs(real(root))).toEqual({ local: ['feature', 'main'], remote: ['origin/other'] });
 });

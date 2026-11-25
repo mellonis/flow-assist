@@ -2,19 +2,29 @@
 // one section per git top.
 //
 // The host core does not run git. This module is the one deliberate exception, and it
-// is READ-ONLY: `git status` and `git diff` under a root, nothing else. What writes
-// the tree stays in the `repo` plugin, behind the person's confirmation.
+// is READ-ONLY: `git status`, `git diff`, `git for-each-ref` and `git symbolic-ref`
+// under a root, nothing else. What writes the tree stays in the `repo` plugin, behind
+// the person's confirmation.
 //
 // The module is pure of the app: it takes the roots it is handed, answers a plain list,
 // and imports no React. Every path it reads from a root is held to that root by REAL
 // path, so a link in a clone cannot carry the panel out of the person's work.
 //
-// One baseline only: a git top — the scope itself, a repository above it, or one
-// nested under it — is diffed against HEAD; a nested repository beats anything else
-// for its own paths. Outside git there is no baseline that would mean anything: the
+// Three sources, one walk: a git top — the scope itself, a repository above it, or one
+// nested under it — is sectioned on its own, and a nested repository beats anything
+// else for its own paths. Each mode names what is compared:
+// `branch-local` (the default) is the local changes AND the commits since a base ref,
+// `committed` is only what the branch committed since that base, `worktree` is the
+// uncommitted pile against HEAD. The base is one ref for every top or a lookup per
+// top; a top with no base named for it resolves its own default branch
+// (`defaultBaseRef`). Outside git there is no baseline that would mean anything: the
 // scope must stand in a repository for anything to be walked at all, so a plain folder
 // that merely holds repositories answers `gitless` — `git status` refuses there, and
 // so does the panel. A scope inside a repository gets a section per top it holds.
+//
+// A source that names a base runs on no guesswork: when a top's base cannot be
+// resolved the section is answered with `base: ''` and NO files — never a silent HEAD
+// — and the panel words it (`pick a base to compare against`).
 //
 // A git that is missing, or that fails on one top, never throws out of here: that top
 // contributes no section and the walk answers `failed`, so a tree that could not be
@@ -42,14 +52,28 @@ export interface FileDiff {
 
 export interface DiffSection {
   root: string; // the root directory the section is under, by its REAL path
+  // The label the header prints after `vs `: the ref this top was compared against, or
+  // `HEAD` for the worktree source. `''` — the top names no base and nothing was
+  // compared; the section then holds no files and the panel offers the picker.
+  base: string;
+  // What kind of section it is; absent means `'tree'` — a git top this walk drew
+  // (or a path change `turn-diff.ts` grouped under one). `'reported'` is
+  // `turn-diff.ts`'s group of changes that are not files.
+  kind?: 'tree' | 'reported';
   files: FileDiff[];
 }
 
-// What a walk answers: the sections it drew — one per git top, HEAD the baseline —
-// and the two honest nothings. `gitless`: the scope is outside git entirely, so the
-// panel says `not a git repository`; `failed`: a top was found and git could not read
-// it, so the panel says that — neither ever reads as `no changes in the working tree`
-// unless a repository was read and was clean.
+// What a walk compares. `branch-local` (the default): the local changes AND the
+// commits since the base. `committed`: only what the branch committed since the base.
+// `worktree`: only the uncommitted changes, against HEAD — the one source that needs
+// no base.
+export type DiffMode = 'branch-local' | 'committed' | 'worktree';
+
+// What a walk answers: the sections it drew — one per git top, each against its own
+// base — and the two honest nothings. `gitless`: the scope is outside git entirely, so
+// the panel says `not a git repository`; `failed`: a top was found and git could not
+// read it, so the panel says that — neither ever reads as `no changes in the working
+// tree` unless a repository was read and was clean.
 export interface WorkingTreeDiff {
   sections: DiffSection[];
   gitless: boolean;
@@ -222,6 +246,15 @@ function segmentOf(diff: string): { hunks: string; added: number; removed: numbe
   return { hunks: body.join('\n'), added, removed, binary: false };
 }
 
+// The panel's letter for a file no `git status` entry names — one the mode's diff
+// carries on its own (a commit added or deleted it and the worktree is clean for it) —
+// read from the file's own diff preamble.
+function preambleStatus(diff: string): 'A' | 'M' | 'D' {
+  if (/^new file mode /m.test(diff)) return 'A';
+  if (/^deleted file mode /m.test(diff)) return 'D';
+  return 'M';
+}
+
 // The new path of a `diff --git a/<old> b/<new>` header. git prefixes are forced on
 // the command line, so the shape is fixed; a path git had to C-quote (a control
 // character in the name) does not match, and that file is diffed on its own instead.
@@ -230,7 +263,7 @@ function headerPath(line: string): string | null {
   return at < 0 ? null : line.slice(at + 3);
 }
 
-// `git diff HEAD` split per file: the footprint git reports for a path is the hunks
+// `git diff` split per file: the footprint git reports for a path is the hunks
 // under its `diff --git` header. A rename's segment is filed under the NEW path.
 function splitDiff(diff: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -252,7 +285,12 @@ function splitDiff(diff: string): Map<string, string> {
   return out;
 }
 
-const GIT_DIFF_ARGS = ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD', '--'];
+// The one `git diff` batch per top, carrying the mode's comparison: `HEAD` against the
+// worktree, the base against the worktree, or the base's merge-base against the
+// branch's commits. git's prefixes are forced so its headers parse the same whatever
+// the repository's config says.
+const diffBatch = (spec: string): string[] => ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', '--src-prefix=a/', '--dst-prefix=b/', spec, '--'];
+const diffOne = (spec: string, rel: string): string[] => ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', spec, '--', literalPath(rel)];
 
 // A path handed to git as a pathspec, read as the one file or directory it names. A
 // plain pathspec takes `*` and `?` as wildcards (brackets are literal to git), so a root
@@ -291,15 +329,18 @@ function pastReadSize(abs: string, root: string): boolean {
 
 // One file of a git top, as its own diff. An addition (staged or untracked) is diffed
 // from empty text and a deletion to empty text, so both read the way the panel draws
-// any other change; a modification is git's own diff of it.
-async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A' | 'M' | 'D', segments: Map<string, string>, head: boolean): Promise<Omit<FileDiff, 'path' | 'status'>> {
-  if (status === 'A') {
+// any other change; anything the mode's diff carries is git's own diff of it — `spec`
+// in the per-file fallback when the batch's answer held no segment. `fromDiff` marks
+// a file no `git status` entry names (a commit changed it and the worktree is clean):
+// it has no worktree text to synthesize from and is shown exactly as git reports it.
+async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A' | 'M' | 'D', segments: Map<string, string>, head: boolean, spec: string, fromDiff: boolean): Promise<Omit<FileDiff, 'path' | 'status'>> {
+  if (!fromDiff && status === 'A') {
     const read = await readWorkingFile(path.resolve(top, entry.path), root);
     if (read && 'note' in read) return { added: 0, removed: 0, hunks: '', note: read.note };
     const d = unifiedDiff('', read ? read.text : '', FULL_DIFF);
     return { added: d.added, removed: d.removed, hunks: d.diff };
   }
-  if (status === 'D') {
+  if (!fromDiff && status === 'D') {
     if (!head) return { added: 0, removed: 0, hunks: '' };
     const read = await headFile(top, entry.path);
     if (read && 'note' in read) return { added: 0, removed: 0, hunks: '', note: read.note };
@@ -308,27 +349,107 @@ async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A
   }
   if (pastReadSize(path.resolve(top, entry.path), root)) return { added: 0, removed: 0, hunks: '', note: 'too large' };
   const own = segments.get(entry.path);
-  const diff = own ?? (await runGit(top, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', 'HEAD', '--', literalPath(entry.path)])).toString('utf8');
+  const diff = own ?? (await runGit(top, diffOne(spec, entry.path))).toString('utf8');
   const seg = segmentOf(diff);
   return { added: seg.added, removed: seg.removed, hunks: seg.hunks, ...(seg.binary ? { note: 'binary' as const } : {}) };
 }
 
-// One git top's section: everything changed under `root` that belongs to `top`.
+// What a walk may be given internally: the exported `opts` shape (`workingTreeDiff`),
+// one base ref for every top or a lookup asked with the top, and the mode.
+type WalkOpts = {
+  base?: string | ((root: string) => string | undefined);
+  mode?: DiffMode;
+};
+
+// A ref name, not a flag and not smuggled argument text: a caller's `base` reaches
+// git's argv, so a name that could read as an option or that carries whitespace or a
+// control byte is refused like a base that does not exist.
+const refNameUsable = (name: string): boolean =>
+  name.length > 0 && !name.startsWith('-') && !/[\s\u0000-\u001f]/.test(name);
+
+// What a top compares against: the caller's own ref for it (a lookup asked with the
+// top), else the top's default branch. `null` — nothing usable was named or resolved;
+// a lookup that answers `undefined` falls through to the default, and one that throws
+// is taken as answering `undefined`.
+async function baseFor(top: string, opts: WalkOpts): Promise<string | null> {
+  let given: string | undefined;
+  if (typeof opts.base === 'function') {
+    try { given = opts.base(top); } catch { given = undefined; }
+  } else {
+    given = opts.base;
+  }
+  const chosen = given ?? (await defaultBaseRef(top));
+  return chosen !== undefined && chosen !== null && refNameUsable(chosen) ? chosen : null;
+}
+
+// The default branch of a repository: `origin/HEAD`'s target as a plain branch name,
+// else `main` when that branch exists, else `master` when it exists. `null` — the
+// repository names no default and the panel must offer its picker; HEAD is never a
+// silent answer. A git that fails here answers `null` too — never throws.
+export async function defaultBaseRef(root: string): Promise<string | null> {
+  try {
+    const target = (await runGit(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toString('utf8').trim();
+    const name = target.startsWith('origin/') ? target.slice('origin/'.length) : target;
+    if (name) return name;
+  } catch { /* no `origin/HEAD` to read */ }
+  for (const name of ['main', 'master']) {
+    try {
+      const listed = (await runGit(root, ['for-each-ref', '--format=%(refname:short)', `refs/heads/${name}`])).toString('utf8').trim();
+      if (listed) return name;
+    } catch { /* git is missing, or this top is broken — the walk reports what it can */ }
+  }
+  return null;
+}
+
+// The branches a base picker lists: the local heads and the remote refs, in the order
+// git sorts them. A git that cannot answer makes an empty list of that side — never
+// throws out of here.
+export async function listBaseRefs(root: string): Promise<{ local: string[]; remote: string[] }> {
+  const one = async (namespace: string): Promise<string[]> => {
+    try {
+      return (await runGit(root, ['for-each-ref', '--format=%(refname:short)', namespace]))
+        .toString('utf8').split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
+    } catch { return []; }
+  };
+  return { local: await one('refs/heads'), remote: await one('refs/remotes') };
+}
+
+// One git top's section: everything the mode holds under `root` that belongs to `top`.
 // A nested repository is left to the section the walk gives it — git reports it as a
 // `sub/` entry or a staged gitlink, and it is a folder either way, never a file of
-// this top. `null` — nothing changed there, so there is nothing to draw.
-async function headSection(root: string, top: string, tops: string[]): Promise<DiffSection | null> {
+// this top. `null` — the mode holds nothing there, so there is nothing to draw. A top
+// whose base the mode needs but cannot get answers an empty section with `base: ''` —
+// not `null`, so the panel can word it and offer the picker.
+async function headSection(root: string, top: string, tops: string[], opts: WalkOpts): Promise<DiffSection | null> {
   // Repositories nested INSIDE this top own their paths. A top above it owns `top`
   // itself and must not swallow what is inside.
   const nested = tops.filter((t) => t !== top && within(t, top));
+  // A path under the root that is this top's own: not the root itself (that is the
+  // nested repository the root stands in), not under another top, and not the folder
+  // of a nested repository — that one is its own section.
+  const owns = (abs: string): boolean =>
+    abs !== root && within(abs, root) && !nested.some((t) => within(abs, t)) && !isDirectory(abs);
+  // `git status` names every file — its letter, its rename, the untracked pile no diff
+  // ever carries — and the mode says which of them it holds. A clean worktree still
+  // leaves `committed` and `branch-local` their diffs: commits changed files the
+  // status cannot see, and those are exactly what those sources show.
   const changed = parseStatus((await runGit(top, ['status', '--porcelain', '-z', '--untracked-files=all'])).toString('utf8'))
     .map((entry) => ({ entry, abs: path.resolve(top, entry.path) }))
-    // Only what the root holds: a repository above it carries paths of its own too.
-    .filter(({ abs }) => abs !== root && within(abs, root))
-    // Only what this top holds: a path at or under another one is that one's.
-    .filter(({ abs }) => !nested.some((t) => within(abs, t)))
-    .filter(({ abs }) => !isDirectory(abs));
-  if (!changed.length) return null;
+    .filter(({ abs }) => owns(abs));
+  const mode = opts.mode ?? 'branch-local';
+  let spec: string;
+  let base: string;
+  if (mode === 'worktree') {
+    // The one source that needs no base: the last commit is where the worktree stands.
+    if (!changed.length) return null;
+    spec = 'HEAD';
+    base = 'HEAD';
+  } else {
+    const chosen = await baseFor(top, opts);
+    if (chosen === null) return { root, base: '', files: [] };
+    spec = mode === 'committed' ? `${chosen}...HEAD` : chosen;
+    base = chosen;
+  }
   const head = await hasHead(top);
   // The batch is scoped to the root's part of the tree — a root deep inside a large
   // repository would otherwise diff that entire repository on every refresh, and a top
@@ -338,16 +459,35 @@ async function headSection(root: string, top: string, tops: string[]): Promise<D
   // one failed batch costs per-file calls, never the section's hunks.
   const scope = within(root, top) ? path.relative(top, root) || '.' : '.';
   let segments = new Map<string, string>();
+  let batched = false;
   if (head) {
-    try { segments = splitDiff((await runGit(top, [...GIT_DIFF_ARGS, literalPath(scope)])).toString('utf8')); } catch { /* per file, below */ }
+    try {
+      segments = splitDiff((await runGit(top, [...diffBatch(spec), literalPath(scope)])).toString('utf8'));
+      batched = true;
+    } catch { /* per file, below */ }
   }
+  // What the mode holds: its diff's own files (a committed change to a file the
+  // worktree is clean for is only here) plus every status entry it keeps — for the
+  // letter, and for an untracked file in the local sources. `committed` keeps a status
+  // entry only where its diff has a change to show: what is uncommitted is not "what
+  // the branch committed", and an untracked pile never is. The batch failing leaves
+  // the tracked entries to say what they can from their own per-file diffs.
+  const kept = changed.filter(({ entry }) =>
+    mode === 'committed' ? (batched ? segments.has(entry.path) : entry.code !== '??') : true);
+  const named = new Set(kept.map(({ entry }) => entry.path));
+  const carried = [...segments.keys()]
+    .map((p) => ({ entry: { code: '', path: p }, abs: path.resolve(top, p), fromDiff: true }))
+    .filter(({ entry, abs }) => !named.has(entry.path) && owns(abs));
+  const items = [...kept.map((c) => ({ ...c, fromDiff: false })), ...carried]
+    .sort((a, b) => (a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0));
   const files: FileDiff[] = [];
-  for (const { entry, abs } of changed) {
-    const status = statusOf(entry.code);
+  for (const { entry, abs, fromDiff } of items) {
+    const status = fromDiff ? preambleStatus(segments.get(entry.path) ?? '') : statusOf(entry.code);
     const rel = path.relative(root, abs).split(path.sep).join('/');
-    files.push({ status, path: rel, ...(await oneFile(root, top, entry, status, segments, head)) });
+    files.push({ status, path: rel, ...(await oneFile(root, top, entry, status, segments, head, spec, fromDiff)) });
   }
-  return { root, files };
+  if (!files.length) return null;
+  return { root, base, files };
 }
 
 // What a root is made of: its git tops. The scope must itself stand in a repository —
@@ -397,11 +537,12 @@ async function scanRoot(root: string): Promise<string[]> {
 }
 
 // Every change under `roots`, a root at a time in the order given: its git tops in walk
-// order. Sections are never merged across roots — two checkouts of one repository are
-// two answers. `gitless` says the scope is outside git, which is what an empty
-// `sections` then means: `not a git repository`, never a clean tree; `failed` says a
-// top was found and git could not read it, which is never a clean tree either.
-export async function workingTreeDiff(roots: string[]): Promise<WorkingTreeDiff> {
+// order, each section against its own base. Sections are never merged across roots —
+// two checkouts of one repository are two answers. `gitless` says the scope is outside
+// git, which is what an empty `sections` then means: `not a git repository`, never a
+// clean tree; `failed` says a top was found and git could not read it, which is never
+// a clean tree either.
+export async function workingTreeDiff(roots: string[], opts?: { base?: string | ((root: string) => string | undefined); mode?: DiffMode }): Promise<WorkingTreeDiff> {
   const sections: DiffSection[] = [];
   let gitless = true;
   let failed = false;
@@ -412,7 +553,7 @@ export async function workingTreeDiff(roots: string[]): Promise<WorkingTreeDiff>
       if (tops.length) gitless = false;
       for (const top of tops) {
         try {
-          const section = await headSection(root, top, tops);
+          const section = await headSection(root, top, tops, opts ?? {});
           if (section) sections.push(section);
         } catch {
           // git is not installed, or it failed on this top: the top contributes no

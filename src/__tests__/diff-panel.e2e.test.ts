@@ -26,7 +26,7 @@ const git = (cwd: string, ...args: string[]): string => {
 // One commit, then one file changed since it: a tree with exactly one file to show.
 const scratchTree = () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-panel-')));
-  git(root, 'init', '-q');
+  git(root, 'init', '-q', '-b', 'main');
   git(root, 'config', 'user.name', 'Test');
   git(root, 'config', 'user.email', 'test@example.com');
   // The person's own git config may sign commits; a scratch repository never reaches a
@@ -47,7 +47,7 @@ const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
 // One commit, then TWO files changed since it: two blocks to fold independently.
 const scratchPair = () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-pair-')));
-  git(root, 'init', '-q');
+  git(root, 'init', '-q', '-b', 'main');
   git(root, 'config', 'user.name', 'Test');
   git(root, 'config', 'user.email', 'test@example.com');
   git(root, 'config', 'commit.gpgsign', 'false');
@@ -348,7 +348,7 @@ test('a docked chat with no rows for the panel says where it can be shown', asyn
 // cd'd into one project asks about that project.
 const scratchRepo = (dir: string, file: string, marker: string) => {
   fs.mkdirSync(dir, { recursive: true });
-  git(dir, 'init', '-q');
+  git(dir, 'init', '-q', '-b', 'main');
   git(dir, 'config', 'user.name', 'Test');
   git(dir, 'config', 'user.email', 'test@example.com');
   git(dir, 'config', 'commit.gpgsign', 'false');
