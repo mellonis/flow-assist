@@ -190,7 +190,7 @@ class DraftPort extends FakePort {
 }
 
 test('a left turn that fails with a queued message puts the queue into the saved draft and is parked', async () => {
-const realFetch = nativeFetch;
+  const realFetch = nativeFetch;
   try {
     const { sub, rig } = await heldTurnInA();
     rig.conv.enqueue('queued while it ran');
