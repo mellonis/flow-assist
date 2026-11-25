@@ -382,21 +382,35 @@ async function baseFor(top: string, opts: WalkOpts): Promise<string | null> {
   return chosen !== undefined && chosen !== null && refNameUsable(chosen) ? chosen : null;
 }
 
-// The default branch of a repository: `origin/HEAD`'s target as a plain branch name,
-// else `main` when that branch exists, else `master` when it exists. `null` — the
-// repository names no default and the panel must offer its picker; HEAD is never a
-// silent answer. A git that fails here answers `null` too — never throws.
+// The branches a base picker lists, and what an existence check asks: the refs git
+// lists under the given namespaces (`%(refname:short)`, its own name exactly — a ref
+// under one never counts for its parent). A git that cannot answer lists nothing —
+// never throws out of here.
+async function listedRefs(root: string, namespaces: string[]): Promise<string[]> {
+  try {
+    return (await runGit(root, ['for-each-ref', '--format=%(refname:short)', ...namespaces]))
+      .toString('utf8').split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
+  } catch { return []; }
+}
+
+// The default branch of a repository: `origin/HEAD`'s target as a plain branch name —
+// when the name it gives resolves among the refs git could compare against — else
+// `main` when that branch exists, else `master` when it exists. A dangling `origin/HEAD`
+// is no base: its tail names a ref that is not there, and comparing against it would
+// fail on a tree git reads just fine. `null` — the repository names no default and the
+// panel must offer its picker; HEAD is never a silent answer. A git that fails here
+// answers `null` too — never throws.
 export async function defaultBaseRef(root: string): Promise<string | null> {
   try {
     const target = (await runGit(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toString('utf8').trim();
     const name = target.startsWith('origin/') ? target.slice('origin/'.length) : target;
-    if (name) return name;
+    if (name) {
+      const known = await listedRefs(root, [`refs/heads/${name}`, `refs/tags/${name}`, `refs/remotes/${name}`]);
+      if (known.includes(name)) return name;
+    }
   } catch { /* no `origin/HEAD` to read */ }
   for (const name of ['main', 'master']) {
-    try {
-      const listed = (await runGit(root, ['for-each-ref', '--format=%(refname:short)', `refs/heads/${name}`])).toString('utf8').trim();
-      if (listed) return name;
-    } catch { /* git is missing, or this top is broken — the walk reports what it can */ }
+    if ((await listedRefs(root, [`refs/heads/${name}`])).includes(name)) return name;
   }
   return null;
 }
@@ -405,13 +419,7 @@ export async function defaultBaseRef(root: string): Promise<string | null> {
 // git sorts them. A git that cannot answer makes an empty list of that side — never
 // throws out of here.
 export async function listBaseRefs(root: string): Promise<{ local: string[]; remote: string[] }> {
-  const one = async (namespace: string): Promise<string[]> => {
-    try {
-      return (await runGit(root, ['for-each-ref', '--format=%(refname:short)', namespace]))
-        .toString('utf8').split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
-    } catch { return []; }
-  };
-  return { local: await one('refs/heads'), remote: await one('refs/remotes') };
+  return { local: await listedRefs(root, ['refs/heads']), remote: await listedRefs(root, ['refs/remotes']) };
 }
 
 // One git top's section: everything the mode holds under `root` that belongs to `top`.

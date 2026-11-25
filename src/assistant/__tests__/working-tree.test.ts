@@ -494,3 +494,36 @@ test('listBaseRefs lists local and remote branches', async () => {
 
   expect(await listBaseRefs(real(root))).toEqual({ local: ['feature', 'main'], remote: ['origin/other'] });
 });
+
+// `origin/HEAD` is a file a fetch wrote, not a promise it kept: its tail names a ref,
+// and a ref that is not there is no base. `git diff` against it would fail on a tree
+// git read just fine — the honest answer is the fall-through or no base at all, never
+// `failed`.
+test('a dangling origin/HEAD never reads as a failed walk', async () => {
+  // The tail is gone but a branch survives: that branch is the base.
+  const survivor = tmpRoot();
+  makeRepo(survivor, { 'a.txt': 'one\n' }, 'master');
+  git(survivor, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');
+  write(survivor, 'a.txt', 'two\n');
+  expect(await defaultBaseRef(real(survivor))).toBe('master');
+  const walked = await workingTreeDiff([survivor]);
+  expect(walked.failed).toBe(false);
+  expect(walked.sections).toHaveLength(1);
+  expect(walked.sections[0]!.base).toBe('master');
+  expect(byPath(walked.sections[0]!.files)['a.txt']!.status).toBe('M');
+
+  // Nothing survives: the panel gets the picker's section (no base, no files) and the
+  // walk answers for the tree it READ — never `failed`.
+  const bare = tmpRoot();
+  fs.mkdirSync(bare, { recursive: true });
+  git(bare, 'init', '-q', '-b', 'main');
+  git(bare, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/gone');
+  write(bare, 'first.txt', 'hello\n');
+  expect(await defaultBaseRef(real(bare))).toBe(null);
+  const noBase = await workingTreeDiff([bare]);
+  expect(noBase.gitless).toBe(false);
+  expect(noBase.failed).toBe(false);
+  expect(noBase.sections).toHaveLength(1);
+  expect(noBase.sections[0]!.base).toBe('');
+  expect(noBase.sections[0]!.files).toEqual([]);
+});
