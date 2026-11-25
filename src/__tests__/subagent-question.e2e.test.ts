@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil, type Turn } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -17,7 +17,6 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -93,6 +92,9 @@ test('with a draft in the field there is no block, only a notice; the draft stay
   expect(a!.requests.length).toBe(1);
   await ui.press('backspace');
   await ui.press('backspace');
+  // The block is back once the typing grace expires — on the clock the fixture moves,
+  // not on wall time (child-ask-guard.ts: `askClock`).
+  pause();
   await settleUntil(() => frameOf(ui).includes(title('qdraft-do-it')));
   expect(frameOf(ui)).not.toContain(notice('qdraft-do-it'));
   pause();
@@ -112,12 +114,13 @@ test('a key before the pause, at the block\'s appearing or right after another k
   expect(a!.requests.length).toBe(1);
   expect(frameOf(ui)).toContain(notice('qarm-do-it')); // the z was typed
   await ui.press('backspace');
-  await settleUntil(() => frameOf(ui).includes(title('qarm-do-it')));
-  clock.t += 300; // the block is back, the person's key was a moment ago
+  await settleUntil(() => frameOf(ui).includes('? a question is waiting'));
+  clock.t += 300; // the question is parked; the person's key was a moment ago
   await ui.press('z');
   await settle(4);
   expect(a!.requests.length).toBe(1);
   await ui.press('backspace');
+  pause();
   await settleUntil(() => frameOf(ui).includes(title('qarm-do-it')));
   pause();
   await ui.type('go');

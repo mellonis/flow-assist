@@ -326,6 +326,19 @@ export function anthropicRefusal(req: Record<string, unknown>, headers: Record<s
 
 export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await flush(); await new Promise((r) => setTimeout(r, 4)); } };
 
+// A wait for a state instead of a number of hops — one that never gives up quietly: a
+// condition that never held fails the wait, naming itself in the error. A silent
+// give-up reads as success until some later assertion fails on a frame no reader can
+// connect to the wait that actually gave up.
+export const settleUntil = async (ok: () => boolean, n = 400): Promise<void> => {
+  for (let i = 0; i < n; i++) {
+    if (ok()) return;
+    await settle(1);
+  }
+  if (ok()) return;
+  throw new Error(`settleUntil: the condition never held in ${n} settles: ${String(ok)}`);
+};
+
 // The process-global fetch as the preload snapshotted it — a test's restore target.
 export const restoreFetch = (): void => { globalThis.fetch = nativeFetch; };
 

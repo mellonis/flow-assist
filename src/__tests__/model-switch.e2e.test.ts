@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as waitFor } from './helpers/scripted';
 import { sessionFiles } from './helpers/session-files';
 import { resetSessionConfig } from '../config/load';
 
@@ -39,7 +39,7 @@ const said = (ui: UI, text: string) => ui.backend.lastFrame.split('\n').filter((
 // Wait for a state the app reaches, rather than for a number of ticks: a loaded machine
 // makes a ticking wait a flake. `settle(1)` is well under a millisecond of work, so the
 // bound is generous.
-const settleUntil = async (ok: () => boolean, n = 2000) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 2000) => waitFor(ok, n);
 const command = async (ui: UI, text: string) => { await ui.type(text); await ui.press('return'); await settle(); };
 // A question: wait for the request it sends, so nothing below races the stream's end.
 const ask = async (model: ScriptedModel, ui: UI, text: string) => {
@@ -54,8 +54,11 @@ const noteOnce = async (ui: UI, text: string) => {
   await settleUntil(() => said(ui, text) === 1);
   expect(said(ui, text)).toBe(1);
 };
-// The one session's file in a directory of the test's own.
-const stateFile = (dir: string) => {
+// The one session's file in a directory of the test's own. The first save is debounced
+// (the 250 ms of src/assistant/conversation-session.ts's `persist`), so the count waits
+// for the disk to carry the file before it says how many there are.
+const stateFile = async (dir: string) => {
+  await settleUntil(() => sessionFiles(dir).length > 0);
   const names = sessionFiles(dir);
   expect(names).toHaveLength(1);
   const file = path.join(dir, names[0]!);
@@ -106,7 +109,7 @@ test('an id a role maps to is a name too, and the session file keeps it', async 
   expect(model.requests.at(-1)?.model).toBe('default-model');
   await command(ui, '/model big-model'); // a role's target, not a row's name
   await noteOnce(ui, 'model: big-model');
-  const state = stateFile(dir);
+  const state = await stateFile(dir);
   expect(state.read().model).toBe('big-model');
   await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('big-model');
@@ -122,7 +125,7 @@ test('a catalogue id no role maps to is a name of its own, and the session file 
   expect(model.requests.at(-1)?.model).toBe('default-model');
   await command(ui, '/model other-model');
   await noteOnce(ui, 'model: other-model');
-  const state = stateFile(dir);
+  const state = await stateFile(dir);
   expect(state.read().model).toBe('other-model');
   await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('other-model');
@@ -170,7 +173,7 @@ test('return on a row sets it as /model <name> does, and closes the panel', asyn
   await ui.press('return');
   await noteOnce(ui, 'model: deep → big-model');
   expect(ui.backend.lastFrame).not.toContain('Flow Assist · Model');
-  expect(stateFile(dir).read().model).toBe('big-model');
+  expect((await stateFile(dir)).read().model).toBe('big-model');
   await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('big-model');
   ui.app.unmount();
@@ -189,7 +192,7 @@ test('esc closes the panel, and nothing of the session moves', async () => {
   await settle();
   expect(ui.backend.lastFrame).not.toContain('Flow Assist · Model');
   expect(said(ui, 'model: ')).toBe(0);
-  expect(Object.hasOwn(stateFile(dir).read(), 'model')).toBe(false);
+  expect(Object.hasOwn((await stateFile(dir)).read(), 'model')).toBe(false);
   expect(model.requests).toHaveLength(1);
   await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('default-model');
@@ -246,7 +249,7 @@ test('/model default clears the session\'s own model, and the next request follo
   expect(model.requests).toHaveLength(1); // a switch sends nothing
   await command(ui, '/model default');
   await noteOnce(ui, 'model: default (default-model)');
-  const state = stateFile(dir);
+  const state = await stateFile(dir);
   expect(Object.hasOwn(state.read(), 'model')).toBe(false);
   await ask(model, ui, 'second');
   expect(model.requests.at(-1)?.model).toBe('default-model');
@@ -275,7 +278,7 @@ test('an unknown name is refused with the list, the line stays, and nothing chan
   // A typo leaves the line as typed, as /auto, /notes and /mode do.
   expect(ui.backend.lastFrame).toContain('› /model nope');
   expect(said(ui, 'model: ')).toBe(0);
-  expect(Object.hasOwn(stateFile(dir).read(), 'model')).toBe(false);
+  expect(Object.hasOwn((await stateFile(dir)).read(), 'model')).toBe(false);
   await ui.press('escape'); // the field is cleared, so the next question is its own
   await settle();
   await ask(model, ui, 'second');
