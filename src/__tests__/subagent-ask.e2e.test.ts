@@ -184,6 +184,7 @@ test('two subagents ask: one block at a time, the older first, and the next arms
   pause();
   await ui.press('y');
   await settleUntil(() => frameOf(ui).includes('⚠ new-one-second ·'));
+  await settleUntil(() => fs.existsSync(a!.file));
   expect(fs.existsSync(a!.file)).toBe(true);
   expect(fs.existsSync(b!.file)).toBe(false);
   // Right after an answer the next block is not answerable: this y is a letter.
@@ -213,7 +214,7 @@ test('the conversation\'s own y/n comes first, answered by ⏎ at once; the suba
   expect(frameOf(ui)).not.toContain('both-one-do ·');
   // At once: ⏎ answers, no pause.
   await ui.press('return');
-  await settleUntil(() => frameOf(ui).includes('⚠ both-one-do ·'));
+  await settleUntil(() => frameOf(ui).includes('⚠ both-one-do ·') && frameOf(ui).includes('parent done'));
   expect(frameOf(ui)).toContain('parent done');
   expect(fs.existsSync(a!.file)).toBe(false);
   pause();
