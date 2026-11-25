@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil, type Turn } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -15,7 +15,6 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -287,7 +286,7 @@ test('a list at its end stays at its end when a row appears and when it leaves',
   expect(last()).toBeGreaterThan(0);
   // The row the subagent's start appends leaves the list at its end.
   await ask(ui, '/subagent AAA go');
-  await settleUntil(() => a!.held && frameOf(ui).includes('aaa-go started'));
+  await settleUntil(() => a!.held && frameOf(ui).includes('subagent «aaa-go» started'), 400, 'the subagent row to appear');
   expect(frameOf(ui)).toContain('answer line 14');
   // So does the row its end appends, under the last of the answer.
   a!.release();

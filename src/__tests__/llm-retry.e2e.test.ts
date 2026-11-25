@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { retryClock } from '../assistant/llm-retry.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -18,7 +18,7 @@ afterEach(() => {
   Object.assign(retryClock, realClock);
 });
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 

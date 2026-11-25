@@ -1,6 +1,6 @@
 // The chat as a person meets it, through the real TUI with a scripted model.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { PLAN_REMINDER } from '../assistant/plan';
 import { keyGlyph } from '../playback/keys';
 
@@ -9,7 +9,7 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // Settles until `ok` holds (or `n` rounds of a few ms pass) — for a wait on a timer.
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 
 // The style of the cell where `text` starts (plus `offset` cells).
 function styleAt(backend: { lastBuffer: any; lastFrame: string }, text: string, offset = 0) {

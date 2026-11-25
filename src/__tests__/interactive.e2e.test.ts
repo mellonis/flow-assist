@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { InteractiveDeps, InteractiveSpawn } from '../assistant/interactive';
 import { INTERACTIVE_ASK } from '../assistant/interactive';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -23,10 +23,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tty-e2e-')));
 type Sent = { role: string; content: unknown }[];
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 // A small interactive program: asks for a name, greets in colour, draws a progress
 // line with carriage returns, prints an error in red and exits 1.

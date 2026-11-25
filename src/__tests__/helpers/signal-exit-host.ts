@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { exitOnSignals, runExitHooks } from '../../assistant/sessions';
-import { ScriptedModel, bootApp, settle, type RecordedRequest } from './scripted';
+import { ScriptedModel, bootApp, settleUntil, type RecordedRequest } from './scripted';
 
 const ready = process.argv[2]!;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-signal-exit-'));
@@ -23,8 +23,8 @@ const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
 await ui.press('F');
 await ui.type('a question');
 await ui.press('return');
-for (let i = 0; i < 3000 && !(task.held && (ui.backend.lastFrame ?? '').includes('Started it.')); i++) await settle(1);
-if (!task.held) { console.error('the background task never started'); process.exit(3); }
+// A wait that names itself: the script exits non-zero with the reason on stderr.
+await settleUntil(() => task.held && (ui.backend.lastFrame ?? '').includes('Started it.'), 3000, 'the background task to start');
 fs.writeFileSync(ready, dir);
 // Nothing else keeps the process alive once the chat is idle.
 setInterval(() => {}, 60_000);

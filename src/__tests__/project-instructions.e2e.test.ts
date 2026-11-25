@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -16,10 +16,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-instr-e2e-')));
 type Sent = { role: string; content: unknown }[];
 const systemOf = (m: ScriptedModel, i: number) => String((m.requests[i]!.messages as Sent).find((x) => x.role === 'system')?.content ?? '');
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 const shown = (p: string) => (p.startsWith(`${os.homedir()}/`) ? `~${p.slice(os.homedir().length)}` : p);
 
 test('cd into a project: the next request carries its AGENTS.md, the chat says so, and run_command runs there', async () => {

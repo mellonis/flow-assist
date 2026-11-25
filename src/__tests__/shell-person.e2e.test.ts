@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
 import { lockPath } from '../assistant/sessions.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { stripRows } from './helpers/work-panel';
 import { isSessionFile } from './helpers/session-files';
 
@@ -16,10 +16,7 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const settleUntil = async (cond: () => boolean, ms = 5000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 5000) => settleUntilShared(cond, { ms });
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -510,7 +507,10 @@ test('leaving a session whose only running shell belongs to a subagent asks, and
   await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
   await wait(800);
   await ui.press('y');
-  await started(ui, 'sh-1');
+  // The child's background shell is kept as the session's when its tool's own settle
+  // ends — and that is when the child can finish its turn, so its answer is the drawn
+  // proof the job is there to be left behind (its start toast belongs to the child's view).
+  await settleUntil(() => frameOf(ui).includes('subsh-go finished'));
   await ask(ui, '/new');
   await settleUntil(() => frameOf(ui).includes('Background shells are running'));
   expect(frameOf(ui)).toContain('sh-1 · sleep 60 running');

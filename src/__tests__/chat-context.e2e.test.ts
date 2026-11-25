@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { ContextItem, Make } from '../loader/plugin';
 import { sessionFiles } from './helpers/session-files';
 
@@ -20,7 +20,7 @@ afterEach(() => {
   if (realKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = realKey;
 });
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 const flat = (s: string) => s.replace(/\s+/g, ' ');
 
 type State = { subject?: string | null; items?: ContextItem[] | null; refreshes: number; seen: unknown[]; fail?: boolean; throws?: boolean };

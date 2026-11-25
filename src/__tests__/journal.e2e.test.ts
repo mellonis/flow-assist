@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
-import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, handoff, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { Make } from '../loader/plugin.ts';
 import { listTree } from './helpers/session-files';
 
@@ -15,7 +15,7 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-e2e-'));
 const rootOf = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-root-')));
 const journals = (dir: string) => listTree(dir).filter((n) => n.endsWith('.log.jsonl'));

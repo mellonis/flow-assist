@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Make } from '../loader/plugin';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -19,10 +19,7 @@ const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-
 type Sent = { role: string; content: unknown; tool_call_id?: string }[];
 const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 const lastTool = (m: ScriptedModel) => String(sentTo(m).filter((x) => x.role === 'tool').at(-1)?.content ?? '');
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 // Eleven non-breaking spaces spread over a text far longer than the cap below, so the
 // middle of it — and some of them — is cut from what the model is sent.

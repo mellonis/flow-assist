@@ -12,7 +12,7 @@ import { agentHash } from '../assistant/agent-file.ts';
 import { recordAgentStart } from '../assistant/agent-trust.ts';
 import { refreshToolRegistry } from '../loader/tools.ts';
 import { hostStateDir } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, handoff, settle, settleUntil } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { listTree } from './helpers/session-files';
 
@@ -35,7 +35,6 @@ const write = (file: string, text: string) => {
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const toolNames = (req: { tools?: unknown; [k: string]: unknown }): string[] => ((req.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
 
 const BAND = { type: 'function' as const, function: { name: 'band_look', description: 'Looks at the band.', parameters: { type: 'object', properties: {} } } };
@@ -180,7 +179,9 @@ test('the child receives the filled prompt, is labeled by the agent\'s id, and s
   write(path.join(agents, 'job.md'), doc('params: ticket\n', 'START-A {{ticket}}'));
   child.script([{ text: 'first answer' }], [{ hold: true }, { text: 'second answer' }]);
   await ask(ui, '/subagent @job T-1');
-  await settleUntil(() => frameOf(ui).includes('subagent «job» started'));
+  // The start's own toast is replaced by the answer's before a frame can show it; the
+  // drawn fact that the subagent is here is the door's badge.
+  await settleUntil(() => frameOf(ui).includes('↓ 1 in background'));
   await settleUntil(() => frameOf(ui).includes('first answer'));
   expect(firstUser(child.requests[0]!)).toBe('START-A T-1');
   expect(String((child.requests[0]!.messages as Array<{ role: string; content: string }>)[0]!.content)).toContain("The person's task: START-A T-1");

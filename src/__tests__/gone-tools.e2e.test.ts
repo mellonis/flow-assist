@@ -3,7 +3,7 @@
 // the model is told why the tool is gone — the plugin that removed it, or that the person
 // disabled it — an error, never a "call again".
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 import { refreshToolRegistry } from '../loader/tools';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -31,11 +31,11 @@ test('a group tool the plugin dropped mid-turn answers that it is gone, and neve
   await ui.press('F');
   await ui.type('ping it');
   await ui.press('return');
-  for (let i = 0; i < 50 && model.requests.length < 1; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 1, 50, 'the first request');
   plugin!.tools = [];
   refreshToolRegistry();
   model.release();
-  for (let i = 0; i < 100 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 100, 'the second request');
   expect(resultOf(model, 1, 'guest_ping')).toContain('guest_ping is gone — guest removed it');
   expect(ran).toBe(0);
   ui.app.unmount();
@@ -49,10 +49,10 @@ test('an ai-tool whose plugin the person took out answers that it is gone, and n
   await ui.press('F');
   await ui.type('echo it');
   await ui.press('return');
-  for (let i = 0; i < 50 && model.requests.length < 1; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 1, 50, 'the first request');
   ui.tools.withhold!('guest', true);
   model.release();
-  for (let i = 0; i < 100 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 100, 'the second request');
   expect(resultOf(model, 1, 'guest_echo')).toContain('guest_echo is gone — guest was disabled');
   expect(ran).toBe(0);
   ui.app.unmount();

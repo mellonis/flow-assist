@@ -7,14 +7,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
-import { ScriptedModel, bootApp, settle, type RecordedRequest } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil, type RecordedRequest } from './helpers/scripted';
 import { listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const system = (req: RecordedRequest): string => String(req.messages.find((m) => m.role === 'system')?.content ?? '');
 type Saved = { id: string; messages: { role: string; content: unknown }[] };
 const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)

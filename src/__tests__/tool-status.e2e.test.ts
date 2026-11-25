@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -31,10 +31,7 @@ function verbOn(ui: Ui): { word: string; phase: 'thinking' | 'writing' | '?' } {
   return { word: m[1]!, phase };
 }
 // A real process finishes on its own clock, not the test backend's.
-const settleUntil = async (cond: () => boolean, ms = 4000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 4000) => settleUntilShared(cond, { ms });
 
 test('once the tool is done and the model writes, the line says a word in the writing colour, not the tool', async () => {
   const model = new ScriptedModel();

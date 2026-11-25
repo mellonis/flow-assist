@@ -12,7 +12,7 @@ import { agentTrusted, agentTrustPath, recordAgentStart, skillKeyOf } from '../a
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { loadSkillFresh } from '../assistant/skill-file.ts';
 import { hostStateDir } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 const made: string[] = [];
@@ -26,7 +26,6 @@ const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file),
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 
 async function chat(mark: string) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sk-ag-')));

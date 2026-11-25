@@ -7,14 +7,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import buildNotesPlugin from '../../examples/notes/src/index.ts';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 const screen = (frame: string) => frame.split('\n').map((r) => r.replace(/│ /g, '')).join('\n');
 
 async function boot(model: ScriptedModel) {

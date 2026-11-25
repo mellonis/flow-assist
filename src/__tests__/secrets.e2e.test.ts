@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setActiveSecrets } from '../assistant/secrets.ts';
 import type { Make } from '../loader/plugin.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settleUntil as settleUntilShared } from './helpers/scripted';
 import { listTree, sessionFiles } from './helpers/session-files';
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.e2e-wiki-token-body.signature-part';
@@ -19,7 +19,7 @@ afterEach(() => {
   setActiveSecrets(null);
 });
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 
 // A guest whose read tool answers with the environment it sees, token and all.
 const wiki = (make: Make) => make('wiki', {

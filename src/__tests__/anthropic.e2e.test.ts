@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -20,7 +20,7 @@ afterEach(() => {
 type Block = Record<string, unknown> & { type: string };
 type Sent = { model: string; max_tokens: number; stream?: boolean; system?: Block[]; tools?: Block[]; thinking?: unknown; messages: { role: string; content: Block[] }[] };
 const sent = (model: ScriptedModel, i: number) => model.requests[i] as unknown as Sent;
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 
 // No base URL: the provider brings its own, and the token comes from ANTHROPIC_API_KEY.
 const ANTHROPIC = { provider: 'anthropic', model: 'default-model', toolLoading: 'all' };

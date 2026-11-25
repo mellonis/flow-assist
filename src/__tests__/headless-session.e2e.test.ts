@@ -8,14 +8,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
-import { ScriptedModel, bootApp, settle, type RecordedRequest } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil, type RecordedRequest } from './helpers/scripted';
 import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 // Past the inbox's own 400 ms tick: a turn it would start has started by then.
 const pastTick = () => new Promise((r) => setTimeout(r, 500)).then(() => settle(10));
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-headless-e2e-'));

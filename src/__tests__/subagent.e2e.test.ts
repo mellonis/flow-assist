@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, handoff, settle, settleUntil } from './helpers/scripted';
 import { listSessions } from '../assistant/sessions.ts';
 import { keyGlyph } from '../playback/keys.ts';
 import { listTree, sessionFiles } from './helpers/session-files';
@@ -22,7 +22,6 @@ afterEach(() => {
   fs.rmSync(acceptedConfigPath(), { force: true });
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const hintRow = (frame: string) => frame.split('\n').find((r) => r.includes('history · wheel')) ?? '';

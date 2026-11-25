@@ -2,7 +2,7 @@
 // transport: the loader builds it from its manifest, and the person meets it as any
 // other guest.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -12,8 +12,8 @@ type Ui = Awaited<ReturnType<typeof bootApp>>;
 // Waits for what a test is about, and FAILS when it never comes — a wait that returned
 // quietly would let every assertion after it pass on a screen it never looked at.
 const until = async (ui: Ui, ok: () => boolean, what: string, n = 200) => {
-  for (let i = 0; i < n && !ok(); i++) await settle(1);
-  if (!ok()) throw new Error(`never: ${what}\n${ui.backend.lastFrame}`);
+  try { await settleUntilShared(ok, n, what); }
+  catch (e) { throw new Error(`${(e as Error).message}\n${ui.backend.lastFrame}`); }
 };
 // The plugin side's footer — the row of hints; a docked chat's strip may sit under it.
 const footer = (ui: Ui) => ui.backend.lastFrame.split('\n').find((r) => r.includes(': commands')) ?? '';

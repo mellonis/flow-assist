@@ -7,7 +7,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { getDeep, hostStateDir, loadConfig, resetSessionConfig, saveConfigUnset } from '../config/load';
 import { modelMaySave, modelMaySet } from '../config/schema';
 import type { Make } from '../loader/plugin';
@@ -21,7 +21,7 @@ afterEach(() => {
   for (const key of ['ui.verbs', 'ui.mouse', 'plugins.notes']) saveConfigUnset(key);
 });
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 const savedFile = () => path.join(hostStateDir(), 'config.local.json');
 const readSaved = () => (fs.existsSync(savedFile()) ? fs.readFileSync(savedFile(), 'utf8') : null);
 const lastRow = (ui: { backend: { lastFrame: string } }) => ui.backend.lastFrame.split('\n').filter((r) => r.trim()).at(-1) ?? '';

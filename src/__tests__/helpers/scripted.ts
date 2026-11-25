@@ -330,13 +330,24 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // condition that never held fails the wait, naming itself in the error. A silent
 // give-up reads as success until some later assertion fails on a frame no reader can
 // connect to the wait that actually gave up.
-export const settleUntil = async (ok: () => boolean, n = 400): Promise<void> => {
-  for (let i = 0; i < n; i++) {
+//
+// The budget is in settles — a fixture polling a drawn frame knows how many hops it
+// needs — or in milliseconds (`{ ms }`) for a fixture polling a real process, whose hops
+// take as long as they take. `label` names the wait; without one the condition's own
+// source is the name.
+export type WaitBudget = number | { ms: number };
+
+export const settleUntil = async (ok: () => boolean, budget: WaitBudget = 400, label?: string): Promise<void> => {
+  const deadline = typeof budget === 'number' ? null : Date.now() + budget.ms;
+  const settles = typeof budget === 'number' ? budget : Number.POSITIVE_INFINITY;
+  for (let i = 0; i < settles; i++) {
     if (ok()) return;
+    if (deadline !== null && Date.now() >= deadline) break;
     await settle(1);
   }
   if (ok()) return;
-  throw new Error(`settleUntil: the condition never held in ${n} settles: ${String(ok)}`);
+  const scope = typeof budget === 'number' ? `${budget} settles` : `${budget.ms} ms`;
+  throw new Error(`settleUntil: the condition never held in ${scope}: ${label ?? String(ok)}`);
 };
 
 // The process-global fetch as the preload snapshotted it — a test's restore target.

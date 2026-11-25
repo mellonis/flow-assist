@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -15,10 +15,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const ctrl = async (ui: UI, name: string) => { const consumed = ui.backend.press({ name, ctrl: true }); await settle(); return consumed; };
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 // A conversation with one answer in it, after which every request hangs and ignores
 // its signal.

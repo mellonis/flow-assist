@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -22,7 +22,6 @@ afterEach(() => {
   fs.rmSync(acceptedConfigPath(), { force: true });
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }

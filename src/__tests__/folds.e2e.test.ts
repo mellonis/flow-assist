@@ -9,14 +9,14 @@
 // These tests drive the REAL chat on a test backend: `backend.mouse('down'|'up', x, y)`
 // is what a terminal reports, and the frame is what a person would see.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 
 // The row a piece of text is drawn on, and a cell inside the conversation on it.
 function rowOf(ui: Ui, needle: string): number {
@@ -195,7 +195,9 @@ async function longOutput(runOutputLines = 3, lines = 8) {
   await settleUntil(() => ui.backend.lastFrame.includes('Sixty lines.'));
   await ui.type('and remark on it');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 20.'));
+  // The answer is 20 paragraphs: the view lands on its FIRST row (the eye-landing rule —
+  // the last line is below the window), so the drawn evidence is remark 1, not remark 20.
+  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 1.'));
   await settle(8);
   for (let i = 0; i < 6; i++) await ui.press('pageup');
   return { ui, model };

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 
 const made: string[] = [];
 afterEach(() => {
@@ -18,7 +18,6 @@ const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file),
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 
 // A booted chat whose shell starts in a git project under a root (or with no roots).
 async function chat(opts: { roots?: boolean; guests?: (make: any) => any[]; untrusted?: Array<{ name: string }> } = {}) {

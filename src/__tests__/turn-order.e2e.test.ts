@@ -9,7 +9,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared, type Turn } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 import { SESSION_VERSION, newSessionId, type Session } from '../assistant/sessions.ts';
 import { hereHome, hereProject, sessionFiles } from './helpers/session-files';
@@ -20,7 +20,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 const rows = (ui: Ui) => ui.backend.lastFrame.split('\n');
 const rowOf = (ui: Ui, needle: string) => rows(ui).findIndex((r) => r.includes(needle));
 const times = (frame: string, needle: string) => frame.split(needle).length - 1;

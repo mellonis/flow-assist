@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 import { acquireLock, journalPath, lockPath, projectHome } from '../assistant/sessions';
 import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
@@ -223,7 +223,7 @@ test('a write’s y/n that arrives while the picker is up is drawn over it and a
   await settle();
   expect(ui.backend.lastFrame).toContain('Sessions ·');
   model.release();
-  for (let i = 0; i < 100 && !ui.backend.lastFrame!.includes('echo hi'); i++) await settle(2);
+  await settleUntil(() => ui.backend.lastFrame!.includes('echo hi'), 100, 'the command\'s block');
   expect(ui.backend.lastFrame).toContain('echo hi');
   expect(ui.backend.lastFrame).not.toContain('Sessions ·');
   await ui.press('n'); // declines the write
@@ -250,7 +250,7 @@ test('an error the chat showed before the picker opened does not hide the picker
 
 // A command the model ran, confirmed, then the answer — a block with a fold line to click.
 const upAt = async (ui: Awaited<ReturnType<typeof bootApp>>, text: string) => {
-  for (let i = 0; i < 200 && !ui.backend.lastFrame!.includes(text); i++) await settle(1);
+  await settleUntil(() => ui.backend.lastFrame!.includes(text), 200, `"${text}" on screen`);
 };
 const clickRow = async (ui: Awaited<ReturnType<typeof bootApp>>, text: string) => {
   const y = ui.backend.lastFrame!.split('\n').findIndex((r) => r.includes(text));

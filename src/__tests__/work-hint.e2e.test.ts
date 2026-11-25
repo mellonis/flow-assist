@@ -8,7 +8,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { keyGlyph } from '../playback/keys.ts';
-import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared, type Turn } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -16,7 +16,7 @@ const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 
-const settleUntil = async (ok: () => boolean, n = 600) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 600) => settleUntilShared(ok, n);
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 const rowsOf = (ui: UI) => frameOf(ui).split('\n');
@@ -114,16 +114,18 @@ test('a question a task put to its parent is not a person waiting in the badge',
   // The task's question parks on the subagent's chain, not on the person: both the
   // subagent and the task stay under the door, and neither waits for an answer from them.
   task.release();
-  await settleUntil(() => frameOf(ui).includes('asks its parent'));
-  await settle(6);
-  expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 2 in background`);
-  expect(hintRow(frameOf(ui))).not.toContain('waiting');
-  // The strip says the same thing about the same row: it asks its parent, so no row of it
-  // waits on the person (`? waiting for you` is the person's mark alone).
+  // The ask parks on the subagent's chain: the strip's row says `asking` (no watch pane is
+  // up, so that is where it is drawn), and no row of it waits on the person.
   await ui.press('down');
   await settleUntil(() => panelUp(ui));
+  await settleUntil(() => stripText(ui).includes('asking'));
   expect(panelUp(ui)).toBe(true);
   expect(stripText(ui)).toContain('asking');
   expect(stripText(ui)).not.toContain('? waiting for you');
+  await ui.press('escape');
+  await settleUntil(() => !panelUp(ui));
+  await settle(6);
+  expect(hintRow(frameOf(ui))).toContain(`${keyGlyph('down')} 2 in background`);
+  expect(hintRow(frameOf(ui))).not.toContain('waiting');
   ui.app.unmount();
 }, 30_000);

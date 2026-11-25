@@ -12,7 +12,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -20,7 +20,7 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
-const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 200) => settleUntilShared(ok, n);
 const rows = (ui: Ui) => ui.backend.lastFrame.split('\n');
 // Where a piece of text is drawn: its first cell.
 function at(ui: Ui, needle: string): { x: number; y: number } {

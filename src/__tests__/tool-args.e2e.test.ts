@@ -2,10 +2,10 @@
 // model reads a one-line error naming what is wrong, and a corrected call goes
 // through — src/assistant/tool-args.ts, wired in `agentChat` (src/assistant/agent.ts).
 import { expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 
-const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 100) => settleUntilShared(ok, n);
 
 type Sent = { messages: { role: string; content?: string | null }[] };
 const sent = (model: ScriptedModel, i: number) => model.requests[i] as unknown as Sent;

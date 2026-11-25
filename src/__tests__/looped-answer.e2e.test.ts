@@ -6,13 +6,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { loopTurn } from '../assistant/system-prompt.ts';
 import { chatRows, type RowOpts } from '../views/modals';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { closeRigs, conversationRig, type Sent } from './helpers/conversation';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
-const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 300) => settleUntilShared(ok, n);
 type Msg = { role: string; content: unknown };
 
 // 1 000 code units of exact repeats after `ok `, ending on a unit boundary: the kept head

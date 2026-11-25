@@ -2,12 +2,12 @@
 // stopped, and one key — Enter on the empty field — carries it on.
 // What the model's history says is round-cap.rig.test.ts.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
-const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 300) => settleUntilShared(ok, n);
 type Msg = { role: string; content: unknown };
 
 test('a turn stopped at ai.maxRounds says its last step, and ⏎ on the empty field sends continue', async () => {

@@ -3,7 +3,7 @@
 // screen, its keys in the footer, its tools in the next round — when the handshake
 // completes. A handshake that fails is a skip in the log, as at any start.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -11,8 +11,8 @@ const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 const until = async (ui: Ui, ok: () => boolean, what: string, n = 200) => {
-  for (let i = 0; i < n && !ok(); i++) await settle(1);
-  if (!ok()) throw new Error(`never: ${what}\n${ui.backend.lastFrame}`);
+  try { await settleUntilShared(ok, n, what); }
+  catch (e) { throw new Error(`${(e as Error).message}\n${ui.backend.lastFrame}`); }
 };
 const footer = (ui: Ui) => ui.backend.lastFrame.split('\n').find((r) => r.includes(': commands')) ?? '';
 // The plugin's row on the start screen: its name, then the key that leads in.

@@ -5,7 +5,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { SESSION_VERSION, newSessionId } from '../assistant/sessions.ts';
 import type { Make } from '../loader/plugin.ts';
 import { hereHome, hereProject, sessionFiles } from './helpers/session-files';
@@ -14,7 +14,7 @@ import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 type Ui = Awaited<ReturnType<typeof bootApp>>;
-const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const settleUntil = async (ok: () => boolean, n = 300) => settleUntilShared(ok, n);
 const rowOf = (ui: Ui, needle: string) => ui.backend.lastFrame.split('\n').findIndex((r) => r.includes(needle));
 const click = async (ui: Ui, y: number, x = 12) => { ui.backend.mouse('down', x, y); ui.backend.mouse('up', x, y); await settle(6); };
 
@@ -275,7 +275,9 @@ test('a command opened before a second one starts stays open inside the group', 
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
-  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  // `echo` finishes before a frame can show it running: the stretch's closed line is the
+  // drawn fact that the command is there, and a click opens the record inside it.
+  await settleUntil(() => /\+ \d+ commands?/.test(ui.backend.lastFrame));
   await openStretch(ui);
   await settleUntil(() => /echo first-out · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo first-out · ✓/);
@@ -306,7 +308,8 @@ test('the stretch of commands closes whole from its own line, and a second click
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
-  await settleUntil(() => ui.backend.lastFrame.includes('Running command…'));
+  // As above: the command ends before a frame can show it running.
+  await settleUntil(() => /\+ \d+ commands?/.test(ui.backend.lastFrame));
   // Open the stretch, then the lone command's record: its body is on the screen before
   // the second command arrives. The stretch's id is derived from its first member's fold,
   // so it does not move when the stretch grows: the line the person opened is the line

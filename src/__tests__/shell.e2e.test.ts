@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
 import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import type { Sent as WireMessage } from './helpers/conversation';
 
 import { nativeFetch } from './helpers/test-setup.ts';
@@ -21,12 +21,7 @@ const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-
 type Sent = { role: string; content: unknown }[];
 const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 // A real process finishes on its own clock, not the test backend's.
-const settleUntil = async (cond: () => boolean, ms = 3000) => {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
-  if (cond()) return;
-  throw new Error(`settleUntil: the condition never held in ${ms} ms: ${String(cond)}`);
-};
+const settleUntil = async (cond: () => boolean, ms = 3000) => settleUntilShared(cond, { ms });
 
 async function boot(model: ScriptedModel, root: string, extra: Record<string, unknown> = {}, cols = 110) {
   const ui = await bootApp(model, cols, 32, undefined, { fs: { roots: [root] }, ...extra });

@@ -5,14 +5,13 @@
 // the turn ended without an answer, and what it had actually done) was somewhere in
 // the middle of it.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const rowsMatching = (ui: Ui, re: RegExp) => ui.backend.lastFrame.split('\n').filter((r) => re.test(r));
 
 // One round, many calls: twelve of one tool in a row, then the two tools alternating.
@@ -24,12 +23,15 @@ const many = () => [
 test('consecutive calls of one tool are one record each in the expanded stretch', async () => {
   const model = new ScriptedModel();
   model.script(many(), [{ text: 'Done at last.' }]);
-  // Tall enough for a good part of the trail to fit the conversation.
-  const ui = await bootApp(model, 110, 44);
+  // Tall enough for a good part of the trail to fit the conversation. Automatic
+  // compaction is another mechanism, with its own tests: this turn's 36 calls would pass
+  // the window and be folded into a handoff before its last answer.
+  const ui = await bootApp(model, 110, 44, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', autoCompact: { enabled: false } } });
   await ui.press('F');
   await ui.type('do a lot');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
+  // Thirty-six rounds: the turn ends when the model says it does, not within a hop budget.
+  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'), { ms: 15_000 });
   await settle(8);
 
   // Folded, the turn is one line — the stretch's own counts.
@@ -54,16 +56,17 @@ test('consecutive calls of one tool are one record each in the expanded stretch'
   expect(rowsMatching(ui, /→ ok/)).toHaveLength(1);
   expect(rowsMatching(ui, /▸ ⌁ datetime · ok/).length).toBeGreaterThan(12);
   ui.app.unmount();
-});
+}, 30_000);
 
 test('the key opens every record\'s body one level at a time, a stretch of many calls included', async () => {
   const model = new ScriptedModel();
   model.script(many(), [{ text: 'Done at last.' }]);
-  const ui = await bootApp(model, 110, 60);
+  // As above: no automatic compaction, and a real budget for 36 rounds.
+  const ui = await bootApp(model, 110, 60, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', autoCompact: { enabled: false } } });
   await ui.press('F');
   await ui.type('do a lot');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'));
+  await settleUntil(() => ui.backend.lastFrame.includes('Done at last.'), { ms: 15_000 });
   await settle(8);
   // The first press opens the stretch: one record per call, no body out.
   ui.backend.press({ name: 'o', ctrl: true });
@@ -75,7 +78,7 @@ test('the key opens every record\'s body one level at a time, a stretch of many 
   await settle(8);
   expect(rowsMatching(ui, /→ ok/).length).toBeGreaterThan(12);
   ui.app.unmount();
-});
+}, 30_000);
 
 test('a turn with three calls looks exactly as it did', async () => {
   const model = new ScriptedModel();

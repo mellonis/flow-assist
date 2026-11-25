@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { transportFor } from '../remote/transports';
 import { socketPath } from '../remote/sockets';
 import manifest from '../../examples/remote-login/manifest.json';
@@ -9,10 +9,7 @@ import manifest from '../../examples/remote-login/manifest.json';
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
-const until = async (ok: () => boolean, label: string, n = 300) => {
-  for (let i = 0; i < n && !ok(); i++) await settle(1);
-  if (!ok()) throw new Error(`timed out waiting for ${label}`);
-};
+const until = async (ok: () => boolean, label: string, n = 300) => settleUntilShared(ok, n, label);
 
 test('the login example runs as a real process: its form draws, typing reaches it, it signs in and says who in the store', async () => {
   const dir = path.resolve(import.meta.dir, '../../examples/remote-login');

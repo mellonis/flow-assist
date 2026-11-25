@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 import { acquireLock } from '../assistant/sessions.ts';
 import { homeIn, listTree, sessionFiles } from './helpers/session-files';
 
@@ -20,7 +20,6 @@ afterEach(() => {
   fs.rmSync(acceptedConfigPath(), { force: true });
 });
 
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-attention-'));
 type Saved = { id: string; messages: { role: string; content: unknown }[] };
 const saved = (dir: string, text: string): Saved | undefined => sessionFiles(dir)

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
-import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -20,7 +20,6 @@ afterEach(() => {
   fs.rmSync(acceptedConfigPath(), { force: true });
   for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
-const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const autoRun = (c: Record<string, unknown>) => (c.shell as { autoRun?: unknown } | undefined)?.autoRun;
 const frameOf = (ui: { backend: { lastFrame?: string } }) => ui.backend.lastFrame ?? '';
 type UI = Awaited<ReturnType<typeof bootApp>>;

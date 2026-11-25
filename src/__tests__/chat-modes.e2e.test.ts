@@ -6,7 +6,7 @@
 // old `fullscreen: true` reads as full.
 import { afterEach, expect, test } from 'bun:test';
 import { TestBackend } from '@flowtty/core/testing';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 import { chatRows, chatWrapWidth, type RowOpts } from '../views/modals';
 import { cellWidth } from '../cells';
 
@@ -321,7 +321,7 @@ test('a click on a fold in the right panel opens it, whichever side has the keyb
   await ui.type('!');
   await ui.type('echo panel-click');
   await ui.press('return');
-  for (let i = 0; i < 200 && !/echo panel-click · ✓/.test(ui.backend.lastFrame); i++) await settle(1);
+  await settleUntil(() => /echo panel-click · ✓/.test(ui.backend.lastFrame), 200, 'the command\'s record');
   const r = rows(ui);
   const y = r.findIndex((l) => /echo panel-click · ✓/.test(l));
   expect(y).toBeGreaterThan(0);
@@ -422,11 +422,11 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   await ui.press('F');
   await ui.type('change it');
   await ui.press('return');
-  for (let i = 0; i < 200 && !ui.backend.lastFrame.includes('Done'); i++) await settle(1);
+  await settleUntil(() => ui.backend.lastFrame.includes('Done'), 200, 'the answer');
   await ui.type('!');
   await ui.type(`echo ${'z'.repeat(70)}`);
   await ui.press('return');
-  for (let i = 0; i < 200 && !/· ✓/.test(ui.backend.lastFrame); i++) await settle(1);
+  await settleUntil(() => /· ✓/.test(ui.backend.lastFrame), 200, 'the command\'s record');
   const panelW = Math.round(160 * 0.32);
   expect(chatFrame(ui)).toEqual({ top: 0, bottom: 39, left: 160 - panelW, width: panelW });
   const wrap = chatWrapWidth(panelW, true);
@@ -538,7 +538,7 @@ test('a bottom panel grows to show a pending question whole, and shrinks back on
   expect(r[hintAt + 1]).toMatch(/╰─+╯/);
   await ui.press('down');
   await ui.press('return');
-  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 50, 'the next request');
   await settle(10);
   expect(chatFrame(ui)).toEqual({ top: 24, bottom: 39, left: 0, width: 100 });
   expect(ui.backend.lastFrame).toContain('Merging then.');
@@ -570,7 +570,7 @@ test('collapsing during a y/n keeps it pending; the footer says it waits; expand
   await press(ui, COLLAPSE);
   expect(ui.backend.lastFrame).toContain('Confirm write: notes_write');
   await ui.press('y');
-  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 50, 'the next request');
   await settle(10);
   expect(toolResult(model, 1)).toContain('written');
   expect(ui.backend.lastFrame).toContain('Written.');
@@ -595,7 +595,7 @@ test('collapsed at the bottom during a question, the strip says it waits; expand
   expect(ui.backend.lastFrame).toContain('Rebase or merge?');
   await ui.press('down');
   await ui.press('return');
-  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 50, 'the next request');
   expect(toolResult(model, 1)).toContain('Rebase or merge? → merge');
   ui.app.unmount();
 });
@@ -619,7 +619,7 @@ test.each(['window', 'full'] as const)('Ctrl+] closing the %s during a question 
   await ui.press('F');
   expect(ui.backend.lastFrame).toContain('Rebase or merge?');
   await ui.press('escape');
-  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 50, 'the next request');
   expect(toolResult(model, 1)).toMatch(/dismiss/i);
   ui.app.unmount();
 });
@@ -754,7 +754,7 @@ test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row ter
   await ui.press('F');
   await ui.type('plan it');
   await ui.press('return');
-  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settleUntil(() => model.requests.length >= 2, 50, 'the next request');
   await settle(10);
   const f = chatFrame(ui);
   expect(f.left).toBe(0); // docked at the bottom
