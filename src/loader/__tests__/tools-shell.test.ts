@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createShellState } from '../../assistant/shell.ts';
-import { commandCwd, platformLine, probePrograms, runCommandDescription, shellTools } from '../tools-shell.ts';
+import { commandCwd, platformLine, probePrograms, PROBED, runCommandDescription, shellTools } from '../tools-shell.ts';
+import { settleUntil } from '../../__tests__/helpers/scripted';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-runcmd-')));
 
@@ -88,7 +89,7 @@ test('every call is a write — it pauses for the y/n', () => {
 
 test('the description tells the model the machine: platform, default cwd, what is installed', () => {
   const root = tmp();
-  const d = runCommandDescription({ fs: { roots: [root] } });
+  const d = runCommandDescription({ fs: { roots: [root] } }, ['git', 'bun']);
   expect(d).toContain(platformLine());
   expect(d).toContain(`It starts at ${root}`);
   expect(d).toContain('remembered between calls');
@@ -112,7 +113,10 @@ test('the description says the true default — the app\'s start directory when 
 });
 
 test('the probe finds programs on PATH and does not throw on an empty PATH', () => {
-  expect(probePrograms()).toContain('git');
+  // The live probe runs a real shell whose 2 s budget can die under load and answer
+  // `[]`; what must hold either way is the answer's shape — a list drawn from the named
+  // set. Its presence in the tool's description is covered by the injected list above.
+  expect(probePrograms().every((p) => PROBED.includes(p))).toBe(true);
   expect(probePrograms({ PATH: '' })).toEqual([]);
 });
 
@@ -125,7 +129,15 @@ test('run_command opens its view and fills it as the command prints', async () =
       return { update: (d: { text: string; exitCode?: number | null }) => states.push(d), discard() {} };
     },
   };
-  const out = await shellTools({}).exec('run_command', { command: 'printf a; sleep 0.2; printf b' }, ctx as never);
+  const gate = path.join(tmp(), 'gate');
+  // The second print is behind a gate this test opens, not behind a sleep: two prints
+  // separated in TIME give the reader's pipe one event `"ab"` whenever its scheduling
+  // gap exceeds the separation, and no wait in the test can tell the two apart. The
+  // gate makes `'a'` arrive alone by construction.
+  const run = shellTools({}).exec('run_command', { command: `printf a; while [ ! -f '${gate}' ]; do sleep 0.02; done; printf b` }, ctx as never);
+  await settleUntil(() => states.some((s) => s.text === 'a'));
+  fs.writeFileSync(gate, '');
+  const out = await run;
   expect(states[0]!.text).toBe('');
   expect(states.some((s) => s.text === 'a')).toBe(true);
   expect(states.at(-1)).toMatchObject({ text: 'ab', exitCode: 0 });
