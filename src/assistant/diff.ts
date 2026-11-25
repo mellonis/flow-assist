@@ -19,15 +19,22 @@ export interface Change {
   after: string;
 }
 
+// The record keeps the change whole up to `CHANGE_DIFF_MAX_BYTES` of diff, so a reader
+// can walk all of it; the chat draws the first `CHANGE_DRAW_MAX_LINES` kept lines. The
+// two caps are separate on purpose: what a session keeps is bounded by bytes, what the
+// chat draws by rows.
+export const CHANGE_DIFF_MAX_BYTES = 2 * 1024 * 1024;
+export const CHANGE_DRAW_MAX_LINES = 80;
+
 // What the chat stores and draws — the diff already made, never the two texts, so a
-// session file holds the lines shown and not two copies of a whole file.
+// session file holds the change's own lines and not two copies of a whole file.
 export interface ChangeView {
   title: string;
-  // Unified hunks (`@@ … @@`, then ` `/`-`/`+` lines), already cut to `maxLines`.
+  // Unified hunks (`@@ … @@`, then ` `/`-`/`+` lines), kept whole up to `CHANGE_DIFF_MAX_BYTES`.
   diff: string;
   added: number;
   removed: number;
-  // Diff lines not shown because of `maxLines`.
+  // Diff lines the record did not keep — past the byte cap.
   hidden: number;
 }
 
@@ -118,13 +125,25 @@ export function unifiedDiff(before: string, after: string, { context = 3, maxLin
 }
 
 // The view of one reported change, or null when nothing changed. A text holding a
-// NUL is not drawn line by line.
-export function changeView(c: Change, opts: DiffOpts = {}): ChangeView | null {
+// NUL is not drawn line by line. The diff is kept whole up to `CHANGE_DIFF_MAX_BYTES`:
+// the cut ends on a line boundary, and what it drops is all that `hidden` counts.
+export function changeView(c: Change): ChangeView | null {
   const title = String(c.title ?? '').trim() || 'change';
   const before = String(c.before ?? ''), after = String(c.after ?? '');
   if (before === after) return null;
   if (before.includes('\u0000') || after.includes('\u0000')) return { title, diff: '', added: 0, removed: 0, hidden: 0 };
-  return { title, ...unifiedDiff(before, after, opts) };
+  const d = unifiedDiff(before, after, { maxLines: Number.MAX_SAFE_INTEGER });
+  const all = d.diff ? d.diff.split('\n') : [];
+  const utf8 = new TextEncoder();
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const line of all) {
+    const next = bytes + utf8.encode(line).length + (kept.length ? 1 : 0);
+    if (next > CHANGE_DIFF_MAX_BYTES) break;
+    bytes = next;
+    kept.push(line);
+  }
+  return { title, ...d, diff: kept.join('\n'), hidden: d.hidden + (all.length - kept.length) };
 }
 
 // What the `✎` line says after the path: how much went in and how much came out. The
@@ -147,14 +166,20 @@ export function fileDiffCounts(f: { added: number; removed: number; note?: 'bina
 
 // The markdown the chat lays out for one change: the hunks in a ```diff fence, which
 // is what colours a diff green and red. The fence is longer than any backtick run in
-// the diff, so a changed Markdown file cannot close it early. Empty for a change with
-// nothing to draw (a binary file) — the title line then stands alone.
+// the drawn lines, so a changed Markdown file cannot close it early. Only the first
+// `CHANGE_DRAW_MAX_LINES` kept lines are drawn; the note counts everything past them —
+// kept lines the draw does not take, and lines the record did not keep. Empty for a
+// change with nothing to draw (a binary file) — the title line then stands alone.
 export function changeMarkdown(v: ChangeView): string {
-  const rows = diffRows(v.diff);
+  const all = v.diff ? v.diff.split('\n') : [];
+  const drawn = all.slice(0, CHANGE_DRAW_MAX_LINES);
+  const text = drawn.join('\n');
+  const rows = diffRows(text);
   if (!rows.length) return '';
-  const longest = Math.max(0, ...(v.diff.match(/`+/g) ?? []).map((r) => r.length));
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
   const fence = '`'.repeat(Math.max(3, longest + 1));
-  const more = v.hidden ? `\n… ${v.hidden} more line${v.hidden === 1 ? '' : 's'}` : '';
+  const n = Math.max(0, all.length - CHANGE_DRAW_MAX_LINES) + v.hidden;
+  const more = n ? `\n… ${n} more line${n === 1 ? '' : 's'}` : '';
   return `${fence}diff\n${rows.map((r) => r.text).join('\n')}\n${fence}${more}`;
 }
 

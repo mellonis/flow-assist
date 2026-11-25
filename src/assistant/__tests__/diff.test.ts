@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, diffRowGroups, unifiedDiff } from '../diff';
+import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, diffRowGroups, unifiedDiff, CHANGE_DIFF_MAX_BYTES, type ChangeView } from '../diff';
 
 const lines = (n: number, f = (i: number) => `line ${i}`) => Array.from({ length: n }, (_, i) => f(i + 1)).join('\n') + '\n';
 
@@ -151,4 +151,44 @@ test('diffRowGroups splits hunks at their @@ headers', () => {
     ['27', '28', '29', '30', '30', '31', '32', '33'],
   ]);
   expect(diffRowGroups('')).toEqual([]);
+});
+
+// ─── The record whole, the chat's cut at draw time ─────────────────────────────
+// What a session keeps is the change whole up to `CHANGE_DIFF_MAX_BYTES`, so a reader
+// can walk all of it; the eighty lines the chat draws are cut where they are drawn.
+
+test('a reported change is recorded whole and counts only what the cap drops', () => {
+  const before = lines(100);
+  const after = lines(99, (i) => `new ${i}`);
+  const v = changeView({ title: 'big.txt', before, after })!;
+  // 100 removals + 99 additions under one hunk header: 200 lines, all of them kept.
+  expect(v.diff.split('\n')).toHaveLength(200);
+  expect(v.hidden).toBe(0);
+  expect(v.diff.split('\n').at(-1)).toBe('+new 99');
+
+  // One giant line puts the text over the cap: the cut ends on a line boundary, so the
+  // giant line and everything after it are dropped — and only those count as hidden.
+  const giant = 'g'.repeat(CHANGE_DIFF_MAX_BYTES + 1024);
+  const big = changeView({ title: 'huge.txt', before: '', after: `${lines(100)}${giant}\n${lines(5)}` })!;
+  expect(big.hidden).toBe(6); // the giant line and the five lines after it
+  expect(big.diff.split('\n')).toHaveLength(101); // the header and the 100 whole lines kept
+  expect(big.diff.split('\n').at(-1)).toBe('+line 100');
+});
+
+test("changeMarkdown keeps the chat's rows and note unchanged", () => {
+  const before = lines(100);
+  const after = lines(99, (i) => `new ${i}`);
+  const v = changeView({ title: 'big.txt', before, after })!;
+  // The first 80 kept lines are drawn — the hunk header is not a row — and the note
+  // counts everything past them.
+  const drawn = Array.from({ length: 79 }, (_, i) => `-line ${i + 1}`).join('\n');
+  expect(changeMarkdown(v)).toBe('```diff\n' + drawn + '\n```\n… 120 more lines');
+  // The same note counts what the byte cap dropped into `hidden`.
+  const noteOf = (md: string) => md.split('\n').at(-1)!;
+  expect(noteOf(changeMarkdown({ ...v, hidden: 7 }))).toBe('… 127 more lines');
+  // A record that already holds a cut — 80 lines and the rest counted in `hidden` —
+  // draws every line it holds, and its own count.
+  const kept = lines(80).replace(/\n$/, '');
+  const old: ChangeView = { title: 'old.txt', diff: kept, added: 80, removed: 0, hidden: 7 };
+  expect(changeMarkdown(old)).toBe('```diff\n' + kept + '\n```\n… 7 more lines');
 });

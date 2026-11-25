@@ -8,6 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 import { buildRepoPlugin } from '../../plugins-available/repo/src/index.ts';
+import { readJournal, type JournalEvent } from '../assistant/journal.ts';
+import { listTree } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
 const realFetch = nativeFetch;
@@ -207,4 +209,55 @@ test('after a restart the diff is still in the chat, and still not in what the m
   expect(sent).toContain('edit_file: replaced in');
   expect(sent).not.toContain('+const b = 42;');
   two.ui.app.unmount();
+});
+
+test('the ✎ block keeps its rows and note', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-sess-'));
+  const root = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-'))), 'clone');
+  fs.mkdirSync(root);
+  // A rewrite of every line: 100 removals and 100 additions under one hunk header —
+  // 201 diff lines, well past the eighty the chat draws.
+  const before = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const after = Array.from({ length: 100 }, (_, i) => `new ${i + 1}`).join('\n') + '\n';
+  fs.writeFileSync(path.join(root, 'app.ts'), before);
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'edit_file', args: { path: 'app.ts', old: before, new: after } }],
+    [{ text: 'Rewritten.' }],
+  );
+  const config = { fs: { roots: [root] }, sessions: { dir } };
+  // A tall terminal: the block of rows and its title must all be on screen at once.
+  const ui = await bootApp(model, 110, 130, (make) => [buildRepoPlugin({ config, make })], config);
+  await ui.press('F');
+  await ui.type('rewrite app.ts');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: edit_file');
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+
+  // What the chat draws: rows up to the eighty-line cut — the hunk header is not a
+  // row, so seventy-nine lines — and ONE note row counting everything past them.
+  const rows = ui.backend.lastFrame.split('\n');
+  const numbered = (no: number, text: string) => rows.some((r) => new RegExp(`\\s${no} │ ${text.replace(/[+*.$]/g, '\\$&')}`).test(r));
+  const shown = screen(ui.backend.lastFrame);
+  expect(shown).toContain('✎ clone/app.ts · +100 −100');
+  expect(numbered(1, '-line 1')).toBe(true);
+  expect(numbered(79, '-line 79')).toBe(true);
+  expect(shown).not.toContain('-line 80');
+  expect(shown).toContain('… 121 more lines');
+  expect(shown).not.toContain('@@');
+
+  // What the record keeps: the change whole — 201 lines, none of them hidden. The
+  // draw's cut is not made where the change is recorded.
+  const journals = listTree(dir).filter((n) => n.endsWith('.log.jsonl'));
+  expect(journals.length).toBeGreaterThan(0);
+  const events: JournalEvent[] = readJournal(path.join(dir, journals[0]!)) ?? [];
+  const rec = events.flatMap((e) => (Array.isArray(e.changes) ? e.changes as { diff: string; hidden: number }[] : []));
+  expect(rec).toHaveLength(1);
+  expect(rec[0]!.diff.split('\n')).toHaveLength(201);
+  expect(rec[0]!.hidden).toBe(0);
+  expect(rec[0]!.diff.split('\n').at(-1)).toBe('+new 100');
+  ui.app.unmount();
 });
