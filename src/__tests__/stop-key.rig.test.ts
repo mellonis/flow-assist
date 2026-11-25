@@ -8,7 +8,8 @@ import path from 'node:path';
 import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 const readPid = (file: string): number | null => {

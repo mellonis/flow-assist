@@ -6,7 +6,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { agentChat } from '../agent';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // An SSE answer whose every delta is built by `delta` — one chunk each, then the end.

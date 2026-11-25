@@ -17,7 +17,8 @@ import { assembleToolRegistry } from '../loader/tools';
 import { renderApp } from '../runtime/app';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../views/modals';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realAskNow = askClock.now;
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realAskNow; });
 

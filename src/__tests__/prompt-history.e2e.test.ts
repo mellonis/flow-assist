@@ -9,7 +9,8 @@ import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

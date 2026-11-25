@@ -15,7 +15,8 @@ import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { openStrip } from './helpers/work-panel';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });

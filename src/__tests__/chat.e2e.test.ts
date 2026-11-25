@@ -4,7 +4,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { PLAN_REMINDER } from '../assistant/plan';
 import { keyGlyph } from '../playback/keys';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // Settles until `ok` holds (or `n` rounds of a few ms pass) — for a wait on a timer.

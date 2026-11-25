@@ -12,7 +12,8 @@ import { validateConfigWriteValue } from '../config/load';
 import { hostConfigSchema } from '../config/schema';
 import { makeFactory } from '../loader/plugin';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // A small Streamable HTTP MCP server: JSON answers, a session id, two tools.

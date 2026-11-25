@@ -8,7 +8,8 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // A guest whose `edit_file` is held until the test lets it go and ignores the turn's

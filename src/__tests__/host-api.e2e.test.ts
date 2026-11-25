@@ -4,7 +4,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp } from './helpers/scripted';
 import { HOST_API } from '../version';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 test('a plugin reads the host API it runs under', async () => {

@@ -11,7 +11,8 @@ import { askClock } from '../assistant/child-ask-guard.ts';
 import { NO_ANSWER } from '../assistant/conversation.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });

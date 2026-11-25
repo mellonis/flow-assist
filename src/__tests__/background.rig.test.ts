@@ -11,7 +11,8 @@ import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 const WORKER = 'You are a background worker';

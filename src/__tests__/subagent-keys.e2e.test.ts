@@ -14,7 +14,8 @@ import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { askUp } from './helpers/ask-block';
 import { closeStrip, openStrip, stripRow, stripRows, stripUp } from './helpers/work-panel';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
 const localConfig = () => path.join(hostStateDir(), 'config.local.json');

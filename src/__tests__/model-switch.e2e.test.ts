@@ -12,7 +12,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { sessionFiles } from './helpers/session-files';
 import { resetSessionConfig } from '../config/load';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
 // A config the chooser has something to name: a base model, two roles and a catalogue.

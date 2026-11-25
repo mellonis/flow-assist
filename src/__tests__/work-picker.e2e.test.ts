@@ -15,7 +15,8 @@ import { keyGlyph } from '../playback/keys.ts';
 import { ScriptedModel, bootApp, firstUser, settle, type Turn } from './helpers/scripted';
 import { closeStrip, openStrip, stripRows, stripUp } from './helpers/work-panel';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
 afterEach(() => {

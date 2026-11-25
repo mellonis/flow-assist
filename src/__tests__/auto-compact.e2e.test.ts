@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, handoff, longText, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
 beforeEach(() => { process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted'; });
 afterEach(() => {

@@ -12,7 +12,8 @@ import { agentChanged, agentTrusted, agentTrustPath, recordAgentStart } from '..
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 
 const made: string[] = [];
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   delete process.env.FLOW_ASSIST_MODEL_SHELL;

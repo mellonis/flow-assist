@@ -9,7 +9,8 @@ import { SESSION_VERSION, newSessionId, saveSession, type Session } from '../ass
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { hereHome, hereProject, listTree, sessionFiles } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

@@ -4,7 +4,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const ITEMS = [{ label: 'Frontend', value: 'fe' }, { label: 'Backend', value: 'be' }, { label: 'Design', value: 'ds' }];

@@ -11,7 +11,8 @@ import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/sc
 import type { Make } from '../loader/plugin.ts';
 import { listTree } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };

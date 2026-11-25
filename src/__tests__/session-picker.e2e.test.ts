@@ -8,7 +8,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { acquireLock, journalPath, lockPath, projectHome } from '../assistant/sessions';
 import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-picker-e2e-'));

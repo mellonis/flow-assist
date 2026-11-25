@@ -11,7 +11,8 @@ import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSe
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { homeIn, listTree, sessionFiles, sessionIdOf } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const localConfig = () => path.join(hostStateDir(), 'config.local.json');
 afterEach(() => {
   globalThis.fetch = realFetch;

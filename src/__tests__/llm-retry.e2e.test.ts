@@ -10,7 +10,8 @@ import { retryClock } from '../assistant/llm-retry.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realClock = { ...retryClock };
 afterEach(() => {
   globalThis.fetch = realFetch;

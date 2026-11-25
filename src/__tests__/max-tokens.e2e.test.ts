@@ -4,10 +4,11 @@
 // says (`src/assistant/wire-fields.ts`) — a name to use instead, a value too large, or a
 // plain unknown field — each answered once and remembered for this process.
 import { afterEach, expect, test } from 'bun:test';
+import { nativeFetch } from './helpers/test-setup.ts';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { ScriptedModel } from './helpers/scripted';
 
-afterEach(closeRigs);
+afterEach(() => { globalThis.fetch = nativeFetch; closeRigs(); });
 
 type Body = { max_tokens?: number; max_completion_tokens?: number; stream?: boolean };
 
@@ -66,7 +67,7 @@ test('a provider naming max_completion_tokens is retried once under that name �
     expect(sent[2]!.max_completion_tokens).toBe(32_000);
     expect(answered(rig, 'the second answer')).toBe(true);
   } finally {
-    globalThis.fetch = scripted;
+    globalThis.fetch = nativeFetch;
   }
 });
 
@@ -101,7 +102,7 @@ test('a provider refusing the ceiling by value is retried once at the capped fal
     expect(refused).toBe(1);
     expect(answered(rig, 'the second answer')).toBe(true);
   } finally {
-    globalThis.fetch = scripted;
+    globalThis.fetch = nativeFetch;
   }
 });
 
@@ -134,6 +135,6 @@ test('a provider refusing max_tokens by name is retried once without it', async 
     expect(sent.map((b) => 'max_tokens' in b)).toEqual([true, false, false]);
     expect(answered(rig, 'the second answer')).toBe(true);
   } finally {
-    globalThis.fetch = scripted;
+    globalThis.fetch = nativeFetch;
   }
 });

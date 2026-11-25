@@ -24,7 +24,8 @@ const { ScriptedModel, bootApp, settle } = await import('./helpers/scripted');
 const { askUp } = await import('./helpers/ask-block');
 const { onCopySelection } = await import('../runtime/app.tsx');
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 beforeEach(() => { copied.length = 0; toolWorks = true; });
 afterEach(() => { globalThis.fetch = realFetch; });
 

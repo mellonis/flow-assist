@@ -2,7 +2,8 @@
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // The shape of a real plugin (the tracker's detail screen): ONE component owns the

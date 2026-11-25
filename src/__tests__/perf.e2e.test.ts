@@ -5,7 +5,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { createFrameMeter } from '../runtime/frame-stats';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const lastRow = (ui: { backend: { lastFrame: string } }) => ui.backend.lastFrame.split('\n').filter((r) => r.trim()).at(-1) ?? '';

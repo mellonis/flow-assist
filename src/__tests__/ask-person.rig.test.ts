@@ -11,7 +11,8 @@ import type { ChildQuestion, ChildSpec } from '../assistant/conversation-types.t
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const children: Conversation[] = [];
 afterEach(() => { globalThis.fetch = realFetch; for (const c of children.splice(0)) c.close('exit'); closeRigs(); });
 

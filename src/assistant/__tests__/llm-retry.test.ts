@@ -8,7 +8,8 @@ import { llmOpts } from '../llm-endpoint';
 import { LlmRequestError, RETRIES_DEFAULT, RETRY_STATUSES, parseRetryAfter, readChunk, retryClock, sleepFor, retryLabel, withRetry, type RetryInfo } from '../llm-retry';
 import { isImageRefusal } from '../images';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realClock = { ...retryClock };
 const NOW = Date.parse('2026-10-20T12:00:00Z');
 

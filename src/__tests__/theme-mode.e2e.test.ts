@@ -6,7 +6,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
 const hintCell = (ui: Awaited<ReturnType<typeof bootApp>>) => {

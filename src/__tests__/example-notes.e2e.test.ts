@@ -10,7 +10,8 @@ import { z } from 'zod';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import buildNotesPlugin from '../../examples/notes/src/index.ts';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };

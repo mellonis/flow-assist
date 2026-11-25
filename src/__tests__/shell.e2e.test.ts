@@ -11,7 +11,8 @@ import { READ_ONLY_TASK_DECLINE } from '../assistant/confirm-policy.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { Sent as WireMessage } from './helpers/conversation';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 const realNow = askClock.now;
 afterEach(() => { globalThis.fetch = realFetch; askClock.now = realNow; });
 

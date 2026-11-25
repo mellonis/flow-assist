@@ -7,7 +7,8 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { getDeep, hostStateDir, loadConfig, resetSessionConfig, saveConfigUnset } from '../config/load';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   resetSessionConfig();

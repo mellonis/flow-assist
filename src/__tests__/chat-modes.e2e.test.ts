@@ -10,7 +10,8 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { chatRows, chatWrapWidth, type RowOpts } from '../views/modals';
 import { cellWidth } from '../cells';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type UI = Awaited<ReturnType<typeof bootApp>>;

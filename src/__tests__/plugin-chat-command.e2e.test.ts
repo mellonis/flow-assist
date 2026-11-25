@@ -11,7 +11,8 @@ import { hostStateDir } from '../config/load';
 import type { Make } from '../loader/plugin';
 import { z } from 'zod';
 
-const realFetch = globalThis.fetch;
+import { nativeFetch } from './helpers/test-setup.ts';
+const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
