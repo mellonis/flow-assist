@@ -3370,8 +3370,9 @@ export function diffPanelBody(p: {
         h(Text, { ...lit, wrap: 'truncate' }, cutLeft(f.path, room)),
         h(Text, { dim: true, wrap: 'truncate', selectable: false }, ` ${counts}`)));
       if (folded) return;
-      // A file with no hunks at all says why where they would have been.
-      if (f.note) {
+      // A binary or too-large file draws nothing at all and says why where its hunks
+      // would have been. A cut record keeps its hunks — its note rides under the row.
+      if (f.note === 'binary' || f.note === 'too large') {
         const why = f.note === 'binary' ? 'binary' : 'too large';
         rows.push(h(Box, { key: `n${si}-${fi}`, flexDirection: 'row', flexShrink: 0, ...fold },
           h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${why} — not shown`)));

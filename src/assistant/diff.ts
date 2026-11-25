@@ -155,10 +155,12 @@ export function changeCounts(v: ChangeView): string {
 }
 
 // What the `/diff` panel's file row says after the path: `· +N −M` in `changeCounts`'
-// wording, or why the file is not drawn at all. The argument is the three fields the
-// answer needs rather than a `FileDiff`: `working-tree.ts` imports this module, so a
-// type import back would close a cycle, and this module stays dependency-free.
-export function fileDiffCounts(f: { added: number; removed: number; note?: 'binary' | 'too large' }): string {
+// wording, or why the file is not drawn at all. A cut record keeps its counts — its
+// hunks draw, and a note row beside them says how much was not kept. The argument is
+// the fields the answer needs rather than a `FileDiff`: `working-tree.ts` imports this
+// module, so a type import back would close a cycle, and this module stays
+// dependency-free.
+export function fileDiffCounts(f: { added: number; removed: number; note?: 'binary' | 'too large' | 'cut' }): string {
   if (f.note === 'binary') return '· binary, not shown';
   if (f.note === 'too large') return '· too large, not shown';
   return `· +${f.added} −${f.removed}`;

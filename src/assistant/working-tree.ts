@@ -39,7 +39,10 @@ import { realOf, within } from './shell.js';
 
 export interface FileDiff {
   status: 'A' | 'M' | 'D';
-  path: string; // relative to the section's root, '/'-separated
+  // What the row draws as the file's name: a walk writes the file's path under the
+  // section's root ('/'-separated); `turn-diff.ts` writes the change's title as the
+  // tool spelled it.
+  path: string;
   // The file's stable key part — what the fold and the cursor key by
   // (`diffFileKey(root, key ?? path)`) when the drawn path is not the name the file is
   // known by; a reported change's index key sets it. Defaults to `path`.
@@ -47,7 +50,9 @@ export interface FileDiff {
   added: number;
   removed: number;
   hunks: string; // the unified diff text; '' for binary / too large
-  note?: 'binary' | 'too large';
+  note?: 'binary' | 'too large' | 'cut';
+  // The lines the record did not keep, when `note` is `'cut'` (`change.hidden`).
+  hidden?: number;
 }
 
 export interface DiffSection {
@@ -56,9 +61,9 @@ export interface DiffSection {
   // `HEAD` for the worktree source. `''` — the top names no base and nothing was
   // compared; the section then holds no files and the panel offers the picker.
   base: string;
-  // What kind of section it is; absent means `'tree'` — a git top this walk drew
-  // (or a path change `turn-diff.ts` grouped under one). `'reported'` is
-  // `turn-diff.ts`'s group of changes that are not files.
+  // What kind of section it is; absent means `'tree'` — a git top the working-tree
+  // walk drew, or a root `turn-diff.ts` groups the turn's path changes under.
+  // `'reported'` is `turn-diff.ts`'s one section for changes that are not files.
   kind?: 'tree' | 'reported';
   files: FileDiff[];
 }
