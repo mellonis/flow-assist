@@ -23,7 +23,7 @@ import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownTex
 import { isClicked, isOpen, isRecordId, foldId, openInFull, toggleFold, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
-import { changeCounts, changeMarkdown, diffRows, diffRowGroups, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
+import { changeCounts, changeMarkdown, diffRows, diffRowGroups, drawnDiff, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
 import { diffFileKey, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
@@ -404,7 +404,10 @@ function changeLines(v: ChangeView, inner: number, palette?: Record<string, stri
   };
   const md = changeMarkdown(v);
   if (!md) return [title];
-  const rows = diffRows(v.diff);
+  // The numbers of the rows the markdown draws — `src` indexes exactly those, and the
+  // gutter is sized from them: a width read from the whole record would move the rows'
+  // padding whenever a record keeps more than the draw takes.
+  const rows = diffRows(drawnDiff(v));
   const width = Math.max(1, ...rows.map((r) => r.no.length));
   const { lines, src } = blockLines(md, inner - width - 1, palette);
   const numbered = lines.map((line, i) => {

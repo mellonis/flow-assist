@@ -5,7 +5,7 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
-import { fileDiffCounts } from '../../assistant/diff.js';
+import { changeView, unifiedDiff, CHANGE_DRAW_MAX_LINES, fileDiffCounts, type ChangeView } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
 import { keyGlyph } from '../../playback/keys.js';
@@ -1707,6 +1707,28 @@ test('a bright row ends the group that precedes it and the next dim row starts a
   expect(split[title]).toBe('✎ src/a.ts · +1 −1');
   expect(split.slice(0, title)).toContain('+ 1 tool');
   expect(split.slice(title)).toContain('+ 2 tools');
+});
+
+test('the ✎ block draws the same rows for a whole record as for one that holds the cut', () => {
+  // A rewrite of every line: 201 diff lines, well past the eighty the chat draws. A
+  // record that keeps them all lays out the same row STRINGS as one holding the first
+  // eighty — the number gutter is sized by the rows drawn, so its padding cannot move.
+  const before = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const after = Array.from({ length: 100 }, (_, i) => `new ${i + 1}`).join('\n') + '\n';
+  const whole = changeView({ title: 'clone/app.ts', before, after })!;
+  const cut: ChangeView = { title: 'clone/app.ts', ...unifiedDiff(before, after) };
+  expect(whole.diff.split('\n').length).toBeGreaterThan(CHANGE_DRAW_MAX_LINES);
+  expect(cut.diff.split('\n')).toHaveLength(CHANGE_DRAW_MAX_LINES);
+  const drawnOf = (change: ChangeView) =>
+    chatRows([{ role: 'assistant', content: '', parts: [{ kind: 'change', change }] }] as never, groupOpts()).map(rowText);
+  const drawn = drawnOf(whole);
+  expect(drawn).toEqual(drawnOf(cut));
+  // The rows themselves: seventy-nine diff rows under the title — the hunk header is
+  // not a row — and one note counting everything past the eighty drawn lines.
+  expect(drawn.some((r) => r.trimEnd().endsWith('-line 1'))).toBe(true);
+  expect(drawn.some((r) => r.includes('-line 79'))).toBe(true);
+  expect(drawn.some((r) => r.includes('-line 80'))).toBe(false);
+  expect(drawn).toContain('… 121 more lines');
 });
 
 test('a group with a live item shows a busy line with a spinner while it runs', async () => {

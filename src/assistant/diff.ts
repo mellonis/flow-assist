@@ -164,6 +164,14 @@ export function fileDiffCounts(f: { added: number; removed: number; note?: 'bina
   return `· +${f.added} −${f.removed}`;
 }
 
+// The diff as far as the chat draws it — the first `CHANGE_DRAW_MAX_LINES` kept lines.
+// `changeMarkdown` lays these out, and everything that reads the numbers of a drawn row
+// walks these same rows: a gutter sized from the whole record would move when a record
+// keeps more.
+export function drawnDiff(v: ChangeView): string {
+  return v.diff ? v.diff.split('\n').slice(0, CHANGE_DRAW_MAX_LINES).join('\n') : '';
+}
+
 // The markdown the chat lays out for one change: the hunks in a ```diff fence, which
 // is what colours a diff green and red. The fence is longer than any backtick run in
 // the drawn lines, so a changed Markdown file cannot close it early. Only the first
@@ -172,8 +180,7 @@ export function fileDiffCounts(f: { added: number; removed: number; note?: 'bina
 // change with nothing to draw (a binary file) — the title line then stands alone.
 export function changeMarkdown(v: ChangeView): string {
   const all = v.diff ? v.diff.split('\n') : [];
-  const drawn = all.slice(0, CHANGE_DRAW_MAX_LINES);
-  const text = drawn.join('\n');
+  const text = drawnDiff(v);
   const rows = diffRows(text);
   if (!rows.length) return '';
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
