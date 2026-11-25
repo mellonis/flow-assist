@@ -105,16 +105,20 @@ export function createProtocol(transport: McpTransport, opts: ProtocolOptions, o
   async function request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
     const raw = await transport.send({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true, timeoutMs);
     const message = raw as { id?: unknown; result?: unknown; error?: { code?: number; message?: string } } | undefined;
-    if (message?.error) throw new McpError(`${message.error.message ?? 'error'}${message.error.code !== undefined ? ` (${message.error.code})` : ''}`, { rpc: true });
-    // A JSON-RPC reply carries `result` or `error` (and the id it answers) — a body
-    // with none of them is not an MCP answer at all. Taking its missing `result` for
-    // an empty success is how a handshake with some other server's protocol reads as
-    // "connected, 0 tools". The failure names what arrived.
-    if (message !== undefined && message !== null && typeof message === 'object'
-      && !('result' in message) && !('error' in message) && !('id' in message)) {
+    // A JSON-RPC reply is an object carrying `result` or `error` (its `id` only says
+    // which request it answers). Anything else — an `{ id }`-only body, a null error, a
+    // bare string, a batch array — is not an MCP answer at all. Taking its missing
+    // `result` for an empty success is how a handshake with some other server's protocol
+    // reads as "connected, 0 tools". The failure names what arrived.
+    const isReply = message !== null && typeof message === 'object' && !Array.isArray(message);
+    if (!isReply) {
       throw new McpError(`not a JSON-RPC answer to ${method}: ${JSON.stringify(raw).slice(0, 120)}`, { rpc: true });
     }
-    return message?.result;
+    if (message.error) throw new McpError(`${message.error.message ?? 'error'}${message.error.code !== undefined ? ` (${message.error.code})` : ''}`, { rpc: true });
+    if (!('result' in message)) {
+      throw new McpError(`not a JSON-RPC answer to ${method}: ${JSON.stringify(raw).slice(0, 120)}`, { rpc: true });
+    }
+    return message.result;
   }
   const notify = (method: string) => transport.send({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
 
