@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, diffPanelBody, diffPanelFileKeys, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
 import { fileDiffCounts } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
@@ -2465,6 +2465,73 @@ test('the body is one walk: the files ↑/↓ move among, in the drawn order, an
   const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40, gitless: false, failed: false });
   expect(gone.cursorRow).toBe(-1);
   expect(gone.rows).toHaveLength(4);
+});
+
+// ─── /diff: the walk's items and the moves ────────────────────────────────────
+// The cursor rests on a row of interest — a file's own row or a hunk's first row —
+// and `diffPanelItems` lists those rows in the drawn order. The moves walk one kind
+// of row over it: file rows (↑/↓) or hunk starts (] [), each clamped at the ends.
+const walkSections: DiffSection[] = [{
+  root: '/r',
+  files: [
+    { status: 'M', path: 'a.txt', added: 3, removed: 2, hunks: '@@ -1,2 +1,3 @@\n-x\n+y\n+z\n@@ -20,2 +21,2 @@\n-p\n+q' },
+    { status: 'A', path: 'b.txt', added: 1, removed: 0, hunks: '@@ -0,0 +1 @@\n+new' },
+  ],
+}];
+const aFile: DiffCursor = { fileKey: diffFileKey('/r', 'a.txt'), hunk: -1 };
+const aHunk0: DiffCursor = { fileKey: aFile.fileKey, hunk: 0 };
+const aHunk1: DiffCursor = { fileKey: aFile.fileKey, hunk: 1 };
+const bFile: DiffCursor = { fileKey: diffFileKey('/r', 'b.txt'), hunk: -1 };
+const bHunk0: DiffCursor = { fileKey: bFile.fileKey, hunk: 0 };
+
+test('diffPanelItems walks file rows and hunk starts in drawn order', () => {
+  // Two files — the first with two hunks, the second folded by key. The fold is what
+  // takes the second file's hunks out of the walk: its row is all it offers.
+  expect(diffPanelItems(walkSections, new Set([bFile.fileKey]))).toEqual([aFile, aHunk0, aHunk1, bFile]);
+  expect(diffPanelItems(walkSections, new Set())).toEqual([aFile, aHunk0, aHunk1, bFile, bHunk0]);
+  // A file with a note has no hunk rows under it, so its row is all it offers too.
+  const noted: DiffSection[] = [{ root: '/r', files: [{ status: 'M', path: 'img.png', added: 0, removed: 0, hunks: '', note: 'binary' }] }];
+  expect(diffPanelItems(noted, new Set())).toEqual([{ fileKey: diffFileKey('/r', 'img.png'), hunk: -1 }]);
+  // A file keyed by something other than its drawn path keys its row by that.
+  const keyed: DiffSection[] = [{ root: '/r', files: [{ ...noted[0]!.files[0]!, path: 'draft.md', key: 'notes.md' }] }];
+  expect(diffPanelItems(keyed, new Set())).toEqual([{ fileKey: diffFileKey('/r', 'notes.md'), hunk: -1 }]);
+});
+
+test('diffFileMove walks file rows and clamps at the ends', () => {
+  const items = diffPanelItems(walkSections, new Set());
+  // From no cursor at all, the direction picks the end to start from.
+  expect(diffFileMove(items, null, 1)).toEqual(aFile);
+  expect(diffFileMove(items, null, -1)).toEqual(bFile);
+  expect(diffFileMove(items, aFile, 1)).toEqual(bFile);
+  expect(diffFileMove(items, bFile, -1)).toEqual(aFile);
+  // At either end a move past the end stays put: the walk never wraps or falls off.
+  expect(diffFileMove(items, aFile, -1)).toEqual(aFile);
+  expect(diffFileMove(items, bFile, 1)).toEqual(bFile);
+  // From a hunk's row the next file row below is the next file's own row.
+  expect(diffFileMove(items, aHunk1, 1)).toEqual(bFile);
+});
+
+test('diffHunkMove walks hunk starts across files', () => {
+  const items = diffPanelItems(walkSections, new Set());
+  // From a file's own row a hunk move lands on that file's first hunk…
+  expect(diffHunkMove(items, aFile, 1)).toEqual(aHunk0);
+  // …and from its last hunk on the next file's first hunk: hunk starts cross files.
+  expect(diffHunkMove(items, aHunk1, 1)).toEqual(bHunk0);
+  expect(diffHunkMove(items, bHunk0, -1)).toEqual(aHunk1);
+  // The last hunk start of the walk is its end: one more step stays put.
+  expect(diffHunkMove(items, bHunk0, 1)).toEqual(bHunk0);
+  // With every file folded there is no hunk start at all — the cursor is unchanged.
+  const folded = diffPanelItems(walkSections, new Set([aFile.fileKey, bFile.fileKey]));
+  expect(diffHunkMove(folded, bHunk0, 1)).toEqual(bHunk0);
+  expect(diffHunkMove(folded, null, -1)).toBeNull();
+});
+
+test('diffFirstItem and diffLastItem are the ends of the list', () => {
+  const items = diffPanelItems(walkSections, new Set());
+  expect(diffFirstItem(items)).toEqual(items[0]!);
+  expect(diffLastItem(items)).toEqual(items[items.length - 1]!);
+  expect(diffFirstItem([])).toBeNull();
+  expect(diffLastItem([])).toBeNull();
 });
 
 // ─── The question wizard (ticket 4) ─────────────────────────────────────────

@@ -191,3 +191,17 @@ export function diffRows(diff: string): { text: string; no: string }[] {
     .map((text, i) => ({ text, no: nums[i] ?? '' }))
     .filter((r) => !HUNK_HEADER.test(r.text));
 }
+
+// The hunks as one group each — what a walk rests a cursor on: a hunk's first row.
+// A `@@` header starts a group and its rows are `diffRows`' rows under that header;
+// rows before the first header are no hunk's and are dropped.
+export function diffRowGroups(diff: string): Array<Array<{ text: string; no: string }>> {
+  const texts: string[] = [];
+  for (const line of diff ? diff.split('\n') : []) {
+    if (HUNK_HEADER.test(line)) texts.push(line);
+    else if (texts.length) texts[texts.length - 1] += '\n' + line;
+  }
+  // Each group keeps its own header while the numbers are read from it — `diffRows`
+  // drops the header's row and keeps the rest, as it does for a whole diff.
+  return texts.map((text) => diffRows(text));
+}

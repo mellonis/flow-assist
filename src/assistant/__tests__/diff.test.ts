@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, unifiedDiff } from '../diff';
+import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, diffRowGroups, unifiedDiff } from '../diff';
 
 const lines = (n: number, f = (i: number) => `line ${i}`) => Array.from({ length: n }, (_, i) => f(i + 1)).join('\n') + '\n';
 
@@ -126,4 +126,29 @@ test('a line number is never invented for a line the diff does not have', () => 
   // A text with a NUL is named and not drawn — no rows, and so no numbers.
   const bin = changeView({ title: 'img.png', before: '', after: 'PNG\u0000' })!;
   expect(diffRows(bin.diff)).toEqual([]);
+});
+
+// ─── The hunk groups of a walk ─────────────────────────────────────────────────
+// The `/diff` panel's walk rests a cursor on each hunk's first row, so the hunks must
+// exist as GROUPS — `diffRows` alone flattens them into one list.
+
+test('diffRowGroups splits hunks at their @@ headers', () => {
+  const before = lines(40);
+  const after = before.replace('line 5\n', 'five\n').replace('line 30\n', 'thirty\n');
+  const diff = unifiedDiff(before, after).diff;
+  const groups = diffRowGroups(diff);
+  expect(groups).toHaveLength(2);
+  // Each group's rows are `diffRows`' rows: the `@@` row is dropped and every row
+  // carries the number it has in the file.
+  expect(groups.flat()).toEqual(diffRows(diff));
+  expect(groups.flat().some((r) => r.text.startsWith('@@'))).toBe(false);
+  // The first group's first row is the first line of hunk 1 — where its context starts.
+  expect(groups[0]![0]).toEqual({ text: ' line 2', no: '2' });
+  expect(groups[1]![0]).toEqual({ text: ' line 27', no: '27' });
+  // Every hunk numbers its rows from its own header, not from where the last left off.
+  expect(groups.map((g) => g.map((r) => r.no))).toEqual([
+    ['2', '3', '4', '5', '5', '6', '7', '8'],
+    ['27', '28', '29', '30', '30', '31', '32', '33'],
+  ]);
+  expect(diffRowGroups('')).toEqual([]);
 });

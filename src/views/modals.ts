@@ -23,7 +23,7 @@ import { answerText, readParts, reasoningSummary, runMarks, runRowText, shownTex
 import { isClicked, isOpen, isRecordId, foldId, openInFull, toggleFold, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
-import { changeCounts, changeMarkdown, diffRows, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
+import { changeCounts, changeMarkdown, diffRows, diffRowGroups, fileDiffCounts, type ChangeView } from '../assistant/diff.js';
 import { diffFileKey, type DiffSection } from '../assistant/working-tree.js';
 import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
@@ -3251,8 +3251,61 @@ export interface DiffPanelView {
 // The files the panel shows, in the order ↑/↓ walk them: root by root, as drawn.
 export function diffPanelFileKeys(sections: DiffSection[]): string[] {
   const keys: string[] = [];
-  for (const s of sections) for (const f of s.files) keys.push(diffFileKey(s.root, f.path));
+  for (const s of sections) for (const f of s.files) keys.push(diffFileKey(s.root, f.key ?? f.path));
   return keys;
+}
+
+// Where the cursor rests: a file's own row (`hunk: -1`) or a hunk's first row
+// (`hunk >= 0`, its index among the groups of `diffRowGroups`). `fileKey` is
+// `diffFileKey(root, f.key ?? f.path)`, the same key the fold set and the body read.
+export type DiffCursor = { fileKey: string; hunk: number };
+
+// Every row the cursor rests on, in the drawn order: a file's item, then one item per
+// hunk start under it. A folded file and a file with a note draw their row alone, so
+// that row is all they offer the cursor.
+export function diffPanelItems(sections: DiffSection[], collapsed: ReadonlySet<string>): DiffCursor[] {
+  const items: DiffCursor[] = [];
+  for (const s of sections) for (const f of s.files) {
+    const fileKey = diffFileKey(s.root, f.key ?? f.path);
+    items.push({ fileKey, hunk: -1 });
+    if (collapsed.has(fileKey) || f.note) continue;
+    diffRowGroups(f.hunks).forEach((_, hunk) => items.push({ fileKey, hunk }));
+  }
+  return items;
+}
+
+// One kind of cursor row over `diffPanelItems`' order: one row of the kind per call,
+// `step`'s sign the direction — the next (`step > 0`) or previous (`step < 0`) row of
+// that kind from where the cursor rests. Its own row is the anchor, so from a file's
+// row a hunk move lands on that file's first hunk. The walk is clamped at both ends —
+// a move past the end stays put — and from no cursor at all it goes to the end the
+// step points toward. A row `items` no longer holds (a refresh took it away) leaves
+// the cursor where it is.
+function moveCursor(items: DiffCursor[], kind: (c: DiffCursor) => boolean, at: DiffCursor | null, step: number): DiffCursor | null {
+  const rows = items.filter(kind);
+  if (!rows.length || !step) return at;
+  if (at === null) return step > 0 ? rows[0]! : rows[rows.length - 1]!;
+  const anchor = items.findIndex((c) => c.fileKey === at.fileKey && c.hunk === at.hunk);
+  const way = anchor < 0 ? [] : step > 0 ? items.slice(anchor + 1).filter(kind) : items.slice(0, anchor).filter(kind).reverse();
+  return way[0] ?? at;
+}
+
+// The move over the file rows.
+export function diffFileMove(items: DiffCursor[], at: DiffCursor | null, step: number): DiffCursor | null {
+  return moveCursor(items, (c) => c.hunk === -1, at, step);
+}
+
+// The move over the hunk starts; with none in the walk the cursor is unchanged.
+export function diffHunkMove(items: DiffCursor[], at: DiffCursor | null, step: number): DiffCursor | null {
+  return moveCursor(items, (c) => c.hunk >= 0, at, step);
+}
+
+// The ends of the walk.
+export function diffFirstItem(items: DiffCursor[]): DiffCursor | null {
+  return items[0] ?? null;
+}
+export function diffLastItem(items: DiffCursor[]): DiffCursor | null {
+  return items[items.length - 1] ?? null;
 }
 
 // The panel's ONE walk: the rows it draws, and which row the cursor's file is on (-1 —
@@ -3295,7 +3348,7 @@ export function diffPanelBody(p: {
     rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
       cutStep(`diff · ${s.files.length} ${s.files.length === 1 ? 'file' : 'files'} +${added} −${removed} · vs HEAD`, inner)));
     s.files.forEach((f, fi) => {
-      const key = diffFileKey(s.root, f.path);
+      const key = diffFileKey(s.root, f.key ?? f.path);
       const folded = p.collapsed.has(key);
       const counts = fileDiffCounts(f);
       const lead = `${folded ? '▸' : '▾'} ${f.status} `;

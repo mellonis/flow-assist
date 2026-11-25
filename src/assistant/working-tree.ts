@@ -30,6 +30,10 @@ import { realOf, within } from './shell.js';
 export interface FileDiff {
   status: 'A' | 'M' | 'D';
   path: string; // relative to the section's root, '/'-separated
+  // The file's stable key part — what the fold and the cursor key by
+  // (`diffFileKey(root, key ?? path)`) when the drawn path is not the name the file is
+  // known by; a reported change's index key sets it. Defaults to `path`.
+  key?: string;
   added: number;
   removed: number;
   hunks: string; // the unified diff text; '' for binary / too large
