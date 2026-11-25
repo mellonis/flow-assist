@@ -254,14 +254,6 @@ test('a tracked file grown past 2 MiB is noted as too large instead of diffed', 
   expect(f.added + f.removed).toBe(0);
 });
 
-test('a file row names a cut record: note "cut" and the lines it did not keep', () => {
-  // The walk never cuts a record — `turn-diff.ts` maps one that `changeView` cut at
-  // its byte cap. The pair is the row's way of saying so; this fixture is its shape.
-  const cut: FileDiff = { status: 'M', path: 'notes.md', added: 3, removed: 0, hunks: '@@ -1,1 +1,4 @@', note: 'cut', hidden: 42 };
-  expect(cut.note).toBe('cut');
-  expect(cut.hidden).toBe(42);
-});
-
 test('a repository with no commit yet still lists what is not tracked', async () => {
   const root = tmpRoot();
   fs.mkdirSync(root, { recursive: true });

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, diffRowGroups, unifiedDiff, CHANGE_DIFF_MAX_BYTES, type ChangeView } from '../diff';
+import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, diffRowGroups, fileDiffCounts, unifiedDiff, CHANGE_DIFF_MAX_BYTES, type ChangeView } from '../diff';
 
 const lines = (n: number, f = (i: number) => `line ${i}`) => Array.from({ length: n }, (_, i) => f(i + 1)).join('\n') + '\n';
 
@@ -58,6 +58,16 @@ test('a binary text is named, not drawn', () => {
   // as inline code — so the markdown here is the fenced block alone, and a binary has none.
   expect(changeMarkdown(v)).toBe('');
   expect(changeCounts(v)).toBe('· binary, not shown');
+});
+
+test('fileDiffCounts says the counts, or why a file is not drawn at all', () => {
+  // The two notes that hide a file's hunks say their words in the counts' place.
+  expect(fileDiffCounts({ added: 3, removed: 1, note: 'binary' })).toBe('· binary, not shown');
+  expect(fileDiffCounts({ added: 3, removed: 1, note: 'too large' })).toBe('· too large, not shown');
+  // A cut record keeps its hunks and its counts — what the record dropped is said by
+  // its own note row — so it counts like a row with no note at all.
+  expect(fileDiffCounts({ added: 3, removed: 0, note: 'cut' })).toBe('· +3 −0');
+  expect(fileDiffCounts({ added: 3, removed: 0 })).toBe('· +3 −0');
 });
 
 test('the markdown fence outlasts any backtick run in the diff', () => {
