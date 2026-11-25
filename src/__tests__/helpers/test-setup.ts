@@ -15,6 +15,7 @@ import { drainDisposables } from './disposal.ts';
 import { pluginTrustPath } from '../../loader/trust.ts';
 import { memoryTrustPath } from '../../assistant/memory-trust.ts';
 import { retryClock } from '../../assistant/llm-retry.ts';
+import { setActiveSecrets } from '../../assistant/secrets.ts';
 
 // The real fetch, snapshotted before any test module loads: a test's restore target.
 // A test that leaves the scripted mock installed would otherwise hand the next file a
@@ -29,6 +30,11 @@ try {
   beforeEach(() => {
     fs.rmSync(pluginTrustPath(), { force: true });
     fs.rmSync(memoryTrustPath(), { force: true });
+    // A test starts knowing no secrets. The set an app's boot leaves active
+    // (src/assistant/secrets.ts) outlives the test that made it, and a secret of ANOTHER
+    // test holds back streamed output here: a tail that could still grow into it is
+    // never emitted — a command's single-character chunk being the clearest case.
+    setActiveSecrets(null);
   });
 
   afterEach(async () => {
