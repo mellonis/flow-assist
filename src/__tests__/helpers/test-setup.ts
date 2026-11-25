@@ -21,11 +21,19 @@ import { retryClock } from '../../assistant/llm-retry.ts';
 // double to capture as "the real one".
 export const nativeFetch = globalThis.fetch;
 
-beforeEach(() => {
-  fs.rmSync(pluginTrustPath(), { force: true });
-  fs.rmSync(memoryTrustPath(), { force: true });
-});
+// The hooks register where there is a test runner to register with. The helpers are
+// also reachable from a plain `bun` script — the signal-exit host boots the real app
+// through `helpers/scripted.ts` — and `bun:test`'s hooks have nothing to attach to
+// there.
+try {
+  beforeEach(() => {
+    fs.rmSync(pluginTrustPath(), { force: true });
+    fs.rmSync(memoryTrustPath(), { force: true });
+  });
 
-afterEach(async () => {
-  await drainDisposables();
-});
+  afterEach(async () => {
+    await drainDisposables();
+  });
+} catch {
+  // Not a `bun test` run: no per-test isolation to install.
+}
