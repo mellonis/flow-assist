@@ -135,7 +135,13 @@ test('run_command opens its view and fills it as the command prints', async () =
   // gap exceeds the separation, and no wait in the test can tell the two apart. The
   // gate makes `'a'` arrive alone by construction.
   const run = shellTools({}).exec('run_command', { command: `printf a; while [ ! -f '${gate}' ]; do sleep 0.02; done; printf b` }, ctx as never);
-  await settleUntil(() => states.some((s) => s.text === 'a'));
+  // On failure say WHAT arrived: this test's subject is the pipe's chunk boundary, "the
+  // state never said `a`" is only useful together with the chunks that came instead.
+  try {
+    await settleUntil(() => states.some((s) => s.text === 'a'));
+  } catch (e) {
+    throw new Error(`${(e as Error).message} — states: ${JSON.stringify(states)}`);
+  }
   fs.writeFileSync(gate, '');
   const out = await run;
   expect(states[0]!.text).toBe('');
