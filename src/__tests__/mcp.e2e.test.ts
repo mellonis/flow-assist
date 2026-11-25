@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ScriptedModel, bootApp } from './helpers/scripted';
+import { ScriptedModel, bootApp, settleUntil } from './helpers/scripted';
 import { loadPlugins } from '../loader/build';
 import { assembleToolRegistry, chatGroupDescriptions, pluginConfigs } from '../loader/tools';
 import { validateConfigWriteValue } from '../config/load';
@@ -38,12 +38,6 @@ beforeAll(() => {
   });
 });
 afterAll(() => server.stop(true));
-
-// A wait names the state it waits for instead of guessing at milliseconds: the
-// assertion after it reads an arrived thing, not a raced one.
-const until = async (ok: () => boolean, tries = 200) => {
-  for (let i = 0; i < tries && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
-};
 
 const mcpConfig = () => ({ plugins: { mcp: { servers: { webstorm: { url: `http://127.0.0.1:${server.port}/stream` } } } } });
 
@@ -90,7 +84,7 @@ test('a call through the chat: asked first, sent with the session, answered as d
   const callsBefore = seen.filter((s) => s.method === 'tools/call').length;
   expect(callsBefore).toBe(0); // nothing reaches the server before the person says yes
   await app.press('y');
-  await until(() => seen.some((s) => s.method === 'tools/call') && model.requests.length >= 2);
+  await settleUntil(() => seen.some((s) => s.method === 'tools/call') && model.requests.length >= 2);
   await app.press('escape');
   const call = seen.find((s) => s.method === 'tools/call')!;
   expect(call.params).toEqual({ name: 'get_file_text', arguments: { path: 'src/answer.ts' } });
@@ -121,7 +115,7 @@ test('a server\'s `initialize` instructions become its tool group\'s description
   await app.press('F');
   await app.type('hi');
   await app.press('return');
-  await until(() => (((model.requests.at(-1) as { tools?: unknown[] } | undefined)?.tools) ?? []).length >= 2);
+  await settleUntil(() => (((model.requests.at(-1) as { tools?: unknown[] } | undefined)?.tools) ?? []).length >= 2);
   const sentTools = (model.requests.at(-1) as unknown as { tools: { function: { name: string; description: string } }[] }).tools;
   const getFileText = sentTools.find((t) => t.function.name === 'webstorm__get_file_text')!;
   const replaceText = sentTools.find((t) => t.function.name === 'webstorm__replace_text')!;
@@ -159,15 +153,18 @@ test('a server that failed at start connects later: its group is in the next req
     await app.press('F');
     await app.type('one');
     await app.press('return');
-    await until(() => model.requests.length >= 1);
-    const index = (i: number) => JSON.stringify(((model.requests[i] as { tools?: unknown[] } | undefined)?.tools) ?? []);
+    await settleUntil(() => model.requests.length >= 1);
+    const index = (i: number) => {
+      expect(model.requests[i], `request ${i} to the model arrived`).toBeDefined();
+      return JSON.stringify(((model.requests[i] as { tools?: unknown[] } | undefined)?.tools) ?? []);
+    };
     expect(index(0)).not.toContain('find_issue');
     up = true;
     for (let i = 0; i < 50 && !app.backend.lastFrame.includes('[mcp] tracker connected — 1 tool'); i++) { await new Promise((r) => setTimeout(r, 20)); await app.press('end'); }
     expect(app.backend.lastFrame).toContain('[mcp] tracker connected — 1 tool');
     await app.type('two');
     await app.press('return');
-    await until(() => model.requests.length >= 2);
+    await settleUntil(() => model.requests.length >= 2);
     // In the index of tools_load, the group's own heading and its tool.
     expect(index(1)).toContain('mcp:tracker');
     expect(index(1)).toContain('find_issue');
@@ -188,7 +185,7 @@ test('a server that answers 401 is not tried again: the reason names the token',
     shape.setup({ ui: {}, host: { services: { pushLog: (m: string) => lines.push(m) } } });
     // The line is written after the 401 sets the server aside; any second attempt would
     // have to precede it.
-    await until(() => lines.join('\n').includes('the server refuses the token'));
+    await settleUntil(() => lines.join('\n').includes('the server refuses the token'));
     expect(asked).toBe(1);
     expect(lines.join('\n')).toContain('tracker: not connected — HTTP 401 — the server refuses the token');
   } finally {
@@ -228,7 +225,7 @@ test('/mcp lists the servers in a panel; d disables one at once, saved, and its 
   await app.press('escape');
   await app.type('hi');
   await app.press('return');
-  await until(() => model.requests.length >= 1);
+  await settleUntil(() => model.requests.length >= 1);
   expect(JSON.stringify(model.requests.at(-1))).not.toContain('webstorm__get_file_text');
   app.app.unmount();
   // The settings file is the process's under `bun test`: what this test saved goes.
@@ -271,7 +268,10 @@ test('a server whose connect is held: the app draws at once, and a turn begun be
     await app.type('what does answer.ts export?');
     await app.press('return');
     for (let i = 0; i < 50 && model.requests.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
-    const sent = (i: number) => (((model.requests[i] as { tools?: { function: { name: string } }[] } | undefined)?.tools) ?? []).map((t) => t.function.name);
+    const sent = (i: number) => {
+      expect(model.requests[i], `request ${i} to the model arrived`).toBeDefined();
+      return (((model.requests[i] as { tools?: { function: { name: string } }[] } | undefined)?.tools) ?? []).map((t) => t.function.name);
+    };
     expect(sent(0)).not.toContain('webstorm__get_file_text');
     open();
     await (shape as { ready: Promise<unknown> }).ready;
