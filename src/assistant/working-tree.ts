@@ -246,9 +246,9 @@ function segmentOf(diff: string): { hunks: string; added: number; removed: numbe
   return { hunks: body.join('\n'), added, removed, binary: false };
 }
 
-// The panel's letter for a file no `git status` entry names — one the mode's diff
-// carries on its own (a commit added or deleted it and the worktree is clean for it) —
-// read from the file's own diff preamble.
+// A change's own letter, read from the file's diff preamble: what the mode's diff adds
+// is `A`, what it deletes is `D`, and what it changes in place is `M`. The status
+// letter covers only what the diff says nothing about.
 function preambleStatus(diff: string): 'A' | 'M' | 'D' {
   if (/^new file mode /m.test(diff)) return 'A';
   if (/^deleted file mode /m.test(diff)) return 'D';
@@ -327,29 +327,34 @@ function pastReadSize(abs: string, root: string): boolean {
   return st.size > MAX_FILE_BYTES;
 }
 
-// One file of a git top, as its own diff. An addition (staged or untracked) is diffed
-// from empty text and a deletion to empty text, so both read the way the panel draws
-// any other change; anything the mode's diff carries is git's own diff of it — `spec`
-// in the per-file fallback when the batch's answer held no segment. `fromDiff` marks
-// a file no `git status` entry names (a commit changed it and the worktree is clean):
-// it has no worktree text to synthesize from and is shown exactly as git reports it.
-async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A' | 'M' | 'D', segments: Map<string, string>, head: boolean, spec: string, fromDiff: boolean): Promise<Omit<FileDiff, 'path' | 'status'>> {
-  if (!fromDiff && status === 'A') {
+// One file of a git top, as the mode's diff sees it. What that diff carries is what
+// the mode shows: a file the commits touched keeps THEIR hunks even where the worktree
+// then deleted it, and a deletion reads against the ref the mode names. The
+// syntheses below stand in only where the diff holds nothing of the file — an
+// addition no diff lists (untracked), a deletion outside a batch that failed. An
+// addition is then diffed from empty text and a deletion to empty text, so both read
+// the way the panel draws any other change.
+async function oneFile(root: string, top: string, entry: StatusEntry, status: 'A' | 'M' | 'D', segments: Map<string, string>, head: boolean, spec: string): Promise<Omit<FileDiff, 'path' | 'status'>> {
+  if (pastReadSize(path.resolve(top, entry.path), root)) return { added: 0, removed: 0, hunks: '', note: 'too large' };
+  const own = segments.get(entry.path);
+  if (own !== undefined) {
+    const seg = segmentOf(own);
+    return { added: seg.added, removed: seg.removed, hunks: seg.hunks, ...(seg.binary ? { note: 'binary' as const } : {}) };
+  }
+  if (status === 'A') {
     const read = await readWorkingFile(path.resolve(top, entry.path), root);
     if (read && 'note' in read) return { added: 0, removed: 0, hunks: '', note: read.note };
     const d = unifiedDiff('', read ? read.text : '', FULL_DIFF);
     return { added: d.added, removed: d.removed, hunks: d.diff };
   }
-  if (!fromDiff && status === 'D') {
+  if (status === 'D') {
     if (!head) return { added: 0, removed: 0, hunks: '' };
     const read = await headFile(top, entry.path);
     if (read && 'note' in read) return { added: 0, removed: 0, hunks: '', note: read.note };
     const d = unifiedDiff(read ? read.text : '', '', FULL_DIFF);
     return { added: d.added, removed: d.removed, hunks: d.diff };
   }
-  if (pastReadSize(path.resolve(top, entry.path), root)) return { added: 0, removed: 0, hunks: '', note: 'too large' };
-  const own = segments.get(entry.path);
-  const diff = own ?? (await runGit(top, diffOne(spec, entry.path))).toString('utf8');
+  const diff = (await runGit(top, diffOne(spec, entry.path))).toString('utf8');
   const seg = segmentOf(diff);
   return { added: seg.added, removed: seg.removed, hunks: seg.hunks, ...(seg.binary ? { note: 'binary' as const } : {}) };
 }
@@ -367,10 +372,18 @@ type WalkOpts = {
 const refNameUsable = (name: string): boolean =>
   name.length > 0 && !name.startsWith('-') && !/[\s\u0000-\u001f]/.test(name);
 
+// Whether a ref name is one git could compare against: it is listed as its own name
+// under `refs/heads`, `refs/tags` or `refs/remotes`. A dangling name is no base —
+// comparing against it would fail a tree git reads just fine.
+async function refResolves(root: string, name: string): Promise<boolean> {
+  return (await listedRefs(root, [`refs/heads/${name}`, `refs/tags/${name}`, `refs/remotes/${name}`])).includes(name);
+}
+
 // What a top compares against: the caller's own ref for it (a lookup asked with the
-// top), else the top's default branch. `null` — nothing usable was named or resolved;
-// a lookup that answers `undefined` falls through to the default, and one that throws
-// is taken as answering `undefined`.
+// top), else the top's default branch. `base` is ONE REF — the branch name a picker
+// fed — and a raw SHA is not one: every name is existence-checked, and what does not
+// resolve falls through as if no ref had been named. `null` — nothing usable was
+// named or resolved; a lookup that throws is taken as answering `undefined`.
 async function baseFor(top: string, opts: WalkOpts): Promise<string | null> {
   let given: string | undefined;
   if (typeof opts.base === 'function') {
@@ -378,8 +391,8 @@ async function baseFor(top: string, opts: WalkOpts): Promise<string | null> {
   } else {
     given = opts.base;
   }
-  const chosen = given ?? (await defaultBaseRef(top));
-  return chosen !== undefined && chosen !== null && refNameUsable(chosen) ? chosen : null;
+  const chosen = given !== undefined && given !== null && refNameUsable(given) && (await refResolves(top, given)) ? given : undefined;
+  return chosen ?? (await defaultBaseRef(top));
 }
 
 // The branches a base picker lists, and what an existence check asks: the refs git
@@ -404,10 +417,7 @@ export async function defaultBaseRef(root: string): Promise<string | null> {
   try {
     const target = (await runGit(root, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).toString('utf8').trim();
     const name = target.startsWith('origin/') ? target.slice('origin/'.length) : target;
-    if (name) {
-      const known = await listedRefs(root, [`refs/heads/${name}`, `refs/tags/${name}`, `refs/remotes/${name}`]);
-      if (known.includes(name)) return name;
-    }
+    if (name && (await refResolves(root, name))) return name;
   } catch { /* no `origin/HEAD` to read */ }
   for (const name of ['main', 'master']) {
     if ((await listedRefs(root, [`refs/heads/${name}`])).includes(name)) return name;
@@ -484,15 +494,18 @@ async function headSection(root: string, top: string, tops: string[], opts: Walk
     mode === 'committed' ? (batched ? segments.has(entry.path) : entry.code !== '??') : true);
   const named = new Set(kept.map(({ entry }) => entry.path));
   const carried = [...segments.keys()]
-    .map((p) => ({ entry: { code: '', path: p }, abs: path.resolve(top, p), fromDiff: true }))
+    .map((p) => ({ entry: { code: '', path: p }, abs: path.resolve(top, p) }))
     .filter(({ entry, abs }) => !named.has(entry.path) && owns(abs));
-  const items = [...kept.map((c) => ({ ...c, fromDiff: false })), ...carried]
+  const items = [...kept, ...carried]
     .sort((a, b) => (a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0));
   const files: FileDiff[] = [];
-  for (const { entry, abs, fromDiff } of items) {
-    const status = fromDiff ? preambleStatus(segments.get(entry.path) ?? '') : statusOf(entry.code);
+  for (const { entry, abs } of items) {
+    // The diff names its own change — added, deleted, modified — and the status letter
+    // stands in only where the diff says nothing of the file.
+    const own = segments.get(entry.path);
+    const status = own !== undefined ? preambleStatus(own) : statusOf(entry.code);
     const rel = path.relative(root, abs).split(path.sep).join('/');
-    files.push({ status, path: rel, ...(await oneFile(root, top, entry, status, segments, head, spec, fromDiff)) });
+    files.push({ status, path: rel, ...(await oneFile(root, top, entry, status, segments, head, spec)) });
   }
   if (!files.length) return null;
   return { root, base, files };

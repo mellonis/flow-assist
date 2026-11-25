@@ -527,3 +527,77 @@ test('a dangling origin/HEAD never reads as a failed walk', async () => {
   expect(noBase.sections[0]!.base).toBe('');
   expect(noBase.sections[0]!.files).toEqual([]);
 });
+
+// What the mode's diff carries is what that mode shows: a file the commit touched and
+// the worktree then deleted is the COMMIT's change under `committed` and the
+// base-to-gone deletion under `branch-local` — the worktree's deletion is never the
+// committed source's answer, and a deletion always reads against the ref the mode
+// names.
+test('the mode\'s diff is what a file shows even where the worktree deleted it', async () => {
+  const root = tmpRoot();
+  git(root, 'init', '-q', '-b', 'feature');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  write(root, 'x.txt', 'one\ntwo\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'base');
+  git(root, 'branch', 'main');
+  write(root, 'x.txt', 'one\ntwo\nthree\n'); // the branch commit adds a line
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'branch commit');
+  fs.rmSync(path.join(root, 'x.txt')); // the worktree then deletes the file
+
+  // `committed` draws the commit's own hunks — the addition — and calls the file
+  // modified, never the deletion the worktree made.
+  const committedOnly = await workingTreeDiff([root], { base: 'main', mode: 'committed' });
+  const shown = byPath(committedOnly.sections[0]!.files)['x.txt']!;
+  expect(shown.status).toBe('M');
+  expect(shown.added).toBe(1);
+  expect(shown.removed).toBe(0);
+  expect(shown.hunks).toContain('+three');
+
+  // `branch-local` removes what the BASE held (two lines) — never what the commit's
+  // edit made of the file (its third line).
+  const all = await workingTreeDiff([root], { base: 'main', mode: 'branch-local' });
+  const gone = byPath(all.sections[0]!.files)['x.txt']!;
+  expect(gone.status).toBe('D');
+  expect(gone.added).toBe(0);
+  expect(gone.removed).toBe(2);
+  expect(gone.hunks).toContain('-two');
+  expect(gone.hunks).not.toContain('-three');
+
+  // `worktree` draws the deletion it is: HEAD's three lines, gone.
+  const worktreeOnly = await workingTreeDiff([root], { mode: 'worktree' });
+  const deleted = byPath(worktreeOnly.sections[0]!.files)['x.txt']!;
+  expect(deleted.status).toBe('D');
+  expect(deleted.removed).toBe(3);
+  expect(deleted.hunks).toContain('-three');
+});
+
+// The caller's `base` is ONE ref — the name a picker fed — and a ref that is not
+// there is not trusted: the walk falls to the top's default branch (and its label
+// says so), and where nothing resolves it answers the empty section the panel words —
+// never `failed`, never a clean claim over a comparison that never ran.
+test('a caller base that is gone falls through to the default, or to the empty section', async () => {
+  // A dirty top: the default branch takes the comparison and names itself in `base`.
+  const dirty = tmpRoot();
+  makeRepo(dirty, { 'a.txt': 'one\n' });
+  write(dirty, 'a.txt', 'two\n');
+  const walked = await workingTreeDiff([dirty], { base: 'gone' });
+  expect(walked.failed).toBe(false);
+  expect(walked.sections).toHaveLength(1);
+  expect(walked.sections[0]!.base).toBe('main');
+  expect(byPath(walked.sections[0]!.files)['a.txt']!.status).toBe('M');
+
+  // A clean top with no default branch at all: the empty section — the change list is
+  // honestly empty because NOTHING WAS COMPARED, not because the tree is clean.
+  const bare = tmpRoot();
+  makeRepo(bare, { 'a.txt': 'one\n' }, 'trunk');
+  const noBase = await workingTreeDiff([bare], { base: 'gone' });
+  expect(noBase.gitless).toBe(false);
+  expect(noBase.failed).toBe(false);
+  expect(noBase.sections).toHaveLength(1);
+  expect(noBase.sections[0]!.base).toBe('');
+  expect(noBase.sections[0]!.files).toEqual([]);
+});
