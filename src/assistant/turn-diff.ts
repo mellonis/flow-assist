@@ -13,11 +13,13 @@
 // Where a report goes is what its title says. A title that names a path (`~/…`, `/…`)
 // is a change to a file: it keeps the title as its path and is sectioned under the real
 // root its path lies in — a repository's top when one holds the file, the file's own
-// real location when none does — as the walk sections a git top. Any other title
-// (`ABC-1 · description`) is a change to something that is not a file: one `reported`
-// section for the turn's whole group, each report its own row keyed by its place among
-// the group (a title may repeat). The reported group goes after the path sections, as
-// the panel draws it.
+// real location when none does — as the walk sections a git top. A path the turn
+// reports again keeps every report its own row: the first is keyed by its path (a mark
+// carries across sources), a repeat by its place among the turn's reports. Any other
+// title (`ABC-1 · description`) is a change to something that is not a file: one
+// `reported` section for the turn's whole group, each report its own row keyed by its
+// place among the group (a title may repeat). The reported group goes after the path
+// sections, as the panel draws it.
 //
 // Pure: no React, no clock, no git. The only path work is `realOf` and `gitRootOf`,
 // reading where a path lies.
@@ -55,8 +57,9 @@ const expandedTitle = (title: string): string =>
 // What a report carries on its row: the title as the path the row draws (for a path
 // change the title IS the file's name, as the tool spelled it), the record's hunk text
 // as kept, and — where the record did not keep the change whole — the note and the
-// count of the lines it dropped (`note: 'cut'`). A reported row's `key` is its place
-// among the turn's reported changes, since its title may repeat.
+// count of the lines it dropped (`note: 'cut'`). A row's `key`, when given, is an
+// index: a reported row's place among the turn's reported changes, a repeated path
+// row's place among all the turn's reports — its title may repeat either way.
 const fileOf = (change: ChangeView, status: 'A' | 'M' | 'D', key?: string): FileDiff => ({
   status,
   path: change.title,
@@ -83,17 +86,27 @@ export function lastTurnChanges(messages: readonly ChatMsg[]): DiffSection[] {
   }
   const sectionsByRoot = new Map<string, DiffSection>();
   const reported: FileDiff[] = [];
+  // Titles the turn mapped once already. The FIRST row of a path keeps the
+  // path-derived key — the walk keys the same file by its path too, so a mark carries
+  // across sources — and every later row of that path is keyed by its place among the
+  // turn's reports. Two rows of one file then never share a key (their hunks stay
+  // their own; reports are never merged).
+  const seenPaths = new Set<string>();
+  let reportIndex = 0;
   for (let i = start; i < messages.length; i++) {
     for (const part of messages[i]!.parts ?? []) {
       if (part.kind !== 'change') continue;
       const change = part.change;
       const status = statusOf(change);
+      const place = reportIndex++;
       if (isPathTitle(change.title)) {
         const real = realOf(expandedTitle(change.title));
         const root = gitRootOf(real) ?? real;
         let section = sectionsByRoot.get(root);
         if (!section) { section = { root, base: '', files: [] }; sectionsByRoot.set(root, section); }
-        section.files.push(fileOf(change, status));
+        const repeat = seenPaths.has(change.title);
+        seenPaths.add(change.title);
+        section.files.push(fileOf(change, status, repeat ? `\u0000${place}` : undefined));
       } else {
         reported.push(fileOf(change, status, `\u0000${reported.length}`));
       }

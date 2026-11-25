@@ -9,6 +9,7 @@ import type { ChatMsg } from '../conversation-types.ts';
 import { changeView, CHANGE_DIFF_MAX_BYTES } from '../diff.ts';
 import type { TurnPart } from '../step.ts';
 import { lastTurnChanges } from '../turn-diff.ts';
+import { diffFileKey } from '../working-tree.ts';
 
 // ── fixture helpers ─────────────────────────────────────────────────────────
 // A scratch tree under the system temp directory. Nothing here reaches a directory
@@ -98,6 +99,35 @@ test('a reported title that repeats keeps each report its own key', () => {
     { path: 'ABC-1 · description', key: '\u00000' },
     { path: 'ABC-1 · description', key: '\u00001' },
   ]);
+});
+
+test('a path the turn reports twice keeps each report its own row and key', () => {
+  const tmp = tmpRoot();
+  const repo = repoRoot(path.join(tmp, 'repo'));
+  const sections = lastTurnChanges([
+    person('edit the file twice'),
+    assistant([
+      change(`${repo}/a.ts`, 'a\n', 'b\n'),
+      change('ABC-1 · description', 'one\n', 'two\n'),
+      change(`${repo}/a.ts`, 'b\n', 'c\n'),
+    ]),
+  ]);
+  const root = sections.find((s) => s.kind === undefined)!.root;
+  const [first, second, ...rest] = sections.find((s) => s.kind === undefined)!.files;
+  expect(rest).toEqual([]);
+  // The first keeps its path-derived key — the walk keys the same file by its path
+  // too, so a mark carries across sources. A repeat is keyed by its place among the
+  // turn's reports (the third of three), while the reported row between them keys by
+  // its own place among the turn's reported changes; the root separates the two
+  // namespaces. Either way, no two rows of one file share a key.
+  expect(first!.key).toBeUndefined();
+  expect(second!.key).toBe('\u00002');
+  expect(diffFileKey(root, first!.key ?? first!.path)).not.toBe(diffFileKey(root, second!.key ?? second!.path));
+  // Two writes, two hunks — reports are never merged.
+  expect(first!.hunks).toBe('@@ -1,1 +1,1 @@\n-a\n+b');
+  expect(second!.hunks).toBe('@@ -1,1 +1,1 @@\n-b\n+c');
+  const reportedFiles = sections.find((s) => s.kind === 'reported')!.files;
+  expect(reportedFiles.map((f) => f.key)).toEqual(['\u00000']);
 });
 
 test('a queued message mid-turn is not a boundary', () => {
