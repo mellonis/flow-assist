@@ -17,6 +17,7 @@
 - No `HOST_API` bump; no new plugin-contract surface.
 - Every test wait goes through the shared `settleUntil(ok, budget, label)` (`src/__tests__/helpers/scripted.ts`); a silent give-up fails `no-silent-waits`.
 - `git` use stays read-only: `git status`, `git diff`, `git for-each-ref`, `git symbolic-ref` only — in `working-tree.ts` and `turn-diff.ts` and their tests.
+- Fixture repos name their branch explicitly (`git init -q -b main`), or the test reads `git symbolic-ref --short HEAD` and pins that: a `vs <ref>` string never depends on the machine's `init.defaultBranch`.
 - Tests never touch a person's files: fixture repos are `git init` under `os.tmpdir()` (the existing `scratchTree`/`scratchPair` pattern), and every conversation test boots with its own temp sessions dir.
 - Verdict commands after each task: `bun run typecheck` and that task's test file(s) green.
 - Commits are conventional (`feat(diff): …`, `test(diff): …`); no `Co-Authored-By` trailer.
@@ -44,6 +45,7 @@
 
 **Files:**
 - Modify: `src/assistant/diff.ts`
+- Modify: `src/assistant/working-tree.ts` (one field: `FileDiff.key?: string` — the stable key part of a file, defaulting to `path`; a reported change's index key sets it. `diffPanelItems` and the body key by `diffFileKey(root, f.key ?? f.path)`.)
 - Modify: `src/views/modals.ts` (next to `diffPanelFileKeys`)
 - Test: `src/assistant/__tests__/diff.test.ts`, `src/views/__tests__/modals.test.ts`
 
@@ -179,7 +181,7 @@ git commit -m "feat(diff): working-tree sources — a base ref and three modes"
   - `lastTurnChanges(messages: readonly ChatMsg[]): DiffSection[]`
   - The last turn is the messages **after** the last `role === 'user' && !midTurn` message (the message that started the turn; a queued message delivered mid-turn is not a boundary). Its `kind: 'change'` parts are the reports, oldest first. No reports → `[]` (the panel words it).
   - A change whose title starts with `~/` or `/` is a **path change**: `FileDiff.path` = the title as given, `status` = `A` when `before === ''`, `D` when `after === ''`, else `M`; `root` = `gitRootOf(realOf(expanded)) ?? realOf(expanded)`; grouped per root.
-  - Every other title is a **reported change** (not a file): `FileDiff.path` = the title, `hunks` = its diff, `status` as above, all in one section `{ root: '', kind: 'reported', base: '' }`; its file keys are `diffFileKey('', '\u0000' + index)` (index among the reported changes of that turn — a title may repeat).
+  - Every other title is a **reported change** (not a file): `FileDiff.path` = the title, `key` = `'\u0000' + index` (index among the reported changes of that turn — a title may repeat), `hunks` = its diff, `status` as above, all in one section `{ root: '', kind: 'reported', base: '' }`.
   - `FileDiff` gains `note?: 'binary' | 'too large' | 'cut'` and `hidden?: number`: a change whose record was cut (Task 2's `change.hidden > 0`) carries `note: 'cut'` and `hidden` = the lines the record did not keep.
   - Section `base` for path sections: `''` (the header says `last turn`, not a ref).
 
@@ -279,7 +281,7 @@ git commit -m "feat(diff): the panel — cursor rows, source tails, reported cha
     `diffNextHunk: ']'`, `diffPrevHunk: '['`, `diffNextFile: 'down'`, `diffPrevFile: 'up'`, `diffScrollDown: 'j'`, `diffScrollUp: 'k'`, `diffPageDown: 'pagedown'`, `diffPageUp: 'pageup'`, `diffHalfPageDown: 'ctrl+d'`, `diffHalfPageUp: 'ctrl+u'`, `diffFirst: 'home'`, `diffLast: 'end'`, `diffMarkReviewed: 'm'`, `diffSinglePatch: 's'`, `diffSource: 'd'`, `diffFullscreen: 'f'`, `diffHelp: '?'`, `diffClose: 'q'`.
     (`end` is `toEnd`'s binding too: the dispatcher decides, the panel's block runs first while the panel is drawn. `escape` closes as today and gets no action name.)
   - State: `diffCursor`/`diffCursorRef: DiffCursor | null`, kept in the same ref+state pair the file cursor used.
-  - The dispatcher block (as today: after the picker's, before `isKey(host.keys.sessions)`): while `diffOpenRef.current && (diffShownRef.current || …placeholder for Task 10's fullscreen)`, and the field is empty and no y/n, question or `:` line wants the keyboard, match **only** the panel's own bindings with `isKey(host.keys[action], key)`; every other key falls through. The cursor moves (`diffNextHunk`/`diffPrevHunk`/`diffNextFile`/`diffPrevFile`/`diffFirst`/`diffLast`) call the Task 1 helpers on `diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current)`. The scroll actions use Task 5's `bodyRef`: `diffScrollDown`/`diffScrollUp` → `scrollBy(±1)`, `diffHalfPageDown`/`diffHalfPageUp` → `scrollBy(±half a viewport)` (the handle's metrics) or `scrollPage(±0.5)` if it takes fractions — pin `scrollBy` rows and compute the half in the handler; `diffPageDown`/`diffPageUp` fall through to the list as they do today (the actions exist for rebinding and forward to `scrollPage(±1)` when the fall-through would not reach them). The cursor is re-resolved after a refresh (`same fileKey + hunk → same cursor; the file row when the hunk is gone; null when the file is gone; and the refresh never scrolls unless the cursor moved` — the existing `DiffBody.carry` rule).
+  - The dispatcher block (as today: after the picker's, before `isKey(host.keys.sessions)`): while `diffOpenRef.current && (diffShownRef.current || …placeholder for Task 10's fullscreen)`, and the field is empty and no y/n, question or `:` line wants the keyboard, match **only** the panel's own bindings with `isKey(host.keys[action], key)`; every other key falls through. The cursor moves (`diffNextHunk`/`diffPrevHunk`/`diffNextFile`/`diffPrevFile`/`diffFirst`/`diffLast`) call the Task 1 helpers on `diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current)`. `diffClose` closes the viewer on `q`; `escape` keeps its stop-a-turn order (the existing comment and code stay) and closes the panel from an idle chat. The scroll actions use Task 5's `bodyRef`: `diffScrollDown`/`diffScrollUp` → `scrollBy(±1)`, `diffHalfPageDown`/`diffHalfPageUp` → `scrollBy(±half a viewport)` (the handle's metrics) or `scrollPage(±0.5)` if it takes fractions — pin `scrollBy` rows and compute the half in the handler; `diffPageDown`/`diffPageUp` fall through to the list as they do today (the actions exist for rebinding and forward to `scrollPage(±1)` when the fall-through would not reach them). The cursor is re-resolved after a refresh (`same fileKey + hunk → same cursor; the file row when the hunk is gone; null when the file is gone; and the refresh never scrolls unless the cursor moved` — the existing `DiffBody.carry` rule).
   - `caps` for the render: `Object.fromEntries(actions.map((a) => [a, host.keyCap(a)]))`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -368,7 +370,7 @@ git commit -m "feat(diff): review marks — a ✓ that survives the refresh"
 `src/__tests__/diff-panel.e2e.test.ts` (the two-file scratch repo):
 - `s shows one file and counts its place` — `s` draws `diff · 2 of 2 · vs main` for the second file and only its rows.
 - `s again gives the whole list back`, the cursor still on that file's row.
-- `down keeps stepping through the files in single mode` — pressing `↓` draws `diff · 3 of 3 …`-style headers for each file in turn.
+- `down keeps stepping through the files in single mode` — from `diff · 1 of 2 · vs main`, pressing `↓` draws `diff · 2 of 2 · vs main` and that file's rows.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -411,7 +413,7 @@ git commit -m "feat(diff): single-file mode with its 3 of 7 header"
 `src/__tests__/diff-panel.e2e.test.ts` (scratch repo with two branches and an `origin/other` remote ref):
 - `d switches sources` — `d`, `return` on `committed only` draws `vs main — committed only` and hides the uncommitted edit; `working tree only` draws `vs HEAD — working tree only` and only the edit.
 - `the base picker moves the comparison` — `d`, down to a `base` row, `return`, choose `master` on the picker → the header draws `vs master` and the walk is against it; the choice survives closing and reopening `/diff` in the same run.
-- `a repository with no default branch says so and offers the picker` — a fresh `git init` with no branches committed: the panel draws `pick a base (${cap}) to compare against` (the words without the cap spelled), never `vs HEAD` for `branch-local`.
+- `a repository with no default branch says so and offers the picker` — a fresh `git init -q -b main` with zero commits in: the panel draws the row `pick a base to compare against` (which the test asserts verbatim; the render adds the `diffSource` cap beside it, never spelled in the test), never `vs HEAD` for `branch-local`.
 - `last turn draws the turn's reports` — with a scripted write earlier in the run, `d` → `last turn` draws its file row and hunks; a change over the record cap draws `… N lines not kept`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
