@@ -6,4 +6,4 @@
 pathIgnorePatterns = ["plugins-enabled/**"]
 # Every test makes its temporary files under one run root, removed at the end, and
 # starts without the host's trust records (the helpers say why).
-preload = ["./src/__tests__/helpers/tmp-root.ts", "./src/__tests__/helpers/test-setup.ts"]
+preload = ["./src/__tests__/helpers/tmp-root.ts", "./src/__tests__/helpers/test-setup.ts", "./src/__tests__/helpers/preload-hooks.ts"]

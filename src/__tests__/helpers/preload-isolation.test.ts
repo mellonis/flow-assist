@@ -1,4 +1,4 @@
-// The preload's per-test pristine start (src/__tests__/helpers/test-setup.ts): what one
+// The preload's per-test pristine start (src/__tests__/helpers/preload-hooks.ts): what one
 // test leaves behind has no say in the next. Two contracts, split by whose act the
 // residue is. A secret set is an artifact of exercising the host — every boot builds and
 // activates one — so the start RESETS it, and this pair is what pins that. (The process's
