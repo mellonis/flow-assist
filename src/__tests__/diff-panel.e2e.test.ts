@@ -1345,6 +1345,42 @@ test('a click over the fullscreen folds its file and nothing behind it', async (
   ui.app.unmount();
 }, 20_000);
 
+test('a click over the help folds nothing in the conversation behind it', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  // The same turn as under the fullscreen: the trail it leaves (`▸ + 1 tool`) is a fold
+  // line in the conversation — the rows the help now covers.
+  model.script([{ tool: 'datetime', args: {} }], [{ text: 'Done.' }]);
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('what day is it');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  await settle(8);
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
+  await settle(6);
+  const lines = frameLines(ui);
+  const foldY = lines.findIndex((l) => l.includes('▸ + 1 tool'));
+  expect(foldY).toBeGreaterThanOrEqual(0);
+  // `?` opens the host's help over everything the chat draws.
+  await ui.press('?');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('╭─ Help');
+  // A click on the trail row's own cell — on the help that covers it — folds nothing
+  // in the conversation behind, as under the pager and the fullscreen viewer.
+  const foldX = lines[foldY]!.indexOf('▸');
+  ui.backend.mouse('down', foldX, foldY);
+  ui.backend.mouse('up', foldX, foldY);
+  await settle(6);
+  await ui.press('escape');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('▸ + 1 tool');
+  expect(ui.backend.lastFrame).not.toContain('▾ + 1 tool');
+  ui.app.unmount();
+}, 20_000);
+
 test('every key the hint row advertises acts', async () => {
   const root = scratchPair();
   const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
