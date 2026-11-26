@@ -502,6 +502,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // like the folds: nothing here is written to a session.
           const diffReviewedRef = ui.useRef<ReadonlySet<string>>(new Set<string>());
           const [diffReviewed, setDiffReviewed] = ui.useState<ReadonlySet<string>>(new Set<string>());
+          // The one-file view (`diffSinglePatch`'s `s`): just the cursor's file under a
+          // header counting its place over the files. The mode follows the cursor —
+          // every move may land on another file and the view shows that one — and the
+          // toggle puts the cursor on its file's row, which is the move the
+          // scroll-into-view carry follows. Per-process like the folds: nothing here is
+          // written to a session.
+          const diffSingleRef = ui.useRef(false);
+          const [diffSingle, setDiffSingle] = ui.useState(false);
           const diffCursorRef = ui.useRef<DiffCursor | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
@@ -1315,6 +1323,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const items = diffPanelItems(diffSectionsRef.current, folded);
               setDiffCursorTo(diffFileMove(items, { fileKey: at.fileKey, hunk: -1 }, 1));
             }
+            host.notify();
+          };
+          // `s` swaps the whole list for the cursor's file alone (`diffSinglePatch`).
+          // The cursor keeps its file and takes its file's row — or the first item's
+          // file when it has none — so the toggle is a cursor move and the carry
+          // scrolls that row into view whether the one-file view opens or closes.
+          const toggleDiffSingle = () => {
+            const at = diffCursorRef.current;
+            const items = diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current);
+            setDiffCursorTo(at ? { fileKey: at.fileKey, hunk: -1 } : diffFirstItem(items));
+            diffSingleRef.current = !diffSingleRef.current;
+            setDiffSingle(diffSingleRef.current);
             host.notify();
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
@@ -3218,13 +3238,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // scroll beside it (j/k a row, ^d/^u half a body, the page keys a page),
               // `m` marking the file the cursor rests in reviewed (it folds and the
               // cursor steps to the next file row; marked again, the mark goes and the
-              // file reopens), ⏎ folding the file the cursor is on and `q` closing the
-              // viewer. Only
-              // while the panel takes the keyboard (the gate its keys share with the exit
-              // keys: the viewer is drawn and the field is empty, no y/n, question or `:`
-              // line wants it), and only on the panel's OWN bindings — a bound action acts
-              // on its binding and no literal glyph. Every other key falls through to its
-              // usual handler untouched, so a typed message stays the field's.
+              // file reopens), `s` swapping the whole list for the cursor's file under
+              // its place in the count (a second `s` gives the list back), ⏎ folding the
+              // file the cursor is on and `q` closing the viewer. Only while the panel
+              // takes the keyboard (the gate its keys share with the exit keys: the
+              // viewer is drawn and the field is empty, no y/n, question or `:` line
+              // wants it), and only on the panel's OWN bindings — a bound action acts
+              // on its binding and no literal glyph. Every other key falls through to
+              // its usual handler untouched, so a typed message stays the field's.
               // Esc while something runs also stops it, on the first press (the rule the
               // completion list's Esc follows above): the panel is a display and the stop
               // is the person's, so the key goes on to the stop below and the panel stays.
@@ -3267,6 +3288,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The mark is the panel's own: `m` marks the file the cursor rests in
                   // reviewed, on its binding alone.
                   if (isKey(host.keys.diffMarkReviewed ?? [], key)) { markDiffReviewed(); return true; }
+                  // The one-file view is the panel's own too: `s` swaps the list for
+                  // the cursor's file, on its binding alone.
+                  if (isKey(host.keys.diffSinglePatch ?? [], key)) { toggleDiffSingle(); return true; }
                   // The offer is the host's recovery from a limit and outranks a fold: the
                   // field's own row says `⏎ continue`, so ⏎ is the field's then.
                   if (key.name === 'return' && !key.ctrl && !key.meta && !conv.continueOffer) { toggleDiffFile(); return true; }
@@ -3715,7 +3739,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               cursor: diffCursor,
               source: 'branch-local' as const,
               reviewed: diffReviewed,
-              single: false,
+              single: diffSingle,
               // Every action's own cap — what `config.keys` moved it to, if anything —
               // keyed as the panel's hint reads them (`host.keyCap` per action), plus the
               // one fixed key the hint names: `escape` closes the viewer from an idle chat

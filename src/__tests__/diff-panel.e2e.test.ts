@@ -766,3 +766,135 @@ test('m marks the file the cursor rests in, and clamps at the end', async () => 
   expect(inverseAt(ui, 'b.txt')).toBe(true);
   ui.app.unmount();
 }, 15_000);
+
+// ─── the one-file view: `s` ──────────────────────────────────────────────────
+// `s` swaps the whole list for the cursor's file alone and counts its place over
+// the files (`diff · 2 of 2`). The mode follows the cursor: ↑/↓ step the file
+// rows, `]` may land on the next file's hunk and `m` steps to the next file —
+// the shown file is whichever file the cursor rests in. The toggle is a cursor
+// move for the scroll-into-view carry: the cursor takes its file's row and the
+// view follows it either way.
+
+test('s shows one file and counts its place', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // The second file's row, then `s`: the header counts that file's place over the
+  // two, and only that file's rows are drawn.
+  await ui.press('down');
+  await ui.press('s');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 2 of 2 · vs main');
+  expect(frame).toContain('b.txt');
+  expect(frame).toContain('+beta-change');
+  expect(frame).not.toContain('a.txt');
+  expect(frame).not.toContain('+alpha-change');
+  // The single header stands for the section header — never a doubled count.
+  expect(frame).not.toContain('diff · 2 files');
+  // The key is the panel's: none of it is typed into the field.
+  expect(frame).not.toContain('› s');
+  ui.app.unmount();
+}, 15_000);
+
+test('s again gives the whole list back', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('down');
+  await ui.press('s');
+  // The mode must be SEEN before the second `s` gives anything back — a panel that
+  // never took the list away passes every after-state assertion here.
+  expect(ui.backend.lastFrame).toContain('diff · 2 of 2 · vs main');
+  expect(ui.backend.lastFrame).not.toContain('a.txt');
+  await ui.press('s');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 2 files');
+  expect(frame).toContain('a.txt');
+  expect(frame).toContain('+alpha-change');
+  expect(frame).toContain('b.txt');
+  expect(frame).toContain('+beta-change');
+  // The cursor is on the file the one-file view showed: its row, still lit.
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  expect(inverseAt(ui, 'a.txt')).toBe(false);
+  ui.app.unmount();
+}, 15_000);
+
+test('down keeps stepping through the files in single mode', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('s');
+  expect(ui.backend.lastFrame).toContain('diff · 1 of 2 · vs main');
+  // ↓ steps to the next file row and the one-file view shows THAT file.
+  await ui.press('down');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 2 of 2 · vs main');
+  expect(frame).toContain('b.txt');
+  expect(frame).toContain('+beta-change');
+  expect(frame).not.toContain('a.txt');
+  expect(frame).not.toContain('+alpha-change');
+  ui.app.unmount();
+}, 15_000);
+
+test('a hunk move off the shown file lands on the next file\'s hunk and the view follows', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('s');
+  expect(ui.backend.lastFrame).toContain('diff · 1 of 2 · vs main');
+  // The first `]` takes the shown file's own hunk; the next lands on the
+  // neighbour's hunk — same walk as across files, and the view follows.
+  await ui.press(']');
+  expect(ui.backend.lastFrame).toContain('diff · 1 of 2 · vs main');
+  await ui.press(']');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('diff · 2 of 2 · vs main');
+  expect(frame).toContain('b.txt');
+  expect(frame).toContain('+beta-change');
+  expect(frame).not.toContain('a.txt');
+  ui.app.unmount();
+}, 15_000);
+
+test('m in single mode marks the shown file and its advance shows the next', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('s');
+  expect(ui.backend.lastFrame).toContain('diff · 1 of 2 · vs main');
+  // `m` marks the shown file reviewed: it folds and the cursor steps to the next
+  // file row — which is the file the one-file view now shows.
+  await ui.press('m');
+  expect(ui.backend.lastFrame).toContain('diff · 2 of 2 · vs main');
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  expect(ui.backend.lastFrame).not.toContain('+alpha-change');
+  // The last file, marked from its own row: the step is clamped and the view stays.
+  await ui.press('m');
+  expect(rowWith(ui, 'b.txt')).toContain('▸ ✓ M b.txt · +1 −1');
+  expect(ui.backend.lastFrame).toContain('diff · 2 of 2 · vs main');
+  ui.app.unmount();
+}, 15_000);
+
+test('a mode toggle takes the cursor to its file\'s row and the view follows it', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // Deep in the first file: the cursor rests on its second hunk.
+  await ui.press(']');
+  await ui.press(']');
+  expect(inverseAt(ui, 'a19')).toBe(true);
+  // `s` enters the one-file view on the cursor's file — and the toggle is a cursor
+  // move: the cursor takes the file's row, and the identity-keyed carry scrolls
+  // that row into view where it is now drawn.
+  await ui.press('s');
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  expect(litInPanel(ui)).toContain('a.txt');
+  // Leaving again from a hunk of the shown file is the same move the other way:
+  // the whole list is back and the cursor's file row is the one on screen.
+  await ui.press(']');
+  expect(inverseAt(ui, '+alpha-head')).toBe(true);
+  await ui.press('s');
+  expect(ui.backend.lastFrame).toContain('diff · 2 files');
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  expect(litInPanel(ui)).toContain('a.txt');
+  ui.app.unmount();
+}, 15_000);
