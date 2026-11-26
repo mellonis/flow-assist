@@ -2303,6 +2303,7 @@ export function renderChatModal({
   pickerOwn = 'idle',
   panel = null,
   diffPanel = null,
+  diffBody,
   model,
   hover = false,
   onPickRow,
@@ -2467,6 +2468,9 @@ export function renderChatModal({
   // `/diff`: the working tree in a panel of its own — beside the conversation, or below
   // the field strip on a terminal too narrow for two halves (null — closed).
   diffPanel?: DiffPanelView | null;
+  // The chat's key handler reaches the panel's list scroll through this object: the
+  // render hands it on and the list fills it with its live methods (`bodyRef`).
+  diffBody?: DiffBodyScroll;
 }) {
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
   // it, and the picker comes back once it is answered. So for a plugin's panel.
@@ -2535,6 +2539,9 @@ export function renderChatModal({
           // The body hears PgUp/PgDn and the wheel while the chat has the keyboard and
           // nothing stands in the conversation's place.
           scroll: { isActive: !!focused && !pager && !watch && !base.hidden },
+          // The chat's key handler reaches this list's scroll through `diffBody`: the
+          // body fills it with the list's live methods.
+          bodyRef: diffBody,
         }))
     : null;
   // The background badge of the hint row: the `↓` door and the number of rows it opens
@@ -3563,6 +3570,11 @@ function DiffBody({ rows, cursorRow, isActive, bodyRef }: {
     const top = Math.max(0, Math.min(x.maxScrollTop, want));
     if (top !== x.scrollTop) box.current?.scrollTo(top);
   };
+  // A cursor move is carried at once, right after the commit: a move alone leaves the
+  // metrics unchanged, and the `onMetrics` call below would hold the move back and play
+  // it out late — under a refresh, away from where the person reads. `carry` reads the
+  // move, so a render that made none scrolls nothing.
+  useEffect(() => { carry(); });
   return h(ScrollList<ReactNode>, {
     ref: box,
     isActive,

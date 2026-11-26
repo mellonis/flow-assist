@@ -55,10 +55,10 @@ test(':help shows keys and commands, inside the screen, each command once', asyn
   expect(frame).not.toContain('undefined');
   // …and `view` / `back`, which did nothing, are gone from it.
   expect(frame).not.toMatch(/^\s*│\s+(view|back)\b/m);
-  // PgDn reaches what is below the frame.
+  // PgDn reaches what is below the frame — however far down the list keeps it: the
+  // keys the plugin binds grow the list before the commands.
   expect(frame).not.toContain('keycaps [on|off]');
-  await ui.press('pagedown');
-  await ui.press('pagedown');
+  for (let pages = 0; pages < 20 && !ui.backend.lastFrame.includes('keycaps [on|off]'); pages++) await ui.press('pagedown');
   expect(ui.backend.lastFrame).toContain('keycaps [on|off]');
   await ui.press('escape');
   expect(ui.backend.lastFrame).not.toContain('╭─ Help');

@@ -39,7 +39,7 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentsPanelRows, stopQuestion } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffPanelFileKeys, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelItems, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, type DiffBodyScroll, type DiffCursor, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -176,6 +176,14 @@ type BuildAssistantParams = {
 
 // The pager of a background shell: the one block of the synthetic list its output stands in.
 const JOB_PAGER_ID = '0:view:0';
+// Every `/diff` viewer action the plugin's `keys` table binds. The dispatcher matches
+// them on their bindings alone (`isKey` — `config.keys.<action>` moves any) and the
+// caps the hint draws come from these same names (`host.keyCap`).
+const DIFF_ACTIONS = [
+  'diffNextHunk', 'diffPrevHunk', 'diffNextFile', 'diffPrevFile', 'diffFirst', 'diffLast',
+  'diffScrollDown', 'diffScrollUp', 'diffHalfPageDown', 'diffHalfPageUp', 'diffPageDown', 'diffPageUp',
+  'diffMarkReviewed', 'diffSinglePatch', 'diffSource', 'diffFullscreen', 'diffHelp', 'diffClose',
+] as const;
 // That list: one `!command`-like message with a console view of what the job has printed
 // (its tail, as a view keeps it), live while it runs.
 function jobMessages(job: ShellJob): ChatMsg[] {
@@ -220,7 +228,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // field), and `/work` opens the same panel from inside the chat.
     // `toEnd` (End) brings the conversation back to its end from wherever it was
     // scrolled to — when End has nothing to do in the field (see the chat's handler).
-    keys: { chat: 'F', sessions: 'ctrl+s', work: 'J', details: ['ctrl+o', 'ctrl+r'], toEnd: 'end', chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
+    // The `diff*` actions are the `/diff` viewer's keyboard, over its own panel while
+    // the field is empty (the chat's handler decides both — and its diff block runs
+    // before `toEnd`, so `end` over a drawn panel goes to the walk's last row).
+    // `escape` is no action of its own: it stops a running turn first and closes the
+    // panel from an idle chat.
+    keys: {
+      chat: 'F', sessions: 'ctrl+s', work: 'J', details: ['ctrl+o', 'ctrl+r'], toEnd: 'end', chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\',
+      diffNextHunk: ']', diffPrevHunk: '[', diffNextFile: 'down', diffPrevFile: 'up',
+      diffScrollDown: 'j', diffScrollUp: 'k', diffPageDown: 'pagedown', diffPageUp: 'pageup',
+      diffHalfPageDown: 'ctrl+d', diffHalfPageUp: 'ctrl+u', diffFirst: 'home', diffLast: 'end',
+      diffMarkReviewed: 'm', diffSinglePatch: 's', diffSource: 'd', diffFullscreen: 'f', diffHelp: '?', diffClose: 'q',
+    },
     // config.plugins.assistant: `mode` — where the chat is (src/runtime/panel-layout.ts):
     // `panel` beside the plugin's screen (the default), `window` over it, `full` the
     // whole terminal; `/mode` switches it for the session, and an old `fullscreen: true`
@@ -467,17 +486,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); host.notify(); };
           // `/diff`: the working tree in a panel of the chat's own, beside the conversation
           // or under the field. The refs are the key handler's and the walk's; the states are
-          // the render's. The folded files and the cursor are keyed `diffFileKey(root, path)`
-          // and outlive a refresh and a toggle: a file that stays changed stays folded where
-          // the person put it.
+          // the render's. The folded files are keyed `diffFileKey(root, path)`, the cursor is
+          // that key plus its hunk — both outlive a refresh and a toggle: a file that stays
+          // changed stays folded where the person put it.
           const diffOpenRef = ui.useRef(false);
           const [diffOpen, setDiffOpenState] = ui.useState(false);
           const diffSectionsRef = ui.useRef<DiffSection[]>([]);
           const [diffSections, setDiffSections] = ui.useState<DiffSection[]>([]);
           const diffCollapsedRef = ui.useRef<ReadonlySet<string>>(new Set<string>());
           const [diffCollapsed, setDiffCollapsed] = ui.useState<ReadonlySet<string>>(new Set<string>());
-          const diffCursorRef = ui.useRef<string | null>(null);
-          const [diffCursor, setDiffCursor] = ui.useState<string | null>(null);
+          const diffCursorRef = ui.useRef<DiffCursor | null>(null);
+          const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
           // Whether the scope stands outside git entirely: the empty panel's answer is
           // `not a git repository`, not `no changes in the working tree`.
@@ -490,8 +509,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the same rows, and flipping the line back and forth each second reads as work.
           const diffLoadedRef = ui.useRef(false);
           // Whether the panel is drawn at all this render: `chatRoom` gives it no rows when
-          // the terminal is too small for the split, and its keys wait for the rows.
+          // the terminal is too small for the split, and its keys wait for the rows. With the
+          // panel fullscreen over the terminal (`diffFullRef`) the split says nothing — the
+          // keys' drawn condition is either shape.
           const diffShownRef = ui.useRef(false);
+          const diffFullRef = ui.useRef(false);
+          // The rows the panel's body draws in — the split's height less its frame and hint
+          // row. The half-page key is half of it: rows, computed in the key handler from
+          // this draw's measure (`renderDiffPanel`'s scroll seam is rows and pages).
+          const diffBodyRowsRef = ui.useRef(0);
+          // The one channel from the key handler to the panel's list scroll. The chat hands
+          // the object over and the body fills it with the list's live methods (the seam
+          // `renderDiffPanel` calls `bodyRef`).
+          const diffBodyRef = ui.useRef<DiffBodyScroll>({ scrollBy: () => {}, scrollPage: () => {} });
           // `/sessions` and the `sessions` key: the picker, drawn in the conversation's
           // place (src/assistant/session-picker.ts). The ref is for the key handler, the
           // state for the render; null — closed.
@@ -1152,11 +1182,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A diff is text a token may sit in — a config, a script, a log — so it is
               // redacted before it reaches the state the panel draws from.
               const sections = redactDeep(raw);
-              // The file the cursor was on stays the cursor while it is still there, and
-              // a tree that lost it moves the cursor to the first file drawn.
-              const keys = diffPanelFileKeys(sections);
+              // Where the cursor rests is re-found on every walk: the same pair while the
+              // walk still draws it, the file's row when only its hunk went, and nothing at
+              // all when the file itself is gone. The first walk of an open panel — nothing
+              // to re-find — puts it on the first file's row.
               const at = diffCursorRef.current;
-              const cursor = at && keys.includes(at) ? at : keys[0] ?? null;
+              const items = diffPanelItems(sections, diffCollapsedRef.current);
+              const cursor = at === null
+                ? (diffLoadedRef.current ? null : items.find((it) => it.hunk === -1) ?? items[0] ?? null)
+                : items.some((it) => it.fileKey === at.fileKey && it.hunk === at.hunk) ? at
+                : items.some((it) => it.fileKey === at.fileKey && it.hunk === -1) ? { fileKey: at.fileKey, hunk: -1 }
+                : null;
               diffSectionsRef.current = sections;
               setDiffSections(sections);
               setDiffGitless(gitless);
@@ -1216,23 +1252,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             host.notify();
           };
           const toggleDiff = () => (diffOpenRef.current ? closeDiff() : openDiff());
-          // ↑/↓ walk the files the panel shows, in the order it draws them.
-          const moveDiffCursor = (delta: number) => {
-            const keys = diffPanelFileKeys(diffSectionsRef.current);
-            if (!keys.length) return;
-            const at = diffCursorRef.current;
-            const i = at ? keys.indexOf(at) : -1;
-            const next = keys[i < 0 ? (delta > 0 ? 0 : keys.length - 1) : Math.max(0, Math.min(keys.length - 1, i + delta))]!;
-            diffCursorRef.current = next;
-            setDiffCursor(next);
+          // Where the cursor rests next: ONE walk over the rows it rests on (a file's row,
+          // then one per hunk start), moved by Task 1's helpers from where it is.
+          const setDiffCursorTo = (cursor: DiffCursor | null) => {
+            if (cursor === diffCursorRef.current) return;
+            diffCursorRef.current = cursor;
+            setDiffCursor(cursor);
             host.notify();
+          };
+          // ↑/↓ walk the file rows and ]/[ the hunk starts, over the items `diffPanelItems`
+          // answers — the rows of interest in the order the panel draws them. A move past
+          // either end stays put.
+          const moveDiffCursor = (kind: 'file' | 'hunk', step: number) => {
+            const items = diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current);
+            setDiffCursorTo(kind === 'file' ? diffFileMove(items, diffCursorRef.current, step) : diffHunkMove(items, diffCursorRef.current, step));
           };
           // A click on a file's block folds it — the fold a person reaches for without
           // knowing a key — and puts the cursor on that file, so ↑/↓ walk on from where
           // they are looking.
           const foldDiffFile = (key: string) => {
-            diffCursorRef.current = key;
-            setDiffCursor(key);
+            setDiffCursorTo({ fileKey: key, hunk: -1 });
             const next = new Set(diffCollapsedRef.current);
             if (next.has(key)) next.delete(key); else next.add(key);
             diffCollapsedRef.current = next;
@@ -1242,7 +1281,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // ⏎ folds the file the cursor is on, or opens it again.
           const toggleDiffFile = () => {
             const at = diffCursorRef.current;
-            if (at) foldDiffFile(at);
+            if (at) foldDiffFile(at.fileKey);
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
           // plugin has the field's strip and nothing left over, and a terminal too small
@@ -2679,6 +2718,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // spells — the work picker's `ctrl+d` kill — is the panel's key, never the
             // exit arm's, and goes on to the panel below. Everything else arms as ever.
             if (panelRef.current && panelKeys(panelRef.current).some((def) => def.key.includes('+') && isKey(canonicalBinding(def.key), key))) return 'field';
+            // The diff panel's own chord — the half-page `^d` — is the panel's key whenever
+            // the panel takes the keyboard: it scrolls the panel and never arms the exit,
+            // as a plugin panel's chord does.
+            if (diffTakesKeys() && DIFF_ACTIONS.some((a) => isKey(host.keys[a] ?? [], key))) return 'field';
             if (key.name === 'd' && inputRef.current !== '') return 'field';
             return undefined;
           };
@@ -2697,6 +2740,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return o && o.path.length ? o : null;
           };
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
+          // Whether the diff panel takes the keyboard now — the ONE gate its keys share:
+          // the viewer is drawn (its split, or its fullscreen shape) and nobody else wants
+          // the keyboard — the field is empty, and no y/n, question or `:` line stands over
+          // the panel. The dispatcher reads it and so do the exit keys: a key the panel
+          // takes never arms them.
+          const diffTakesKeys = (): boolean =>
+            diffOpenRef.current && (diffShownRef.current || diffFullRef.current)
+            && fieldEmpty() && !conv.confirm && !conv.question && !childAskNow() && !hostKeys().line;
           // The typing grace a question owes the person's sentence (ask-children-spec.md
           // (subagent y/n)): it takes the keyboard only once the last key the chat took is
           // older than ASK_GRACE_MS, and never while the `:` line is open — a half-written
@@ -3128,23 +3179,57 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (step.action) pickerAction(step.action);
                 return true;
               }
-              // The diff panel: Esc closes it, ↑/↓ walk its files and ⏎ folds one — only
-              // while it is drawn and the field is empty, so a typed message stays the
-              // field's. Every other key falls through to its usual handler.
+              // The diff panel: one walk of its rows under the cursor — ]/[ the hunk
+              // starts, ↑/↓ the file rows, Home/End the ends of the walk — and a free
+              // scroll beside it (j/k a row, ^d/^u half a body, the page keys a page),
+              // ⏎ folding the file the cursor is on and `q` closing the viewer. Only
+              // while the panel takes the keyboard (the gate its keys share with the exit
+              // keys: the viewer is drawn and the field is empty, no y/n, question or `:`
+              // line wants it), and only on the panel's OWN bindings — a bound action acts
+              // on its binding and no literal glyph. Every other key falls through to its
+              // usual handler untouched, so a typed message stays the field's.
               // Esc while something runs also stops it, on the first press (the rule the
               // completion list's Esc follows above): the panel is a display and the stop
               // is the person's, so the key goes on to the stop below and the panel stays.
-              // ↑/↓ and ⏎ are consumed while the panel is drawn even when it has no file to
+              // ↑/↓ and ⏎ are consumed while the panel is drawn even when it has no row to
               // move to: the panel owns them, and falling through would walk the history
               // under a panel that says `↑↓ file`.
               if (diffOpenRef.current) {
                 if (key.name === 'escape' && !conv.canStop()) { closeDiff(); return true; }
-                if (diffShownRef.current && fieldEmpty() && !key.ctrl && !key.meta) {
-                  if (key.name === 'up') { moveDiffCursor(-1); return true; }
-                  if (key.name === 'down') { moveDiffCursor(1); return true; }
+                if (diffTakesKeys()) {
+                  const moveHunk = (step: number) => { moveDiffCursor('hunk', step); return true; };
+                  const moveFile = (step: number) => { moveDiffCursor('file', step); return true; };
+                  if (isKey(host.keys.diffNextHunk ?? [], key)) return moveHunk(1);
+                  if (isKey(host.keys.diffPrevHunk ?? [], key)) return moveHunk(-1);
+                  if (isKey(host.keys.diffNextFile ?? [], key)) return moveFile(1);
+                  if (isKey(host.keys.diffPrevFile ?? [], key)) return moveFile(-1);
+                  if (isKey(host.keys.diffFirst ?? [], key)) {
+                    setDiffCursorTo(diffFirstItem(diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current)));
+                    return true;
+                  }
+                  if (isKey(host.keys.diffLast ?? [], key)) {
+                    setDiffCursorTo(diffLastItem(diffPanelItems(diffSectionsRef.current, diffCollapsedRef.current)));
+                    return true;
+                  }
+                  // The free scroll goes through the seam the render fills with the list's
+                  // own methods (`bodyRef`); `scrollBy`'s unit is rows, `scrollPage`'s a
+                  // viewport. The page keys reach a drawn list natively first (a ScrollList
+                  // hears `pagedown`/`pageup` itself) — the bindings exist for a person who
+                  // rebinds them to a key the list does not know, where only this
+                  // forwarding reaches the scroll at all.
+                  // Half a body in rows: the split's height less the frame's border and its
+                  // hint row, halved — the measure this draw made of the panel.
+                  const half = Math.max(1, Math.floor(Math.max(0, diffBodyRowsRef.current) / 2));
+                  if (isKey(host.keys.diffScrollDown ?? [], key)) { diffBodyRef.current.scrollBy(1); return true; }
+                  if (isKey(host.keys.diffScrollUp ?? [], key)) { diffBodyRef.current.scrollBy(-1); return true; }
+                  if (isKey(host.keys.diffHalfPageDown ?? [], key)) { diffBodyRef.current.scrollBy(half); return true; }
+                  if (isKey(host.keys.diffHalfPageUp ?? [], key)) { diffBodyRef.current.scrollBy(-half); return true; }
+                  if (isKey(host.keys.diffPageDown ?? [], key)) { diffBodyRef.current.scrollPage(1); return true; }
+                  if (isKey(host.keys.diffPageUp ?? [], key)) { diffBodyRef.current.scrollPage(-1); return true; }
+                  if (isKey(host.keys.diffClose ?? [], key)) { closeDiff(); return true; }
                   // The offer is the host's recovery from a limit and outranks a fold: the
                   // field's own row says `⏎ continue`, so ⏎ is the field's then.
-                  if (key.name === 'return' && !conv.continueOffer) { toggleDiffFile(); return true; }
+                  if (key.name === 'return' && !key.ctrl && !key.meta && !conv.continueOffer) { toggleDiffFile(); return true; }
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
@@ -3587,13 +3672,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             diffPanel: diffOpen ? {
               sections: diffSections,
               collapsed: diffCollapsed,
-              cursor: diffCursor ? { fileKey: diffCursor, hunk: -1 } : null,
+              cursor: diffCursor,
               source: 'branch-local' as const,
               reviewed: new Set<string>(),
               single: false,
-              caps: {},
+              // Every action's own cap — what `config.keys` moved it to, if anything —
+              // keyed as the panel's hint reads them (`host.keyCap` per action), plus the
+              // one fixed key the hint names: `escape` closes the viewer from an idle chat
+              // and is no action of its own, so its glyph is `keyGlyph`'s.
+              caps: {
+                ...Object.fromEntries(DIFF_ACTIONS.map((a) => [a, host.keyCap(a)])),
+                escape: keyGlyph({ name: 'escape' }),
+              },
               loading: diffLoading, gitless: diffGitless, failed: diffFailed, onFold: foldDiffFile,
             } : null,
+            // The key handler's one channel to the panel's list scroll, handed over for
+            // the render to fill (`renderDiffPanel`'s `bodyRef`).
+            diffBody: diffBodyRef.current,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),
@@ -3686,6 +3781,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const room = chatRoom(chatProps as unknown as Parameters<typeof chatRoom>[0]);
           // Whether the panel is drawn: the split the layout gave, which the key handlers read.
           diffShownRef.current = !!room.split && (room.split.mode === 'side' || room.split.diff.height > 0);
+          // The rows the panel's body draws in this layout — the pane's height less its
+          // frame and the hint row — for the half-page key's rows.
+          diffBodyRowsRef.current = room.split ? room.split.diff.height - 3 : 0;
           // The conversation's rows are laid out at its half while the panel stands beside
           // them — the measure `renderChatModal` draws them at — so a click's row
           // arithmetic, an anchor and the pager's `blockRows` act on what the screen shows.

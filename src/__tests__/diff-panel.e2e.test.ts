@@ -38,11 +38,11 @@ const scratchTree = () => {
   fs.writeFileSync(path.join(root, 'a.txt'), 'one\nchanged\n');
   return root;
 };
-const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
+const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>, openOn = 'diff · 1 file') => {
   await ui.press('F');
   await ui.type('/diff');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
+  await settleUntil(() => ui.backend.lastFrame.includes(openOn));
 };
 // The header names what is compared against: the branch the walk resolved as the
 // base — `main` in these fixtures — never a `HEAD` hardcoded in the row.
@@ -445,5 +445,190 @@ test('an open panel follows a cd', async () => {
   expect(frame).toContain('+beta-change');
   expect(frame).not.toContain('+alpha-change');
   expect(frame).not.toContain('+outer-change');
+  ui.app.unmount();
+}, 15_000);
+
+// ─── the viewer's keys ─────────────────────────────────────────────────────────
+// The keyboard over ONE walk of the panel's rows: ]/[ the hunks, ↑/↓ the file rows,
+// j/k free scroll, Home/End the ends. One fixture for it — a file edited at two
+// places (two hunks) and a second file with one change, a walk tall enough that
+// scrolling has rows to move and a cursor move can rest on a row out of view.
+const scratchWalk = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-walk-')));
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  const lines = Array.from({ length: 40 }, (_, i) => `a${String(i + 1).padStart(2, '0')}`);
+  fs.writeFileSync(path.join(root, 'a.txt'), `${lines.join('\n')}\n`);
+  fs.writeFileSync(path.join(root, 'b.txt'), 'b01\nb02\nb03\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'init');
+  // The file is edited at two places: a line added at the top, a block rewritten
+  // near the end. The two hunks are the walk's two stops on this file.
+  const out = ['alpha-head', ...lines.slice(0, 21), ...Array.from({ length: 12 }, (_, i) => `tail${String(i + 1).padStart(2, '0')}`), ...lines.slice(33)];
+  fs.writeFileSync(path.join(root, 'a.txt'), `${out.join('\n')}\n`);
+  fs.writeFileSync(path.join(root, 'b.txt'), 'b01\nbeta\nb03\n');
+  return root;
+};
+// What the panel's box draws is read off the frame as a person sees it: the body's
+// first visible row is under the panel's top border (the frame's last `╭`), and the
+// cursor's row is the one cell drawn inverse. The grid — not the text — is what says
+// which row is lit: a row's words alone cannot.
+const frameLines = (ui: Awaited<ReturnType<typeof bootApp>>) => ui.backend.lastFrame.split('\n');
+const cell = (ui: Awaited<ReturnType<typeof bootApp>>, x: number, y: number) =>
+  (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { inverse?: boolean } } } }).lastBuffer.get(x, y);
+const bodyTop = (ui: Awaited<ReturnType<typeof bootApp>>) => {
+  const lines = frameLines(ui);
+  // The scrollbar mounts on the first scroll and paints a thumb cell of its own: for a
+  // row to be "the same row" that cell is not part of the claim.
+  return lines[lines.findLastIndex((l) => l.includes('╭')) + 1]!.replace(/[█░]/g, ' ');
+};
+const inverseAt = (ui: Awaited<ReturnType<typeof bootApp>>, text: string) => {
+  const lines = frameLines(ui);
+  for (let y = 0; y < lines.length; y++) {
+    const x = lines[y]!.indexOf(text);
+    if (x >= 0 && cell(ui, x, y)?.style?.inverse) return true;
+  }
+  return false;
+};
+// The lit row inside the panel's box, or '' when no row is lit — the cursor's own
+// mark, and nothing else on the screen wears it.
+const litInPanel = (ui: Awaited<ReturnType<typeof bootApp>>) => {
+  const lines = frameLines(ui);
+  const top = lines.findLastIndex((l) => l.includes('╭'));
+  for (let y = top + 1; y < lines.length; y++) {
+    if (lines[y]!.includes('╰')) return '';
+    for (let x = 0; x < lines[y]!.length; x++) if (cell(ui, x, y)?.style?.inverse) return lines[y]!;
+  }
+  return '';
+};
+
+test('] and [ walk hunks across files', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // The panel opens on the walk's first cursor position: the first file's own row.
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  // Each `]` lights the next hunk's first row — across the file's two hunks and on
+  // into the second file — and the drawn frame shows the lit row each time.
+  await ui.press(']');
+  expect(inverseAt(ui, '+alpha-head')).toBe(true);
+  expect(inverseAt(ui, 'a.txt')).toBe(false);
+  await ui.press(']');
+  expect(inverseAt(ui, 'a19')).toBe(true);
+  await ui.press(']');
+  expect(inverseAt(ui, 'b01')).toBe(true);
+  expect(litInPanel(ui)).toContain('b01');
+  // `[` walks the same walk back.
+  await ui.press('[');
+  expect(inverseAt(ui, 'a19')).toBe(true);
+  await ui.press('[');
+  expect(inverseAt(ui, '+alpha-head')).toBe(true);
+  ui.app.unmount();
+}, 15_000);
+
+test('up and down walk the file rows', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // Clamped at the first file's row: ↑ has nowhere before it.
+  await ui.press('up');
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  await ui.press('down');
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  expect(inverseAt(ui, 'a.txt')).toBe(false);
+  // Clamped at the last file's row.
+  await ui.press('down');
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  ui.app.unmount();
+}, 15_000);
+
+test('j and k scroll without moving the cursor', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  const top = bodyTop(ui);
+  const field = frameLines(ui).find((l) => l.includes('⏎ send · ⇧⏎'))!;
+  await ui.press('j');
+  // The rows moved — and the cursor's row is the same one, still lit.
+  expect(bodyTop(ui)).not.toBe(top);
+  expect(litInPanel(ui)).toContain('a.txt');
+  await ui.press('k');
+  expect(bodyTop(ui)).toBe(top);
+  expect(litInPanel(ui)).toContain('a.txt');
+  // The letters are the panel's: nothing of them is typed into the field.
+  expect(frameLines(ui).find((l) => l.includes('⏎ send · ⇧⏎'))).toBe(field);
+  ui.app.unmount();
+}, 15_000);
+
+test('home and end go to the ends of the diff', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('end');
+  expect(litInPanel(ui)).toContain('b01');
+  await ui.press('home');
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  expect(inverseAt(ui, 'b01')).toBe(false);
+  ui.app.unmount();
+}, 15_000);
+
+test('the panel takes its keys only from an empty field', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  const top = bodyTop(ui);
+  // With an empty field the panel's keys act: `j` scrolls the rows, and nothing of it
+  // is typed — the field still shows the `⏎ send` row it draws empty.
+  await ui.press('j');
+  expect(bodyTop(ui)).not.toBe(top);
+  expect(ui.backend.lastFrame).toContain('⏎ send · ');
+  expect(ui.backend.lastFrame).not.toContain('› j');
+  // A draft is the field's: the same keystroke types into it and nothing scrolls.
+  await ui.type('a');
+  const top2 = bodyTop(ui);
+  await ui.press('j');
+  expect(ui.backend.lastFrame).toContain('› aj');
+  expect(bodyTop(ui)).toBe(top2);
+  ui.app.unmount();
+}, 15_000);
+
+test('ctrl+d pages the panel and never arms the exit', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  const top = bodyTop(ui);
+  const consumed = ui.backend.press({ name: 'd', ctrl: true });
+  await settle();
+  // The half page moved the rows, and the arm never came up: this ^d is the
+  // panel's, while the panel takes the keyboard.
+  expect(consumed).toBe(true);
+  expect(bodyTop(ui)).not.toBe(top);
+  expect(ui.backend.lastFrame).not.toContain('again to exit');
+  ui.app.unmount();
+}, 15_000);
+
+test('a refresh that takes the cursor\'s file leaves the panel where the person reads', async () => {
+  const root = scratchWalk();
+  // The file that goes away under the cursor is a NEW one — untracked, so the walk
+  // lists it only while it is on disk and a deletion takes its rows with it. It sits
+  // between the two changed files (`git status` orders by path), so the walk keeps
+  // rows below it and the viewport has a place to stay.
+  fs.writeFileSync(path.join(root, 'a2.txt'), 'x01\nx02\n');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 3 files');
+  // The cursor on that file's row: the view follows it there, and it is what the
+  // person is reading when it goes away.
+  await ui.press('down');
+  await settleUntil(() => ui.backend.lastFrame.includes('a2.txt'));
+  expect(litInPanel(ui)).toContain('a2.txt');
+  const top = bodyTop(ui);
+  fs.rmSync(path.join(root, 'a2.txt'));
+  await settleUntil(() => !ui.backend.lastFrame.includes('a2.txt'), 8000);
+  // The cursor is cleared — the row it rested on is gone — and the person's place in
+  // the walk is exactly where it was: the refresh scrolled nothing.
+  expect(litInPanel(ui)).toBe('');
+  expect(bodyTop(ui)).toBe(top);
   ui.app.unmount();
 }, 15_000);
