@@ -495,6 +495,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [diffSections, setDiffSections] = ui.useState<DiffSection[]>([]);
           const diffCollapsedRef = ui.useRef<ReadonlySet<string>>(new Set<string>());
           const [diffCollapsed, setDiffCollapsed] = ui.useState<ReadonlySet<string>>(new Set<string>());
+          // The files marked reviewed (`diffMarkReviewed`'s `✓`), keyed
+          // `diffFileKey(root, path)` like the folds — the key carries across sources and
+          // no walk rebuilds the set, so a refresh keeps every mark. The mark is what was
+          // REVIEWED and the fold is display: a file `⏎` reopens keeps its `✓`. Per-process
+          // like the folds: nothing here is written to a session.
+          const diffReviewedRef = ui.useRef<ReadonlySet<string>>(new Set<string>());
+          const [diffReviewed, setDiffReviewed] = ui.useState<ReadonlySet<string>>(new Set<string>());
           const diffCursorRef = ui.useRef<DiffCursor | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
@@ -1282,6 +1289,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const toggleDiffFile = () => {
             const at = diffCursorRef.current;
             if (at) foldDiffFile(at.fileKey);
+          };
+          // `m` marks the file the cursor rests in reviewed — its file row or one of its
+          // hunks, the mark's scope is the FILE. The mark takes the fold with it: the
+          // hunks leave the rows and the cursor steps to the next file row
+          // (`diffFileMove`, clamped at the end). The mark is what was reviewed and the
+          // fold is display — `foldDiffFile` (⏎, a click) takes no mark away. `m` on a
+          // marked file takes both back and leaves the cursor where it rests: the person
+          // is on that file.
+          const markDiffReviewed = () => {
+            const at = diffCursorRef.current;
+            if (!at) return;
+            const marking = !diffReviewedRef.current.has(at.fileKey);
+            const reviewed = new Set(diffReviewedRef.current);
+            if (marking) reviewed.add(at.fileKey); else reviewed.delete(at.fileKey);
+            diffReviewedRef.current = reviewed;
+            setDiffReviewed(reviewed);
+            const folded = new Set(diffCollapsedRef.current);
+            if (marking) folded.add(at.fileKey); else folded.delete(at.fileKey);
+            diffCollapsedRef.current = folded;
+            setDiffCollapsed(folded);
+            if (marking) {
+              // The cursor may rest in the marked file's hunks, which the fold takes
+              // away: the step is from the file's own row either way.
+              const items = diffPanelItems(diffSectionsRef.current, folded);
+              setDiffCursorTo(diffFileMove(items, { fileKey: at.fileKey, hunk: -1 }, 1));
+            }
+            host.notify();
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
           // plugin has the field's strip and nothing left over, and a terminal too small
@@ -3182,7 +3216,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The diff panel: one walk of its rows under the cursor — ]/[ the hunk
               // starts, ↑/↓ the file rows, Home/End the ends of the walk — and a free
               // scroll beside it (j/k a row, ^d/^u half a body, the page keys a page),
-              // ⏎ folding the file the cursor is on and `q` closing the viewer. Only
+              // `m` marking the file the cursor rests in reviewed (it folds and the
+              // cursor steps to the next file row; marked again, the mark goes and the
+              // file reopens), ⏎ folding the file the cursor is on and `q` closing the
+              // viewer. Only
               // while the panel takes the keyboard (the gate its keys share with the exit
               // keys: the viewer is drawn and the field is empty, no y/n, question or `:`
               // line wants it), and only on the panel's OWN bindings — a bound action acts
@@ -3227,6 +3264,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (isKey(host.keys.diffPageDown ?? [], key)) { diffBodyRef.current.scrollPage(1); return true; }
                   if (isKey(host.keys.diffPageUp ?? [], key)) { diffBodyRef.current.scrollPage(-1); return true; }
                   if (isKey(host.keys.diffClose ?? [], key)) { closeDiff(); return true; }
+                  // The mark is the panel's own: `m` marks the file the cursor rests in
+                  // reviewed, on its binding alone.
+                  if (isKey(host.keys.diffMarkReviewed ?? [], key)) { markDiffReviewed(); return true; }
                   // The offer is the host's recovery from a limit and outranks a fold: the
                   // field's own row says `⏎ continue`, so ⏎ is the field's then.
                   if (key.name === 'return' && !key.ctrl && !key.meta && !conv.continueOffer) { toggleDiffFile(); return true; }
@@ -3666,15 +3706,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               });
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
-            // and the files the person folded. The cursor rests on a file's own row; the
-            // source, the marks, the one-file view and the key caps are what the chat
-            // holds for the viewer.
+            // the files the person folded and the files they marked reviewed. The cursor
+            // rests on a file's own row; the source, the marks, the one-file view and the
+            // key caps are what the chat holds for the viewer.
             diffPanel: diffOpen ? {
               sections: diffSections,
               collapsed: diffCollapsed,
               cursor: diffCursor,
               source: 'branch-local' as const,
-              reviewed: new Set<string>(),
+              reviewed: diffReviewed,
               single: false,
               // Every action's own cap — what `config.keys` moved it to, if anything —
               // keyed as the panel's hint reads them (`host.keyCap` per action), plus the

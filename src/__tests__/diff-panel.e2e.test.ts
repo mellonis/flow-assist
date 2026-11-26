@@ -667,3 +667,102 @@ test('a refresh that keeps the cursor leaves the panel where the person reads', 
   expect(bodyTop(ui)).toBe(top);
   ui.app.unmount();
 }, 20_000);
+
+// ─── the review marks: `m` and the fold ──────────────────────────────────────
+// `m` marks the file the cursor rests in REVIEWED: a `✓` on its row, its hunks out
+// of the rows (marking folds) and the cursor stepped to the next file row. The
+// mark is what was reviewed and the fold is display — ⏎ reopens a marked file and
+// keeps its `✓`. The lead is drawn exactly: the fold glyph, the mark, the status
+// and the path (`▸ ✓ M a.txt`), the counts after it.
+const rowWith = (ui: Awaited<ReturnType<typeof bootApp>>, text: string) =>
+  frameLines(ui).find((l) => l.includes(text)) ?? '';
+
+test('m marks a file reviewed, folds it and steps on', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  await ui.press('m');
+  // The lead says reviewed and folded, exactly — and the file's hunks are gone from
+  // the rows while the neighbour's stay.
+  expect(rowWith(ui, 'a.txt')).toContain('▸ ✓ M a.txt · +1 −1');
+  expect(ui.backend.lastFrame).not.toContain('+alpha-change');
+  expect(ui.backend.lastFrame).toContain('+beta-change');
+  // The cursor steps on: the next file row is lit.
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  expect(inverseAt(ui, 'a.txt')).toBe(false);
+  // The key is the panel's: none of it is typed into the field.
+  expect(ui.backend.lastFrame).not.toContain('› m');
+  ui.app.unmount();
+}, 15_000);
+
+test('m again reopens the file and clears the mark', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('m');
+  // The mark is on before it is taken off — without this the test passes on a panel
+  // nothing was ever marked in.
+  expect(rowWith(ui, 'a.txt')).toContain('▸ ✓ M a.txt');
+  await ui.press('up');
+  await ui.press('m');
+  // The fold reopens and the mark goes: the row draws as it did before the review.
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  expect(rowWith(ui, 'a.txt')).toContain('▾ M a.txt · +1 −1');
+  expect(rowWith(ui, 'a.txt')).not.toContain('✓');
+  // The person is on that file: the cursor stays where it rests.
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  ui.app.unmount();
+}, 15_000);
+
+test('the mark survives a refresh', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('m');
+  expect(rowWith(ui, 'a.txt')).toContain('▸ ✓ M a.txt');
+  // The neighbour changes under the live walk: the panel re-reads the tree and the
+  // mark stays — it is keyed by the file and no walk rebuilds it.
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\nbeta-change\nmore\n');
+  await settleUntil(() => ui.backend.lastFrame.includes('+more'), 8000);
+  expect(rowWith(ui, 'a.txt')).toContain('▸ ✓ M a.txt · +1 −1');
+  expect(ui.backend.lastFrame).not.toContain('+alpha-change');
+  ui.app.unmount();
+}, 15_000);
+
+test('return folds without touching the mark', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press('m');
+  await ui.press('up');
+  await ui.press('return');
+  // ⏎ is the fold alone: the hunks come back and the `✓` stays — the mark is what
+  // was reviewed, the fold is display.
+  expect(ui.backend.lastFrame).toContain('+alpha-change');
+  expect(rowWith(ui, 'a.txt')).toContain('▾ ✓ M a.txt · +1 −1');
+  ui.app.unmount();
+}, 15_000);
+
+test('m marks the file the cursor rests in, and clamps at the end', async () => {
+  // `scratchWalk`'s hunks start on rows the cursor lights by name (`+alpha-head`
+  // for the first file, `b01` for the second), so the cursor is KNOWN to rest inside
+  // a file's hunks when `m` marks that file.
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  await ui.press(']');
+  expect(inverseAt(ui, '+alpha-head')).toBe(true);
+  await ui.press('m');
+  expect(rowWith(ui, 'a.txt')).toContain('▸ ✓ M a.txt');
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  // The last file, marked from its own hunk: the step to the next file row is
+  // clamped at the end and the cursor rests on that file's own row.
+  await ui.press(']');
+  expect(inverseAt(ui, 'b01')).toBe(true);
+  await ui.press('m');
+  expect(rowWith(ui, 'b.txt')).toContain('▸ ✓ M b.txt');
+  expect(ui.backend.lastFrame).not.toContain('+beta');
+  expect(inverseAt(ui, 'b.txt')).toBe(true);
+  ui.app.unmount();
+}, 15_000);

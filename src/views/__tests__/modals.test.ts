@@ -2676,6 +2676,50 @@ test('a reported change is drawn like the chat draws it', async () => {
   drawn.handle.unmount();
 });
 
+// Review Focus: the reviewed mark is drawn in the row's LEAD, exactly — the fold
+// glyph, the `✓`, the status, the path for a tree file; `· ` then the `✓` for a
+// reported change. The literals pin the order and the spaces, whatever the status.
+test('a reviewed row draws its ✓ in the lead — exactly, whatever the status', async () => {
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [
+      { status: 'M', path: 'm.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' },
+      { status: 'A', path: 'a.txt', added: 1, removed: 0, hunks: '@@ -0,0 +1 @@\n+new' },
+      { status: 'D', path: 'd.txt', added: 0, removed: 1, hunks: '@@ -1 +0,0 @@\n-gone' },
+    ],
+  };
+  const reported: DiffSection = {
+    root: '', base: '', kind: 'reported',
+    files: [{ status: 'M', path: 'ABC-1 · description', key: '\u00000', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-a\n+b' }],
+  };
+  const keys = section.files.map((f) => diffFileKey('/r', f.path));
+  const reviewed = new Set([...keys, diffFileKey('', '\u00000')]);
+  const drawn = await diffFrame({ sections: [section, reported], collapsed: new Set(), cursor: null, source: 'turn', reviewed });
+  const rows = drawn.frame.split('\n');
+  const rowOf = (text: string) => {
+    const y = rows.findIndex((r) => r.includes(text));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return rows[y]!;
+  };
+  // A tree file: the lead alone — `▾ ✓ M ` / `▾ ✓ A ` / `▾ ✓ D ` — then the path
+  // and the counts, with the spaces exactly as a reader sees them.
+  expect(rowOf('m.txt')).toContain('▾ ✓ M m.txt · +1 −1');
+  expect(rowOf('a.txt')).toContain('▾ ✓ A a.txt · +1 −0');
+  expect(rowOf('d.txt')).toContain('▾ ✓ D d.txt · +0 −1');
+  // A reported change draws `· ✓ ` before its title — the marker, the mark, and no
+  // status letter.
+  expect(rowOf('ABC-1 · description')).toContain('· ✓ ABC-1 · description  +1 −1');
+  drawn.handle.unmount();
+
+  // Unmarked, the same rows carry no `✓` at all — and the lead still reads whole
+  // (`▾ M a.txt`), so the mark can never be mistaken for the status.
+  const bare = await diffFrame({ sections: [section, reported], collapsed: new Set(), cursor: null, source: 'turn' });
+  expect(bare.frame).toContain('▾ M m.txt · +1 −1');
+  expect(bare.frame).toContain('· ABC-1 · description  +1 −1');
+  expect(bare.frame).not.toContain('✓');
+  bare.handle.unmount();
+});
+
 test('single shows one file and counts its place', async () => {
   const files: FileDiff[] = Array.from({ length: 7 }, (_, i) => ({
     status: 'M' as const, path: `f${i + 1}.txt`, added: 1, removed: 0, hunks: '@@ -1 +1 @@\n-a\n+b',
