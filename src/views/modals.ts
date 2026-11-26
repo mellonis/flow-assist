@@ -3534,18 +3534,27 @@ export type DiffBodyScroll = { scrollBy(rows: number): void; scrollPage(pages: n
 // viewport are laid out) and keeps the cursor's file in view as ↑/↓ move it. It scrolls
 // only when the cursor MOVED — a refresh that finds the file where it was must not pull
 // the panel back to it.
-function DiffBody({ rows, cursorRow, isActive, bodyRef }: {
+function DiffBody({ rows, cursorRow, cursor, isActive, bodyRef }: {
   rows: ReactNode[];
   cursorRow: number;
+  cursor: DiffCursor | null;
   isActive: boolean;
   bodyRef?: DiffBodyScroll;
 }) {
   const box = useRef<ScrollBoxHandle>(null);
   const metrics = useRef<ScrollMetrics | null>(null);
-  // The row the list was last scrolled to, and the one the next measure must scroll to.
-  const seen = useRef(-2);
-  const pending = useRef(-1);
-  if (cursorRow >= 0 && cursorRow !== seen.current) pending.current = cursorRow;
+  // A cursor move is the cursor's IDENTITY changing (`fileKey` + hunk), never its drawn
+  // row: a refresh that keeps the cursor re-lays the rows and may draw it at another
+  // index, and that is the same cursor — scrolling to its new index would pull the view
+  // away from where a free scroll left the person. `pendingKey` is the move awaiting a
+  // measure to carry it with; `seenKey` is the identity last carried.
+  const seenKey = useRef<string | null>(null);
+  const pendingKey = useRef<string | null>(null);
+  const cursorKey = cursor ? `${cursor.fileKey}\u0000${cursor.hunk}` : null;
+  if (cursorKey !== null && cursorKey !== seenKey.current) pendingKey.current = cursorKey;
+  // A cursor that went away takes a move that was not carried with it: there is no row
+  // to put on screen any more.
+  if (cursorKey === null) pendingKey.current = null;
   // The one channel from the chat's key handler to this list's scroll, bound to the
   // handle and the metrics THIS body draws. Freely scrolling keys go through it —
   // `carry` below is the cursor's own scroll and moves on cursor moves only.
@@ -3559,14 +3568,19 @@ function DiffBody({ rows, cursorRow, isActive, bodyRef }: {
   }
   const carry = () => {
     const x = metrics.current;
-    const row = pending.current;
-    if (!x || row < 0) return;
-    pending.current = -1;
-    seen.current = row;
+    const k = pendingKey.current;
+    // A move made before the first measure waits for one — `onMetrics` below calls this
+    // again and the move is not lost. One the cursor no longer holds is dropped.
+    if (!x || k === null || k !== cursorKey) return;
+    pendingKey.current = null;
+    seenKey.current = k;
+    // The row is not drawn (the walk took it away under an unchanged cursor): there is
+    // nothing on screen to scroll to, and a later render owes no scroll for it.
+    if (cursorRow < 0) return;
     // One row of the block stays visible at either edge, so ↑/↓ never land on a row that
     // is off screen.
-    const want = row < x.scrollTop ? row
-      : row >= x.scrollTop + x.viewportHeight ? row - x.viewportHeight + 1
+    const want = cursorRow < x.scrollTop ? cursorRow
+      : cursorRow >= x.scrollTop + x.viewportHeight ? cursorRow - x.viewportHeight + 1
       : x.scrollTop;
     const top = Math.max(0, Math.min(x.maxScrollTop, want));
     if (top !== x.scrollTop) box.current?.scrollTo(top);
@@ -3661,7 +3675,7 @@ export function renderDiffPanel(p: {
     paddingX: 1,
     backgroundColor: p.bg,
   },
-    p.scroll ? h(DiffBody, { rows, cursorRow, isActive: p.scroll.isActive, bodyRef: p.bodyRef }) : rows,
+    p.scroll ? h(DiffBody, { rows, cursorRow, cursor: p.cursor, isActive: p.scroll.isActive, bodyRef: p.bodyRef }) : rows,
     hint ? h(Text, { key: 'hint', dim: true, wrap: 'truncate', selectable: false }, hint) : null);
 }
 

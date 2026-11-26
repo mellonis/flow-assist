@@ -632,3 +632,38 @@ test('a refresh that takes the cursor\'s file leaves the panel where the person 
   expect(bodyTop(ui)).toBe(top);
   ui.app.unmount();
 }, 15_000);
+
+// The first file's working-tree text with `tails` lines rewritten at its second change:
+// `scratchWalk` writes 12 of them, so a test can grow and shrink that diff on disk and
+// re-index every row below it while the walk re-lays them.
+const walkA = (tails: number) => {
+  const lines = Array.from({ length: 40 }, (_, i) => `a${String(i + 1).padStart(2, '0')}`);
+  return ['alpha-head', ...lines.slice(0, 21), ...Array.from({ length: tails }, (_, i) => `tail${String(i + 1).padStart(2, '0')}`), ...lines.slice(21 + tails)].join('\n') + '\n';
+};
+
+test('a refresh that keeps the cursor leaves the panel where the person reads', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff \u00b7 2 files');
+  // The cursor rests on the second file's row and the view follows it there…
+  await ui.press('down');
+  await settleUntil(() => ui.backend.lastFrame.includes('b.txt'));
+  // …then the person scrolls away from it: the rows they read are up in the first
+  // file's changes (`-a27` at their top) and the cursor's own row is off screen.
+  await ui.press('k');
+  expect(litInPanel(ui)).toBe('');
+  const top = bodyTop(ui);
+  expect(top).toContain('-a27');
+  // The file ABOVE the cursor grows under the live walk — its rewritten block now
+  // covers `a34`…`a36` too, three rows that only this growth draws — and every row
+  // below it moves down, the cursor's row among them, while the cursor itself is the
+  // same `fileKey` + hunk. The rows the person reads keep their places.
+  fs.writeFileSync(path.join(root, 'a.txt'), walkA(15));
+  await settleUntil(() => ui.backend.lastFrame.includes('-a34'), 8000);
+  expect(bodyTop(ui)).toBe(top);
+  // …and shrinks back: the same rule, the other way.
+  fs.writeFileSync(path.join(root, 'a.txt'), walkA(12));
+  await settleUntil(() => !ui.backend.lastFrame.includes('-a34'), 8000);
+  expect(bodyTop(ui)).toBe(top);
+  ui.app.unmount();
+}, 20_000);
