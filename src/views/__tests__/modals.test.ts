@@ -2762,6 +2762,17 @@ test('a base the walk could not resolve is worded, never guessed', async () => {
   drawn.handle.unmount();
 });
 
+// The one-file view has no file to stand the header for here, so the pick-a-base
+// wording is the panel's answer in that shape too — the remedy row, beside the
+// picker's cap, stands wherever the panel draws the nothing.
+test('a missing base draws its remedy row in the one-file view too', async () => {
+  const section: DiffSection = { root: '/r', base: '', files: [] };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, single: true, caps: { diffSource: 'd' } });
+  expect(drawn.frame).toContain('pick a base to compare against · d');
+  expect(drawn.frame).not.toContain('no changes');
+  drawn.handle.unmount();
+});
+
 test('a turn with no reports does not read as a clean working tree', async () => {
   const drawn = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, source: 'turn' });
   expect(drawn.frame).toContain('the last turn reported no file changes');

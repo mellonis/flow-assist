@@ -3418,7 +3418,10 @@ export function diffPanelBody(p: {
     // the picker's key beside it, its cap never spelled by hand.
     const noBaseHere = !isReported && s.base === '' && p.source !== 'turn';
     const drawn = drawnFiles(s);
-    if (!p.single && (drawn.length || noBaseHere)) {
+    // In the one-file view the single header stands for the section headers — except
+    // when there is no file at all to stand for: the pick-a-base wording is then the
+    // whole panel's answer and draws in every shape.
+    if ((!p.single || !order.length) && (drawn.length || noBaseHere)) {
       const added = s.files.reduce((n, f) => n + f.added, 0);
       const removed = s.files.reduce((n, f) => n + f.removed, 0);
       rows.push(h(Text, { key: `s${si}`, dim: true, wrap: 'truncate', selectable: false },
