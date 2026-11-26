@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as childProcess from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,6 +39,20 @@ const makeRepo = (dir: string, files: Record<string, string> = { 'a.txt': 'one\n
   git(dir, 'commit', '-qm', 'init');
 };
 const byPath = (files: FileDiff[]) => Object.fromEntries(files.map((f) => [f.path, f]));
+
+// The batch's own git call refused while every other git call runs for real — the
+// shape a batch failure takes in the wild (`git: output too large`, a stuck resource):
+// `oneFile` falls back to per-file diffs and recovers what they carry. The batch is
+// the one call the module makes with `--src-prefix`; a per-file diff declares no
+// prefix of its own.
+const failBatchDiff = <T>(fn: () => Promise<T>): Promise<T> => {
+  const realSpawn = childProcess.spawn;
+  const spy = spyOn(childProcess, 'spawn').mockImplementation(((cmd: string, args?: readonly string[], opts?: object) =>
+    Array.isArray(args) && args.includes('--src-prefix=a/')
+      ? realSpawn('sh', ['-c', 'echo "injected: the batch diff refused" >&2; exit 1'], opts)
+      : realSpawn(cmd, args as string[], opts)) as typeof childProcess.spawn);
+  return fn().finally(() => spy.mockRestore());
+};
 
 // A repository whose BRANCH holds a second commit and whose worktree holds an edit,
 // made without ever switching branches: the starting branch keeps the second commit
@@ -147,6 +162,37 @@ test('a top git cannot read answers failed, never a clean tree', async () => {
   expect(res.gitless).toBe(false);
   expect(res.failed).toBe(true);
   expect(res.sections).toEqual([]);
+});
+
+// The batch is one call per tree, and it alone carries the commits' own files: a clean
+// file the status cannot see and no per-file call names. When git refuses the batch the
+// per-file fallback recovers what it can — but a base mode then compares against a read
+// it did not get, so the walk answers `failed` over the recovered rows: a partial tree
+// is never drawn as the whole one. `worktree` holds exactly what the status lists, so
+// there the fallback is the whole source and the walk is its own honest answer.
+test('a refused batch is a failed walk in a base mode, whatever the per-file diffs recover', async () => {
+  const root = makeFeatureRepo();
+  write(root, 'fresh.txt', 'new\n');
+
+  const under = await failBatchDiff(() => workingTreeDiff([root], { base: 'main', mode: 'branch-local' }));
+  // The per-file fallback recovered the rows it can reach on its own.
+  const recovered = byPath(under.sections[0]!.files);
+  expect(recovered['a.txt']!.hunks).toContain('+TWO');
+  expect(recovered['a.txt']!.hunks).toContain('+FOUR');
+  expect(recovered['fresh.txt']!.status).toBe('A');
+  // The batch's own rows are gone from the read — the commits' clean and deleted files.
+  expect(recovered['committed.txt']).toBeUndefined();
+  expect(recovered['gone.txt']).toBeUndefined();
+  // and the walk says so rather than draw the rest as the whole tree.
+  expect(under.failed).toBe(true);
+
+  const committed = await failBatchDiff(() => workingTreeDiff([root], { base: 'main', mode: 'committed' }));
+  expect(committed.failed).toBe(true);
+
+  const worktree = await failBatchDiff(() => workingTreeDiff([root], { mode: 'worktree' }));
+  const byWorktree = byPath(worktree.sections[0]!.files);
+  expect(byWorktree['a.txt']!.hunks).toContain('+FOUR');
+  expect(worktree.failed).toBe(false);
 });
 
 test('a git root diffs against its base: modified, untracked, deleted, ignored', async () => {
