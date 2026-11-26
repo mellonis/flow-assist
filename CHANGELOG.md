@@ -5,6 +5,28 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/diff` is a diff viewer now.** Its rows are one walk with keys of their own:
+  `]`/`[` step the changes, `↑`/`↓` the files, `j`/`k` scroll the rows without moving
+  the cursor, `Home`/`End` go to the ends and `PageDown`/`PageUp` (or
+  `^d`/`^u`) page it — `^d` here pages the panel and never arms the app's exit. `m` marks
+  the file the cursor rests in as reviewed: a `✓` on its row, its hunks folded and the
+  cursor stepped on to the next file, while `⏎` folds and unfolds a file and keeps the
+  mark. `s` shows one file at a time and counts its place in the header (`3 of 7`). `d`
+  opens what the walk reads — your commits and your local changes together, only the
+  commits since the base, only the uncommitted changes, or the `last turn`'s own write
+  reports — and, under a git source, what each repository compares against, which a
+  picker of its local and remote branches changes for the rest of the run. `f` grows the
+  viewer over the whole terminal and back, `?` opens the help of the keys that act here,
+  and `q` (or `Esc`) closes the viewer and leaves the chat — with a turn running `Esc`
+  still stops the turn and keeps the panel. In the split the keys act only while the
+  field is empty and your own typing keeps every keystroke; grown full the viewer holds
+  them while your draft waits behind it. And a change the write tools report is now
+  recorded whole: it kept only its first eighty lines, the same ones the chat drew. The
+  record now holds the change whole up to 2 MiB, counting away only what that cap drops —
+  `last turn` and `/export` read it in full, and a file row naming a cut record says the
+  lines it did not keep (`… N lines not kept`) — while the chat's `✎`
+  block draws the same eighty rows and the same `… N more lines` note it always has.
+
 - **The work strip is drawn in a docked chat.** With the chat beside a plugin's screen
   (`panel` mode), `↓` drew nothing: the strip's panel was laid at the terminal's corner
   and the chat's area clipped it. The chat's area is now the box its overlays are placed
@@ -241,7 +263,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   under it (a write by the turn, a command you ran, your own editor). It reads the
   repository the shell is in — its whole working tree, wherever in it the shell stands —
   and follows you as you `cd`, never the folders beside it along `shell.roots`. Each file
-  is compared with `HEAD`; outside git there is nothing to compare against that would
+  is compared against the base the panel says it reads (its header names it); outside git
+  there is nothing to compare against that would
   mean anything — a folder that merely holds repositories is outside git too — and the
   panel says `not a git repository`. A repository git cannot read is named as that,
   never shown as a clean tree. It is a view: nothing on it

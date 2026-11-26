@@ -16,6 +16,10 @@
 // `hold` that freezes the stream until the scenario releases it — which is how a
 // frame is taken "while the answer is still coming".
 
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ScriptedModel, bootApp, settle, settleUntil } from '../src/__tests__/helpers/scripted.ts';
 import type { Make } from '../src/loader/plugin.ts';
 
@@ -66,8 +70,8 @@ function styledFrame(buf: CellBuffer): string {
 // ─── the rig ──────────────────────────────────────────────────────────────────
 // The chat opens as a window over the screen here, as in the tests (bootApp's default);
 // the `panel` scenarios dock it, at sizes of their own.
-async function boot(model: ScriptedModel, guests?: (make: Make) => never[], extra: Record<string, unknown> = {}, size?: { w: number; h: number; chatMode?: 'panel' | 'window' | 'full' }) {
-  const ui = await bootApp(model, size?.w ?? W, size?.h ?? H, guests, extra, { chatMode: size?.chatMode });
+async function boot(model: ScriptedModel, guests?: (make: Make) => never[], extra: Record<string, unknown> = {}, size?: { w: number; h: number; chatMode?: 'panel' | 'window' | 'full'; startDir?: string }) {
+  const ui = await bootApp(model, size?.w ?? W, size?.h ?? H, guests, extra, { chatMode: size?.chatMode, startDir: size?.startDir });
   const frame = (title: string) => {
     const buf = ui.backend.lastBuffer;
     if ((COLOR || STYLES) && buf) { console.log(`\n┏━━ ${title}\n${styledFrame(buf)}`); return; }
@@ -103,6 +107,28 @@ const board = (make: Make) => [make('boards', {
     },
   },
 } as never)] as never[];
+
+// A scratch repository with seven changed files — the kind the panel's own tests build,
+// never a repository of the person's: a fresh directory under the temp directory, one
+// commit, then one line added at each file's top (one hunk per file, seven walk stops).
+const scratchSeven = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-frames-diff-')));
+  const git = (...args: string[]) => {
+    const r = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr || r.stdout}`);
+    return r.stdout;
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Frames');
+  git('config', 'user.email', 'frames@example.com');
+  // A scratch repository never reaches a key, and these frames need no signing.
+  git('config', 'commit.gpgsign', 'false');
+  for (let i = 1; i <= 7; i++) fs.writeFileSync(path.join(root, `a${i}.txt`), 'one\ntwo\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
+  for (let i = 1; i <= 7; i++) fs.writeFileSync(path.join(root, `a${i}.txt`), `new-${i}\none\ntwo\n`);
+  return root;
+};
 
 // ─── scenarios ────────────────────────────────────────────────────────────────
 const scenarios: Record<string, () => Promise<void>> = {
@@ -365,12 +391,57 @@ Object.assign(scenarios, {
   panelBottom: () => panelScenario(100, 40),
 });
 
+// The `/diff` viewer at its own size: the panel beside the conversation with one file
+// marked reviewed and the cursor on a hunk, the one-file view's count, the source
+// dialog, and the viewer grown over the terminal. Every state is reached with the real
+// keys over the real walk of a scratch tree.
+async function diffViewer() {
+  const root = scratchSeven();
+  const ui = await boot(new ScriptedModel(), undefined, { shell: { roots: [root] } }, { w: 160, h: 40, startDir: root });
+  await ui.press('F');
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 7 files'), { ms: 4000 }, 'the panel open on seven files');
+  // `]` lights the first file's first hunk row; `m` marks that file reviewed — a ✓ on
+  // its row, its hunks folded — and steps the cursor on to the next file, where `]`
+  // lands on its hunk's first row.
+  await ui.press(']');
+  await ui.press('m');
+  await ui.press(']');
+  ui.frame('160×40: /diff beside the chat — one file marked reviewed, the cursor on a hunk');
+  // The same on the third file, then ⏎ reopens it (mark kept) and `s` shows that file
+  // alone under its count over the seven.
+  await ui.press(']');
+  await ui.press('m');
+  await ui.press('up');
+  await ui.press('return');
+  await ui.press('s');
+  await settle(4);
+  ui.frame('s — one file at a time: 3 of 7, its mark kept');
+  // `d`: what the walk reads — the four sources and the base row under them.
+  await ui.press('d');
+  await settle(4);
+  ui.frame('d — the source dialog over the panel');
+  await ui.press('escape');
+  await settle(4);
+  // The whole list back and `f`: the same body and hint row grown over the terminal.
+  await ui.press('s');
+  await ui.press('f');
+  await settle(4);
+  ui.frame('f — the viewer over the terminal, its frame titled Diff');
+  ui.app.unmount();
+}
+Object.assign(scenarios, { diff: diffViewer });
+
+// Scenarios that boot at a size of their own say it in their frames; the rest draw at
+// the size `--size` names (100×28 by default).
+const ownSize = (name: string) => name.startsWith('panel') || name.startsWith('diff');
+
 const names = wanted.length ? wanted : Object.keys(scenarios);
 for (const name of names) {
   const run = scenarios[name];
   if (!run) { console.error(`unknown scenario "${name}" — have: ${Object.keys(scenarios).join(', ')}`); process.exit(2); }
-  // The panel scenarios boot at sizes of their own and say them in their frames.
-  console.log(`\n\n════════ ${name}${name.startsWith('panel') ? '' : ` (${W}×${H})`} ════════`);
+  console.log(`\n\n════════ ${name}${ownSize(name) ? '' : ` (${W}×${H})`} ════════`);
   await run();
 }
 process.exit(0);
