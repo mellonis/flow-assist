@@ -898,3 +898,34 @@ test('a mode toggle takes the cursor to its file\'s row and the view follows it'
   expect(litInPanel(ui)).toContain('a.txt');
   ui.app.unmount();
 }, 15_000);
+
+test('a toggle scrolls the file row into view even when the cursor does not move', async () => {
+  const root = scratchWalk();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // The cursor stays on the first file's row while the person free-scrolls away
+  // from it — j/k move the rows and leave the cursor where it is.
+  for (let i = 0; i < 10; i++) await ui.press('j');
+  expect(bodyTop(ui)).not.toContain('a.txt');
+  expect(litInPanel(ui)).toBe('');
+  // A toggle is a deliberate move-event: whatever the cursor's identity, the
+  // one-file view brings the cursor's file row back under the eye.
+  await ui.press('s');
+  expect(bodyTop(ui)).toContain('a.txt');
+  expect(litInPanel(ui)).toContain('a.txt');
+  // One row up it is the one-file view — its own header is its one count. (The
+  // carry lands the file row flush at the top; the header stands right above it.)
+  await ui.press('k');
+  expect(ui.backend.lastFrame).toContain('diff · 1 of 2 · vs main');
+  expect(ui.backend.lastFrame).not.toContain('diff · 2 files');
+  // The same ask the other way: scrolled away again inside the one-file view, the
+  // second toggle restores the whole list AND the file row's place in it.
+  for (let i = 0; i < 10; i++) await ui.press('j');
+  expect(bodyTop(ui)).not.toContain('a.txt');
+  await ui.press('s');
+  expect(bodyTop(ui)).toContain('a.txt');
+  expect(litInPanel(ui)).toContain('a.txt');
+  await ui.press('k');
+  expect(ui.backend.lastFrame).toContain('diff · 2 files');
+  ui.app.unmount();
+}, 15_000);

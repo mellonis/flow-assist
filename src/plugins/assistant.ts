@@ -510,6 +510,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // written to a session.
           const diffSingleRef = ui.useRef(false);
           const [diffSingle, setDiffSingle] = ui.useState(false);
+          // The toggle's move-event counter: every `s` bumps it, telling the
+          // scroll-into-view carry the person MOVED — a mode toggle is deliberate and
+          // the cursor's row comes back under the eye even where its identity holds.
+          const [diffScrollNonce, setDiffScrollNonce] = ui.useState(0);
           const diffCursorRef = ui.useRef<DiffCursor | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
@@ -1335,6 +1339,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setDiffCursorTo(at ? { fileKey: at.fileKey, hunk: -1 } : diffFirstItem(items));
             diffSingleRef.current = !diffSingleRef.current;
             setDiffSingle(diffSingleRef.current);
+            setDiffScrollNonce((n: number) => n + 1);
             host.notify();
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
@@ -3740,6 +3745,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               source: 'branch-local' as const,
               reviewed: diffReviewed,
               single: diffSingle,
+              scrollNonce: diffScrollNonce,
               // Every action's own cap — what `config.keys` moved it to, if anything —
               // keyed as the panel's hint reads them (`host.keyCap` per action), plus the
               // one fixed key the hint names: `escape` closes the viewer from an idle chat
