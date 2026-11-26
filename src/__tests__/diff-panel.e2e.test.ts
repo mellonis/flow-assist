@@ -1050,6 +1050,57 @@ test('a repository with no default branch says so and offers the picker', async 
   ui.app.unmount();
 }, 15_000);
 
+test('the base row names the pick or the default in any git source', async () => {
+  const root = scratchSources();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  // `working tree only` compares against HEAD — and the base row still names what
+  // would compare: the top's own default where nothing was picked. `not picked`
+  // means no base resolved, never "the base is inert here".
+  await ui.press('d');
+  await ui.press('down');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs HEAD — working tree only'));
+  await ui.press('d');
+  await settleUntil(() => ui.backend.lastFrame.includes('base · main'));
+  expect(rowWith(ui, 'base · main')).toContain('base · main');
+  // A pick wins the row in that source too.
+  for (let i = 0; i < 3; i++) await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Base branch'));
+  await ui.press('down');
+  await ui.press('down');
+  await ui.press('return');
+  await settle(4);
+  await ui.press('d');
+  await settleUntil(() => ui.backend.lastFrame.includes('base · master'));
+  expect(rowWith(ui, 'base · master')).toContain('base · master');
+  ui.app.unmount();
+}, 15_000);
+
+test('the base row says not picked wherever no default resolves', async () => {
+  // Zero commits and one untracked file: `working tree only` draws the pile against
+  // HEAD, and there is no base to name — the row says so, never a ghost default.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-nobase-')));
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(root, 'fresh.txt'), 'x\n');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'pick a base to compare against');
+  await ui.press('d');
+  await ui.press('down');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs HEAD — working tree only'));
+  await ui.press('d');
+  await settleUntil(() => ui.backend.lastFrame.includes('base · not picked'));
+  expect(rowWith(ui, 'base · not picked')).toContain('base · not picked');
+  ui.app.unmount();
+}, 15_000);
+
 test("a source switch keeps the cursor's file and falls to the first item when it is gone", async () => {
   // Three flat files: two committed past `main` and one edited — so the sources
   // disagree about which files there are, which is what the cursor rule is about.

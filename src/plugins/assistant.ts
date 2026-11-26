@@ -28,7 +28,7 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { diffScopeOf, listBaseRefs, workingTreeDiff, type DiffMode, type DiffSection } from '../assistant/working-tree.js';
+import { defaultBaseRef, diffScopeOf, listBaseRefs, workingTreeDiff, type DiffMode, type DiffSection } from '../assistant/working-tree.js';
 import { lastTurnChanges } from '../assistant/turn-diff.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
@@ -535,6 +535,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // does not the cursor falls on the first item of the new source. Every
           // other walk clears the cursor where the file went and leaves it so.
           const diffCarryRef = ui.useRef(false);
+          // What a base row names where nothing was picked for a root: that root's
+          // own default branch (`defaultBaseRef`), asked at most once per root and
+          // kept; the dialog is drawn again when the answer lands. A repository with
+          // no default is recorded as none — the row reads `not picked`, "no base
+          // resolved".
+          const diffBaseDefaults = ui.useRef(new Map<string, string | null>());
+          const resolveBaseDefault = (root: string): void => {
+            if (diffBaseDefaults.current.has(root)) return;
+            void defaultBaseRef(root).then((ref) => {
+              diffBaseDefaults.current.set(root, ref);
+              if (panelRef.current) host.notify();
+            });
+          };
           const diffCursorRef = ui.useRef<DiffCursor | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
@@ -1931,10 +1944,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }));
           // `d`'s source dialog: what the walk reads — the sources in `DIFF_SOURCES`,
           // then, for a git source, one `base` row per top the last walk read. The
-          // row names what compares there: the person's pick, else the ref the walk
-          // itself resolved (their pick when it stands, else the top's default),
-          // else `not picked` — never a silent HEAD. Rows are read at every draw, so
-          // a section the walk adds or takes away is seen while the dialog is open.
+          // row names what compares there, clause by clause: the person's pick for
+          // the root, else the root's own default branch, else `not picked` — "no
+          // base resolved", never a silent HEAD. Every git source names it so,
+          // `worktree` included: its tail already says what it compares against.
+          // Rows are read at every draw, so a section the walk adds or takes away is
+          // seen while the dialog is open.
           const openDiffSource = () => {
             const current = diffSourceRef.current;
             const rows = (): PanelRow[] => {
@@ -1957,8 +1972,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 ...sources,
                 { id: 'group:base', text: 'base', kind: 'group' },
                 ...tops.map((s) => {
-                  const picked = diffBaseRef.current.get(s.root);
-                  const ref = picked ?? (s.base && s.base !== 'HEAD' ? s.base : 'not picked');
+                  resolveBaseDefault(s.root);
+                  const ref = diffBaseRef.current.get(s.root) ?? diffBaseDefaults.current.get(s.root) ?? 'not picked';
                   // One top talks of itself alone; several must say which is which.
                   return { id: `base:${s.root}`, text: tops.length > 1 ? `base · ${path.basename(s.root)} · ${ref}` : `base · ${ref}` };
                 }),

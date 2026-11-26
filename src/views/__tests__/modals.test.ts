@@ -5,8 +5,9 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
-import { changeView, unifiedDiff, CHANGE_DRAW_MAX_LINES, fileDiffCounts, type ChangeView } from '../../assistant/diff.js';
+import { changeView, unifiedDiff, CHANGE_DIFF_MAX_BYTES, CHANGE_DRAW_MAX_LINES, fileDiffCounts, type ChangeView } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
+import { lastTurnChanges } from '../../assistant/turn-diff.js';
 import { askKey, askStart, type AskState } from '../../assistant/ask.js';
 import { keyGlyph } from '../../playback/keys.js';
 import { bumpViewRevision } from '../../assistant/views.js';
@@ -2797,6 +2798,30 @@ test('a cut record draws its kept hunks and says what was not kept', async () =>
   // The note rides under the hunks, where the `binary`/`too large` rows sit.
   expect(rows.findIndex((l) => l.includes('… 7 lines not kept')))
     .toBeGreaterThan(rows.findIndex((l) => l.includes('+two')));
+  drawn.handle.unmount();
+});
+
+// The chain the record's cut takes to the panel's row, end to end and real on both
+// sides: a change the CHANGE_DIFF_MAX_BYTES cut (`hidden`), put in a turn's parts,
+// mapped by `lastTurnChanges` into `note: 'cut'`, drawn as its `… N lines not kept`
+// row under the kept hunks. The cap arithmetic is diff.test's; the crossing — Task
+// 4's record to Task 5's row — is what nothing else covers.
+test('a cut the turn recorded draws its … N lines not kept row', async () => {
+  const giant = 'g'.repeat(CHANGE_DIFF_MAX_BYTES + 1024);
+  const kept = ['one', 'two', 'three'].map((l) => `${l}\n`).join('');
+  const thrown = ['last'].map((l) => `${l}\n`).join('');
+  const record = changeView({ title: 'huge note', before: '', after: `${kept}${giant}\n${thrown}` })!;
+  expect(record.hidden).toBeGreaterThan(0);
+  const writer: ChatMsg = { role: 'assistant', content: '', parts: [{ kind: 'change', change: record }] };
+  const sections = lastTurnChanges([{ role: 'user', content: 'write it' }, writer]);
+  const file = sections[0]!.files[0]!;
+  expect(file.note).toBe('cut');
+  expect(file.hidden).toBeGreaterThan(0);
+  const drawn = await diffFrame({ sections, collapsed: new Set(), cursor: null, source: 'turn' });
+  const rows = drawn.frame.split('\n');
+  expect(rows.findIndex((l) => l.includes('+three'))).toBeGreaterThan(-1);
+  expect(rows.findIndex((l) => l.includes(`… ${file.hidden} lines not kept`)))
+    .toBeGreaterThan(rows.findIndex((l) => l.includes('+three')));
   drawn.handle.unmount();
 });
 
