@@ -202,3 +202,18 @@ test("changeMarkdown keeps the chat's rows and note unchanged", () => {
   const old: ChangeView = { title: 'old.txt', diff: kept, added: 80, removed: 0, hidden: 7 };
   expect(changeMarkdown(old)).toBe('```diff\n' + kept + '\n```\n… 7 more lines');
 });
+
+// A byte cut that leaves only the `@@` header draws no rows at all — a minified-file
+// edit whose first line is past the cap. The note still stands: what was not kept is
+// counted, and a change never draws as a silent hole.
+test('a cut that leaves zero drawn rows still carries the note', () => {
+  const giant = 'g'.repeat(CHANGE_DIFF_MAX_BYTES + 1024);
+  const v = changeView({ title: 'min.js', before: '', after: giant })!;
+  // The record keeps the hunk header alone and counts the one line past the cap.
+  expect(v.diff.split('\n')).toEqual(['@@ -0,0 +1,1 @@']);
+  expect(v.hidden).toBe(1);
+  expect(changeMarkdown(v)).toBe('… 1 more line');
+  // A cut counted only in `hidden` speaks the same way with zero kept rows drawn.
+  const onlyHidden: ChangeView = { title: 'min.js', diff: '@@ -1 +1 @@', added: 1, removed: 1, hidden: 7 };
+  expect(changeMarkdown(onlyHidden)).toBe('… 7 more lines');
+});
