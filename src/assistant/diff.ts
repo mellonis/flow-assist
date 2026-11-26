@@ -179,16 +179,18 @@ export function drawnDiff(v: ChangeView): string {
 // the drawn lines, so a changed Markdown file cannot close it early. Only the first
 // `CHANGE_DRAW_MAX_LINES` kept lines are drawn; the note counts everything past them —
 // kept lines the draw does not take, and lines the record did not keep. Empty for a
-// change with nothing to draw (a binary file) — the title line then stands alone.
+// change with nothing to draw and nothing to count (a binary file) — the title line
+// then stands alone. A cut that left only the `@@` header draws no rows but still
+// carries its note; a change never draws as a silent hole.
 export function changeMarkdown(v: ChangeView): string {
   const all = v.diff ? v.diff.split('\n') : [];
   const text = drawnDiff(v);
   const rows = diffRows(text);
-  if (!rows.length) return '';
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
   const fence = '`'.repeat(Math.max(3, longest + 1));
   const n = Math.max(0, all.length - CHANGE_DRAW_MAX_LINES) + v.hidden;
   const more = n ? `\n… ${n} more line${n === 1 ? '' : 's'}` : '';
+  if (!rows.length) return more.slice(1);
   return `${fence}diff\n${rows.map((r) => r.text).join('\n')}\n${fence}${more}`;
 }
 
