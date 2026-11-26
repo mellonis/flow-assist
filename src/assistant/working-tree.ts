@@ -577,6 +577,11 @@ async function scanRoot(root: string): Promise<string[]> {
   return tops;
 }
 
+// The git tops the walk sections a root by: the repository at or above the root, and
+// every repository nested under it. `turn-diff.ts` matches a report's relative title
+// against these — the walk's own tops, nothing wider.
+export const gitTops = (root: string): Promise<string[]> => scanRoot(root);
+
 // Every change under `roots`, a root at a time in the order given: its git tops in walk
 // order, each section against its own base. Sections are never merged across roots —
 // two checkouts of one repository are two answers. `gitless` says the scope is outside

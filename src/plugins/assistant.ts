@@ -28,7 +28,7 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { defaultBaseRef, diffScopeOf, listBaseRefs, workingTreeDiff, type DiffMode, type DiffSection } from '../assistant/working-tree.js';
+import { defaultBaseRef, diffScopeOf, gitTops, listBaseRefs, workingTreeDiff, type DiffMode, type DiffSection } from '../assistant/working-tree.js';
 import { lastTurnChanges } from '../assistant/turn-diff.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
@@ -1239,10 +1239,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The walk reads the person's choices at walk time — the source and
               // the base map above — so a picker's choice is just another walk.
               // `last turn` is no git walk at all: what the write tools reported
-              // IS the source (`src/assistant/turn-diff.ts`).
+              // IS the source (`src/assistant/turn-diff.ts`), matched against the
+              // walk's own tops.
               const source = diffSourceRef.current;
               const { sections: raw, gitless, failed } = source === 'turn'
-                ? { sections: lastTurnChanges(convRef.current!.messages), gitless: false, failed: false }
+                ? { sections: lastTurnChanges(convRef.current!.messages, await gitTops(diffScope())), gitless: false, failed: false }
                 : await workingTreeDiff([diffScope()], { base: (top) => diffBaseRef.current.get(top), mode: source });
               if (seq !== diffWalked.current || !diffOpenRef.current) return;
               // A diff is text a token may sit in — a config, a script, a log — so it is
