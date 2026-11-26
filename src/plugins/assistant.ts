@@ -839,10 +839,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // a drag is flowtty's selection — it copies, and it must never fold.
           const CLICK_MS = 250;
           const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
-            // While the pager or the fullscreen viewer stands in for the conversation a
-            // click folds nothing in the rows it covers, and a drag is flowtty's selection
-            // of what is drawn.
-            if (pagerShownRef.current || watchRef.current || diffFullRef.current) { pressRef.current = null; return false; }
+            // While the pager, the watch, the help or the fullscreen viewer stands in
+            // for the conversation a click folds nothing in the rows it covers, and a
+            // drag is flowtty's selection of what is drawn.
+            if (pagerShownRef.current || watchRef.current || diffFullRef.current || (host.store as { help?: { helpModal?: boolean } }).help?.helpModal) { pressRef.current = null; return false; }
             if (key.name === 'mousedrag') { pressRef.current = null; return false; }
             if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
             const down = pressRef.current;
