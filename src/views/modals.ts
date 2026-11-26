@@ -3261,8 +3261,9 @@ export interface DiffPanelView {
   source: DiffSource;
   reviewed: ReadonlySet<string>;
   single: boolean;
-  // What `host.keyCap` answered per action of the panel's keys — the only spelling of
-  // a key the hint row ever draws.
+  // What `host.keyCap` answered per action of the panel's keys, plus the fixed keys'
+  // own glyphs (`escape`'s from `keyGlyph`) — the only spellings of a key the hint row
+  // ever draws.
   caps: Record<string, string>;
   loading?: boolean;
   gitless: boolean;
@@ -3607,7 +3608,10 @@ const DIFF_HINT: Array<{ actions: string[]; label: string }> = [
   { actions: ['diffSource'], label: 'source' },
   { actions: ['diffFullscreen'], label: 'full' },
   { actions: ['diffHelp'], label: 'see all' },
-  { actions: ['diffClose'], label: 'close' },
+  // The close names the FIXED key: `escape` shuts the viewer from an idle chat and is
+  // no action of its own, so its glyph is the one handed over in `caps`, while `q`
+  // (diffClose's binding) keeps working in every handler.
+  { actions: ['escape'], label: 'close' },
 ];
 function diffHint(caps: Record<string, string>, inner: number): string {
   const parts: string[] = [];

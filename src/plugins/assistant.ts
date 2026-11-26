@@ -3679,7 +3679,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // Every action's own cap — what `config.keys` moved it to, if anything —
               // keyed as the panel's hint reads them (`host.keyCap` per action), plus the
               // one fixed key the hint names: `escape` closes the viewer from an idle chat
-              // and is no action of its own, so its glyph is `keyGlyph`'s.
+              // and is no action of its own, so its glyph is `keyGlyph`'s — the hint's
+              // close segment reads it, and draws `esc close` as the design has it.
               caps: {
                 ...Object.fromEntries(DIFF_ACTIONS.map((a) => [a, host.keyCap(a)])),
                 escape: keyGlyph({ name: 'escape' }),

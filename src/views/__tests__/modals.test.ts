@@ -2698,12 +2698,17 @@ test('the hint row carries the caps', async () => {
   };
   const drawn = await diffFrame({
     sections: [section], collapsed: new Set(), cursor: null,
-    caps: { diffPrevFile: '↑', diffNextFile: '↓', diffHelp: '?', diffClose: 'Esc' },
+    // The shape the chat hands over: every action's own cap — `diffClose`'s `q` among
+    // them — and the fixed `escape` beside them.
+    caps: { diffPrevFile: '↑', diffNextFile: '↓', diffHelp: '?', diffClose: 'q', escape: 'Esc' },
   });
-  // Every glyph is a cap the chat handed over, every label a plain word.
+  // Every glyph is a cap the chat handed over, every label a plain word. The close is
+  // the FIXED key's (`esc close`, as the design draws it); the action's binding keeps
+  // working but is not what this row names.
   expect(drawn.frame).toContain('↑↓ file');
   expect(drawn.frame).toContain('? see all');
   expect(drawn.frame.toLowerCase()).toContain('esc close');
+  expect(drawn.frame).not.toContain('q close');
   drawn.handle.unmount();
   // A segment whose cap is absent is dropped — the row never spells a key of its own.
   const bare = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, caps: {} });
