@@ -929,3 +929,194 @@ test('a toggle scrolls the file row into view even when the cursor does not move
   expect(ui.backend.lastFrame).toContain('diff · 2 files');
   ui.app.unmount();
 }, 15_000);
+
+// ─── the source dialog and the base picker: `d` ──────────────────────────────
+// `d` opens what the walk reads — the three git modes over git and the turn's own
+// write reports — and, under a git source, what each top compares against. The
+// fixtures name their branches on purpose: the walk's default (`main`) and the
+// person's own (`master`) must both be real refs, and a remote ref gives the
+// picker's `remote` group something to list.
+const scratchSources = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-src-')));
+  git(root, 'init', '-q', '-b', 'master');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'base');
+  git(root, 'branch', 'main');
+  // One commit past `main` — what `committed only` draws — then one uncommitted
+  // edit — what `working tree only` draws. Each source shows its own end and
+  // hides the other's.
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ncommitted-change\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'branch commit');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ncommitted-change\nuncommitted-edit\n');
+  git(root, 'update-ref', 'refs/remotes/origin/other', 'HEAD');
+  return root;
+};
+
+test('d switches sources', async () => {
+  const root = scratchSources();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  // The dialog names the sources and opens on the one the walk reads now.
+  await ui.press('d');
+  expect(ui.backend.lastFrame).toContain('Diff source');
+  expect(ui.backend.lastFrame).toContain('branch + local');
+  expect(ui.backend.lastFrame).toContain('commits and local changes');
+  await ui.press('down');
+  await ui.press('return');
+  // Committed only: the branch's own commit draws, the uncommitted edit does not.
+  await settleUntil(() => ui.backend.lastFrame.includes('vs main — committed only') && !ui.backend.lastFrame.includes('uncommitted-edit'));
+  const committed = ui.backend.lastFrame;
+  expect(committed).toContain('vs main — committed only');
+  expect(committed).toContain('+committed-change');
+  expect(committed).not.toContain('uncommitted-edit');
+  // Working tree only: the same tree against HEAD — the edit alone.
+  await ui.press('d');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs HEAD — working tree only') && !ui.backend.lastFrame.includes('+committed-change'));
+  const worktree = ui.backend.lastFrame;
+  expect(worktree).toContain('vs HEAD — working tree only');
+  expect(worktree).toContain('+uncommitted-edit');
+  expect(worktree).not.toContain('+committed-change');
+  ui.app.unmount();
+}, 15_000);
+
+test('the base picker moves the comparison', async () => {
+  const root = scratchSources();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  await ui.press('d');
+  // Down past the four sources and the `base` group row to the top's own row.
+  for (let i = 0; i < 5; i++) await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Base branch'));
+  // The picker lists what git holds: the local branches and the remote refs.
+  expect(rowWith(ui, 'master')).toContain('master');
+  expect(ui.backend.lastFrame).toContain('origin/other');
+  await ui.press('down'); // past the `local` group row
+  await ui.press('down'); // `master`
+  await ui.press('return');
+  // The walk runs against the pick: the committed change is `master`'s own now
+  // and goes away with the `vs main` claim.
+  await settleUntil(() => ui.backend.lastFrame.includes('· vs master') && !ui.backend.lastFrame.includes('+committed-change'));
+  const moved = ui.backend.lastFrame;
+  expect(moved).toContain('vs master');
+  expect(moved).not.toContain('vs main');
+  expect(moved).toContain('+uncommitted-edit');
+  // The preference outlives the panel: /diff closed and reopened reads the same
+  // base, and the dialog says so.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs master'));
+  expect(ui.backend.lastFrame).not.toContain('vs main');
+  await ui.press('d');
+  expect(ui.backend.lastFrame).toContain('base · master');
+  ui.app.unmount();
+}, 15_000);
+
+test('a repository with no default branch says so and offers the picker', async () => {
+  // Zero commits: no ref resolves at all — `branch-local` never falls back to
+  // HEAD, the panel words it and the dialog's base row reads `not picked`.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-nobase-')));
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'pick a base to compare against');
+  // The wording asserted verbatim — and the cap beside it is the `diffSource`
+  // binding's own, carried into the row.
+  expect(ui.backend.lastFrame).toContain('pick a base to compare against');
+  expect(rowWith(ui, 'pick a base to compare against')).toContain('pick a base to compare against · d');
+  expect(ui.backend.lastFrame).not.toContain('vs HEAD');
+  // The dialog reads the same state, and the picker is one ⏎ away from it.
+  await ui.press('d');
+  expect(ui.backend.lastFrame).toContain('base · not picked');
+  for (let i = 0; i < 5; i++) await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Base branch'));
+  // The picker says what it lists, a group per side — there is no ref at all yet.
+  const rows = frameLines(ui).map((l) => l.replace(/[│›]/g, ' ').trim());
+  expect(rows).toContain('local');
+  expect(rows).toContain('remote');
+  ui.app.unmount();
+}, 15_000);
+
+test("a source switch keeps the cursor's file and falls to the first item when it is gone", async () => {
+  // Three flat files: two committed past `main` and one edited — so the sources
+  // disagree about which files there are, which is what the cursor rule is about.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-switch-')));
+  git(root, 'init', '-q', '-b', 'master');
+  git(root, 'config', 'user.name', 'Test');
+  git(root, 'config', 'user.email', 'test@example.com');
+  git(root, 'config', 'commit.gpgsign', 'false');
+  for (const f of ['a.txt', 'b.txt', 'c.txt']) fs.writeFileSync(path.join(root, f), 'one\ntwo\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'base');
+  git(root, 'branch', 'main');
+  fs.writeFileSync(path.join(root, 'b.txt'), 'one\ncommitted-one\n');
+  fs.writeFileSync(path.join(root, 'c.txt'), 'one\ncommitted-two\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'branch commit');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\nuncommitted-edit\n');
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 3 files');
+  await ui.press('down');
+  await ui.press('down');
+  expect(inverseAt(ui, 'c.txt')).toBe(true);
+  // `committed only` still has c.txt — and it is the SECOND file there: a fall to
+  // the first item would light b.txt instead.
+  await ui.press('d');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs main — committed only') && !ui.backend.lastFrame.includes('a.txt'));
+  expect(inverseAt(ui, 'c.txt')).toBe(true);
+  // `working tree only` has only a.txt: the cursor's file is gone there and the
+  // cursor falls on the first item of the new source.
+  await ui.press('d');
+  await ui.press('down');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('vs HEAD — working tree only') && !ui.backend.lastFrame.includes('+committed-'));
+  expect(inverseAt(ui, 'a.txt')).toBe(true);
+  ui.app.unmount();
+}, 15_000);
+
+test('last turn draws what the write tools reported', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'workspace_write', args: { path: 'artifacts/note.md', content: '# note\nhello\n' } }],
+    [{ text: 'written' }],
+  );
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  // A scripted write earlier in the run: its report is the source `last turn` reads.
+  await ui.press('F');
+  await ui.type('write the note');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('written'));
+  // The chat already has the keys — `/diff` is typed into it as the command it is.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
+  await ui.press('d');
+  for (let i = 0; i < 3; i++) await ui.press('down'); // past the three git sources
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('· last turn') && rowWith(ui, 'note.md').includes('▾ A'));
+  const row = rowWith(ui, 'note.md');
+  // The panel's own row — the file as the tool spelled it — and its hunks beside
+  // it; the working tree the git sources read is not this source's.
+  expect(row).toContain('▾ A');
+  expect(row).toContain('· +2 −0');
+  const lead = row.indexOf('▾');
+  expect(frameLines(ui).map((l) => l.slice(lead)).join('\n')).toContain('+hello');
+  expect(ui.backend.lastFrame).not.toContain('+changed');
+  ui.app.unmount();
+}, 15_000);

@@ -28,7 +28,8 @@ import {
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { diffScopeOf, workingTreeDiff, type DiffSection } from '../assistant/working-tree.js';
+import { diffScopeOf, listBaseRefs, workingTreeDiff, type DiffMode, type DiffSection } from '../assistant/working-tree.js';
+import { lastTurnChanges } from '../assistant/turn-diff.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
 import { jobConsoleData, renderConsole } from '../assistant/console-view.js';
 import { backgroundCommand } from '../assistant/background-bang.js';
@@ -184,6 +185,14 @@ const DIFF_ACTIONS = [
   'diffScrollDown', 'diffScrollUp', 'diffHalfPageDown', 'diffHalfPageUp', 'diffPageDown', 'diffPageUp',
   'diffMarkReviewed', 'diffSinglePatch', 'diffSource', 'diffFullscreen', 'diffHelp', 'diffClose',
 ] as const;
+// What `d`'s dialog offers: the sources the walk reads — the three git modes and
+// the turn's own write reports — each with the plain phrase its row says.
+const DIFF_SOURCES: ReadonlyArray<{ mode: DiffMode | 'turn'; text: string; detail: string }> = [
+  { mode: 'branch-local', text: 'branch + local', detail: 'commits and local changes' },
+  { mode: 'committed', text: 'committed only', detail: 'commits since the base' },
+  { mode: 'worktree', text: 'working tree only', detail: 'uncommitted changes' },
+  { mode: 'turn', text: 'last turn', detail: 'what write tools reported' },
+];
 // That list: one `!command`-like message with a console view of what the job has printed
 // (its tail, as a view keeps it), live while it runs.
 function jobMessages(job: ShellJob): ChatMsg[] {
@@ -514,6 +523,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // scroll-into-view carry the person MOVED — a mode toggle is deliberate and
           // the cursor's row comes back under the eye even where its identity holds.
           const [diffScrollNonce, setDiffScrollNonce] = ui.useState(0);
+          // What the walk reads, chosen in `d`'s dialog: the source — the git modes
+          // and the turn's own write reports — and the base each top compares
+          // against. Both are the person's preference for the life of the process,
+          // never session state, and the walk reads them at walk time: a choice
+          // needs no second wiring.
+          const diffSourceRef = ui.useRef<DiffMode | 'turn'>('branch-local');
+          const diffBaseRef = ui.useRef(new Map<string, string>());
+          // A source switch's cursor rule, read by the walk that follows it: the
+          // cursor's file keeps its place where the new source has it, and where it
+          // does not the cursor falls on the first item of the new source. Every
+          // other walk clears the cursor where the file went and leaves it so.
+          const diffCarryRef = ui.useRef(false);
           const diffCursorRef = ui.useRef<DiffCursor | null>(null);
           const [diffCursor, setDiffCursor] = ui.useState<DiffCursor | null>(null);
           const [diffLoading, setDiffLoading] = ui.useState(false);
@@ -1196,7 +1217,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const seq = ++diffWalked.current;
             if (!diffLoadedRef.current) setDiffLoading(true);
             try {
-              const { sections: raw, gitless, failed } = await workingTreeDiff([diffScope()]);
+              // The walk reads the person's choices at walk time — the source and
+              // the base map above — so a picker's choice is just another walk.
+              // `last turn` is no git walk at all: what the write tools reported
+              // IS the source (`src/assistant/turn-diff.ts`).
+              const source = diffSourceRef.current;
+              const { sections: raw, gitless, failed } = source === 'turn'
+                ? { sections: lastTurnChanges(convRef.current!.messages), gitless: false, failed: false }
+                : await workingTreeDiff([diffScope()], { base: (top) => diffBaseRef.current.get(top), mode: source });
               if (seq !== diffWalked.current || !diffOpenRef.current) return;
               // A diff is text a token may sit in — a config, a script, a log — so it is
               // redacted before it reaches the state the panel draws from.
@@ -1204,14 +1232,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // Where the cursor rests is re-found on every walk: the same pair while the
               // walk still draws it, the file's row when only its hunk went, and nothing at
               // all when the file itself is gone. The first walk of an open panel — nothing
-              // to re-find — puts it on the first file's row.
+              // to re-find — puts it on the first file's row. A source switch is the one
+              // walk with its own rule (`diffCarryRef`): its file where the new source has
+              // it, the first item of the new source where it does not.
               const at = diffCursorRef.current;
               const items = diffPanelItems(sections, diffCollapsedRef.current);
+              const carried = diffCarryRef.current;
+              if (carried) diffCarryRef.current = false;
+              const first = diffFirstItem(items);
               const cursor = at === null
-                ? (diffLoadedRef.current ? null : items.find((it) => it.hunk === -1) ?? items[0] ?? null)
+                ? (diffLoadedRef.current ? (carried ? first : null) : first)
                 : items.some((it) => it.fileKey === at.fileKey && it.hunk === at.hunk) ? at
                 : items.some((it) => it.fileKey === at.fileKey && it.hunk === -1) ? { fileKey: at.fileKey, hunk: -1 }
-                : null;
+                : (carried ? first : null);
               diffSectionsRef.current = sections;
               setDiffSections(sections);
               setDiffGitless(gitless);
@@ -1869,6 +1902,104 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).then(apply, fail);
               else apply(r);
             } catch (e) { fail(e); }
+          };
+          // The base picker a `base:` row opens (`Base branch`), over the source
+          // dialog: one group per side of `listBaseRefs` — the local branches and
+          // the remote refs. ⏎ takes the ref under the cursor for that root and
+          // drops BOTH panels (the choice is made), then the walk runs against it;
+          // Esc goes back to the source dialog, the panel stack's own way.
+          const openBasePicker = (root: string): Promise<PanelSpec> =>
+            listBaseRefs(root).then(({ local, remote }) => ({
+              title: 'Base branch',
+              rows: () => [
+                { id: 'group:local', text: 'local', kind: 'group' as const },
+                ...local.map((r) => ({ id: `ref:${r}`, text: r })),
+                { id: 'group:remote', text: 'remote', kind: 'group' as const },
+                ...remote.map((r) => ({ id: `ref:${r}`, text: r })),
+              ],
+              keys: [{
+                key: 'return', label: 'use',
+                run: (id: string | null) => {
+                  if (!id || !id.startsWith('ref:')) return undefined;
+                  diffBaseRef.current.set(root, id.slice('ref:'.length));
+                  setPanel(null);
+                  diffWalked.current++; // a walk in flight answers the old base
+                  void walkDiff();
+                  return undefined;
+                },
+              }],
+            }));
+          // `d`'s source dialog: what the walk reads — the sources in `DIFF_SOURCES`,
+          // then, for a git source, one `base` row per top the last walk read. The
+          // row names what compares there: the person's pick, else the ref the walk
+          // itself resolved (their pick when it stands, else the top's default),
+          // else `not picked` — never a silent HEAD. Rows are read at every draw, so
+          // a section the walk adds or takes away is seen while the dialog is open.
+          const openDiffSource = () => {
+            const current = diffSourceRef.current;
+            const rows = (): PanelRow[] => {
+              const sources: PanelRow[] = DIFF_SOURCES.map((s) => ({
+                id: `source:${s.mode}`,
+                text: s.text,
+                detail: s.detail,
+                ...(s.mode === current ? { tone: 'ok' as const } : {}),
+              }));
+              if (current === 'turn') return sources;
+              const tops: DiffSection[] = [];
+              const seen = new Set<string>();
+              for (const s of diffSectionsRef.current) {
+                if (s.kind === 'reported' || seen.has(s.root)) continue;
+                seen.add(s.root);
+                tops.push(s);
+              }
+              if (!tops.length) return sources;
+              return [
+                ...sources,
+                { id: 'group:base', text: 'base', kind: 'group' },
+                ...tops.map((s) => {
+                  const picked = diffBaseRef.current.get(s.root);
+                  const ref = picked ?? (s.base && s.base !== 'HEAD' ? s.base : 'not picked');
+                  // One top talks of itself alone; several must say which is which.
+                  return { id: `base:${s.root}`, text: tops.length > 1 ? `base · ${path.basename(s.root)} · ${ref}` : `base · ${ref}` };
+                }),
+              ];
+            };
+            const spec: PanelSpec = {
+              title: 'Diff source',
+              // The rows are read at every draw; the cursor stays on its row by id.
+              follow: true,
+              rows,
+              keys: [{
+                key: 'return', label: 'use',
+                run: (id: string | null) => {
+                  if (!id) return undefined;
+                  if (id.startsWith('source:')) {
+                    const mode = id.slice('source:'.length) as DiffMode | 'turn';
+                    if (mode !== diffSourceRef.current) {
+                      diffSourceRef.current = mode;
+                      // The switch's own cursor rule (the carry), and what a walk in
+                      // flight answers is the old source's — dropped.
+                      diffCarryRef.current = true;
+                      diffWalked.current++;
+                      void walkDiff();
+                    }
+                    setPanel(null);
+                    return undefined;
+                  }
+                  if (id.startsWith('base:')) return openBasePicker(id.slice('base:'.length));
+                  return undefined;
+                },
+              }],
+            };
+            openPanel(spec);
+            // The dialog opens on the source the walk reads now — the row the
+            // person is choosing from, not the first one.
+            const cur = panelRef.current;
+            if (cur && panelTop(cur) === spec) {
+              const found = panelRows(cur).rows;
+              const at = found.findIndex((r) => r.id === `source:${current}`);
+              if (at > 0) setPanel({ ...cur, cursor: at, at: found[at]!.id });
+            }
           };
           // The work picker (`/work`, its `work` key and `↓` on an empty field): the
           // session's live subagents and background shells as ONE bottom strip, one tab
@@ -3244,8 +3375,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // `m` marking the file the cursor rests in reviewed (it folds and the
               // cursor steps to the next file row; marked again, the mark goes and the
               // file reopens), `s` swapping the whole list for the cursor's file under
-              // its place in the count (a second `s` gives the list back), ⏎ folding the
-              // file the cursor is on and `q` closing the viewer. Only while the panel
+              // its place in the count (a second `s` gives the list back), `d` opening
+              // the dialog of sources and base branches, ⏎ folding the file the cursor
+              // is on and `q` closing the viewer. Only while the panel
               // takes the keyboard (the gate its keys share with the exit keys: the
               // viewer is drawn and the field is empty, no y/n, question or `:` line
               // wants it), and only on the panel's OWN bindings — a bound action acts
@@ -3296,6 +3428,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The one-file view is the panel's own too: `s` swaps the list for
                   // the cursor's file, on its binding alone.
                   if (isKey(host.keys.diffSinglePatch ?? [], key)) { toggleDiffSingle(); return true; }
+                  // `d` opens the source dialog — what the walk reads, and the base
+                  // picker under a git source — on its binding alone.
+                  if (isKey(host.keys.diffSource ?? [], key)) { openDiffSource(); return true; }
                   // The offer is the host's recovery from a limit and outranks a fold: the
                   // field's own row says `⏎ continue`, so ⏎ is the field's then.
                   if (key.name === 'return' && !key.ctrl && !key.meta && !conv.continueOffer) { toggleDiffFile(); return true; }
@@ -3742,7 +3877,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               sections: diffSections,
               collapsed: diffCollapsed,
               cursor: diffCursor,
-              source: 'branch-local' as const,
+              source: diffSourceRef.current,
               reviewed: diffReviewed,
               single: diffSingle,
               scrollNonce: diffScrollNonce,
