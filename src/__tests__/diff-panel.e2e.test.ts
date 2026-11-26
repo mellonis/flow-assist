@@ -1390,5 +1390,32 @@ test('every key the hint row advertises acts', async () => {
   await settle(4);
   expect(ui.backend.lastFrame).not.toContain('diff ·');
   expect(ui.backend.lastFrame).toContain('⏎ send');
+  // `esc` — the hint's close segment — closes the ENTIRE viewer from the fullscreen
+  // too, with no turn running: the frame is gone and the chat is back. One press.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'));
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('╭─ Diff');
+  await ui.press('escape');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Diff');
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  // `q` closes the viewer from the fullscreen too — and never quits the app: the app
+  // frame and its field are alive after it.
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'));
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('╭─ Diff');
+  await ui.press('q');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Diff');
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  expect(ui.backend.lastFrame).toContain('Flow Assist');
   ui.app.unmount();
-}, 20_000);
+}, 25_000);
