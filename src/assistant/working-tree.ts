@@ -28,7 +28,9 @@
 //
 // A git that is missing, or that fails on one top, never throws out of here: that top
 // contributes no section and the walk answers `failed`, so a tree that could not be
-// read is never shown as a clean one.
+// read is never shown as a clean one. A base mode whose batch diff git refused answers
+// `failed` too, however many hunks its per-file fallback recovers: the batch alone
+// carries the commits' own files.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -77,8 +79,9 @@ export type DiffMode = 'branch-local' | 'committed' | 'worktree';
 // What a walk answers: the sections it drew — one per git top, each against its own
 // base — and the two honest nothings. `gitless`: the scope is outside git entirely, so
 // the panel says `not a git repository`; `failed`: a top was found and git could not
-// read it, so the panel says that — neither ever reads as `no changes in the working
-// tree` unless a repository was read and was clean.
+// read it to the end — it failed outright, or a base mode's batch diff was refused —
+// so the panel says that. Neither ever reads as `no changes in the working tree`
+// unless a repository was read and was clean.
 export interface WorkingTreeDiff {
   sections: DiffSection[];
   gitless: boolean;
@@ -440,10 +443,13 @@ export async function listBaseRefs(root: string): Promise<{ local: string[]; rem
 // One git top's section: everything the mode holds under `root` that belongs to `top`.
 // A nested repository is left to the section the walk gives it — git reports it as a
 // `sub/` entry or a staged gitlink, and it is a folder either way, never a file of
-// this top. `null` — the mode holds nothing there, so there is nothing to draw. A top
-// whose base the mode needs but cannot get answers an empty section with `base: ''` —
-// not `null`, so the panel can word it and offer the picker.
-async function headSection(root: string, top: string, tops: string[], opts: WalkOpts): Promise<DiffSection | null> {
+// this top. `section: null` — the mode holds nothing there, so there is nothing to
+// draw. `failed` says a base mode's batch diff was refused: its per-file fallback
+// recovers what it can, but the batch alone carries the commits' own files, so that
+// read is never the whole tree and the walk must say it failed. A top whose base the
+// mode needs but cannot get answers an empty section with `base: ''` — not `null`, so
+// the panel can word it and offer the picker.
+async function headSection(root: string, top: string, tops: string[], opts: WalkOpts): Promise<{ section: DiffSection | null; failed: boolean }> {
   // Repositories nested INSIDE this top own their paths. A top above it owns `top`
   // itself and must not swallow what is inside.
   const nested = tops.filter((t) => t !== top && within(t, top));
@@ -460,16 +466,20 @@ async function headSection(root: string, top: string, tops: string[], opts: Walk
     .map((entry) => ({ entry, abs: path.resolve(top, entry.path) }))
     .filter(({ abs }) => owns(abs));
   const mode = opts.mode ?? 'branch-local';
+  // A base mode compares against a base; `worktree` holds exactly what the status
+  // lists and needs no base at all. The flag only names the modes whose read is
+  // incomplete without the batch.
+  const baseMode = mode !== 'worktree';
   let spec: string;
   let base: string;
   if (mode === 'worktree') {
     // The one source that needs no base: the last commit is where the worktree stands.
-    if (!changed.length) return null;
+    if (!changed.length) return { section: null, failed: false };
     spec = 'HEAD';
     base = 'HEAD';
   } else {
     const chosen = await baseFor(top, opts);
-    if (chosen === null) return { root, base: '', files: [] };
+    if (chosen === null) return { section: { root, base: '', files: [] }, failed: false };
     spec = mode === 'committed' ? `${chosen}...HEAD` : chosen;
     base = chosen;
   }
@@ -477,9 +487,13 @@ async function headSection(root: string, top: string, tops: string[], opts: Walk
   // The batch is scoped to the root's part of the tree — a root deep inside a large
   // repository would otherwise diff that entire repository on every refresh, and a top
   // nested under the root is wholly the root's part — and it is what makes a
-  // modification cheap: one git call for the tree instead of one per file. Its failure
-  // is not the section's either: `oneFile` diffs a file with no segment on its own, so
-  // one failed batch costs per-file calls, never the section's hunks.
+  // modification cheap: one git call for the tree instead of one per file. `oneFile`
+  // diffs a file with no segment on its own, so a refusal recovers what the per-file
+  // calls carry; but the batch alone carries the commits' OWN files (a clean file the
+  // status cannot see, and no per-file call names), so in a base mode a refused batch
+  // is a failed read however many hunks the fallback recovers. In `worktree` the
+  // status names every entry the mode holds, so there the batch is an optimization and
+  // a refusal is not the walk's business.
   const scope = within(root, top) ? path.relative(top, root) || '.' : '.';
   let segments = new Map<string, string>();
   let batched = false;
@@ -489,6 +503,7 @@ async function headSection(root: string, top: string, tops: string[], opts: Walk
       batched = true;
     } catch { /* per file, below */ }
   }
+  const batchRefused = baseMode && head && !batched;
   // What the mode holds: its diff's own files (a committed change to a file the
   // worktree is clean for is only here) plus every status entry it keeps — for the
   // letter, and for an untracked file in the local sources. `committed` keeps a status
@@ -512,8 +527,8 @@ async function headSection(root: string, top: string, tops: string[], opts: Walk
     const rel = path.relative(root, abs).split(path.sep).join('/');
     files.push({ status, path: rel, ...(await oneFile(root, top, entry, status, segments, head, spec)) });
   }
-  if (!files.length) return null;
-  return { root, base, files };
+  if (!files.length) return { section: null, failed: batchRefused };
+  return { section: { root, base, files }, failed: batchRefused };
 }
 
 // What a root is made of: its git tops. The scope must itself stand in a repository —
@@ -566,8 +581,8 @@ async function scanRoot(root: string): Promise<string[]> {
 // order, each section against its own base. Sections are never merged across roots —
 // two checkouts of one repository are two answers. `gitless` says the scope is outside
 // git, which is what an empty `sections` then means: `not a git repository`, never a
-// clean tree; `failed` says a top was found and git could not read it, which is never
-// a clean tree either.
+// clean tree; `failed` says a top was found and git could not read it to the end, which
+// is never a clean tree either.
 export async function workingTreeDiff(roots: string[], opts?: { base?: string | ((root: string) => string | undefined); mode?: DiffMode }): Promise<WorkingTreeDiff> {
   const sections: DiffSection[] = [];
   let gitless = true;
@@ -579,8 +594,9 @@ export async function workingTreeDiff(roots: string[], opts?: { base?: string | 
       if (tops.length) gitless = false;
       for (const top of tops) {
         try {
-          const section = await headSection(root, top, tops, opts ?? {});
-          if (section) sections.push(section);
+          const read = await headSection(root, top, tops, opts ?? {});
+          if (read.section) sections.push(read.section);
+          if (read.failed) failed = true;
         } catch {
           // git is not installed, or it failed on this top: the top contributes no
           // section and the walk goes on — saying so, rather than drawing the rest as
