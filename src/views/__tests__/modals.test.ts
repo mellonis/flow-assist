@@ -833,6 +833,36 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   handle.unmount();
 });
 
+test("the diff viewer's keys read as plain words in the help", async () => {
+  const backend = new TestBackend(110, 40);
+  const handle = await render(
+    h(renderHelp, {
+      width: 110,
+      height: 40,
+      theme: { modals: { bg: undefined } },
+      helpOpen: true,
+      keys: {
+        diffNextHunk: [']'], diffPrevHunk: ['['], diffNextFile: ['down'], diffPrevFile: ['up'],
+        diffScrollDown: ['j'], diffScrollUp: ['k'], diffPageDown: ['pagedown'], diffPageUp: ['pageup'],
+        diffHalfPageDown: ['ctrl+d'], diffHalfPageUp: ['ctrl+u'], diffFirst: ['home'], diffLast: ['end'],
+        diffMarkReviewed: ['m'], diffSinglePatch: ['s'], diffSource: ['d'], diffFullscreen: ['f'],
+        diffHelp: ['?'], diffClose: ['q'],
+      },
+    }),
+    backend,
+  );
+  const frame = backend.lastFrame;
+  // One plain phrase per action — what the ticket calls it, not the camelCase name.
+  for (const label of [
+    'next change', 'previous change', 'next file', 'previous file', 'scroll down', 'scroll up',
+    'page down', 'page up', 'half page down', 'half page up', 'to the first change', 'to the last change',
+    'mark reviewed', 'one file / all files', 'diff source', 'full screen', 'the diff panel', 'close the diff panel',
+  ]) expect(frame).toContain(label);
+  expect(frame).not.toContain('diff next');
+  expect(frame).not.toContain('diffClose');
+  handle.unmount();
+});
+
 // A wide cluster (a CJK usage word, a remapped key) takes two grid cells, and
 // `backend.lastFrame` omits the second one (its `char` is `''`), so a plain string
 // index is not a column — this helper walks the buffer cell by cell to find the

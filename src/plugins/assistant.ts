@@ -40,14 +40,14 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentsPanelRows, stopQuestion } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelItems, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, type DiffBodyScroll, type DiffCursor, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelItems, firstFoldRow, inputVisualRows, liveChatStatus, nextFoldLevel, pagerTitle, pendingChatRows, renderDiffFull, type ConfirmAsk, type DiffBodyScroll, type DiffCursor, type DiffPanelView, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, canonicalBinding, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
-import { askKey } from '../assistant/ask.js';
+import { askKey, type AskState } from '../assistant/ask.js';
 import { memoryCommand, type Shown } from '../assistant/memory-command.js';
 import { migrateMemoryJson, removeFact, writeIndex } from '../assistant/memory-store.js';
 import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-trust.js';
@@ -566,10 +566,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // panel fullscreen over the terminal (`diffFullRef`) the split says nothing — the
           // keys' drawn condition is either shape.
           const diffShownRef = ui.useRef(false);
+          // The fullscreen view (`f`): the panel grown over the chat's whole area. The
+          // ref is what the keys and the draw read; the state is what re-renders for it.
+          // A toggle changes no draft — the field's text is untouched by either shape.
           const diffFullRef = ui.useRef(false);
+          const [diffFull, setDiffFullState] = ui.useState(false);
           // The rows the panel's body draws in — the split's height less its frame and hint
-          // row. The half-page key is half of it: rows, computed in the key handler from
-          // this draw's measure (`renderDiffPanel`'s scroll seam is rows and pages).
+          // row, or the fullscreen's whole body. The half-page key is half of it: rows,
+          // computed in the key handler from this draw's measure (`renderDiffPanel`'s scroll
+          // seam is rows and pages).
           const diffBodyRowsRef = ui.useRef(0);
           // The one channel from the key handler to the panel's list scroll. The chat hands
           // the object over and the body fills it with the list's live methods (the seam
@@ -834,9 +839,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // a drag is flowtty's selection — it copies, and it must never fold.
           const CLICK_MS = 250;
           const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
-            // While the pager is drawn a click folds nothing in the conversation it
-            // stands in for, and a drag is flowtty's selection of the pager's own text.
-            if (pagerShownRef.current || watchRef.current) { pressRef.current = null; return false; }
+            // While the pager or the fullscreen viewer stands in for the conversation a
+            // click folds nothing in the rows it covers, and a drag is flowtty's selection
+            // of what is drawn.
+            if (pagerShownRef.current || watchRef.current || diffFullRef.current) { pressRef.current = null; return false; }
             if (key.name === 'mousedrag') { pressRef.current = null; return false; }
             if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
             const down = pressRef.current;
@@ -1286,6 +1292,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!diffOpenRef.current) return;
             diffOpenRef.current = false;
             diffShownRef.current = false;
+            diffFullRef.current = false;
+            setDiffFullState(false);
             setDiffOpenState(false);
             setDiffLoading(false);
             if (diffTimer.current) { clearTimeout(diffTimer.current); diffTimer.current = null; }
@@ -1386,6 +1394,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             diffSingleRef.current = !diffSingleRef.current;
             setDiffSingle(diffSingleRef.current);
             setDiffScrollNonce((n: number) => n + 1);
+            host.notify();
+          };
+          // `f` grows the panel over the chat's whole area and back (`diffFullscreen`).
+          // The fullscreen holds the viewer's keys whatever the draft holds; the toggle
+          // itself never touches the draft.
+          const toggleDiffFull = () => {
+            if (!diffOpenRef.current) return;
+            diffFullRef.current = !diffFullRef.current;
+            setDiffFullState(diffFullRef.current);
             host.notify();
           };
           // A panel the layout gave no rows is open and invisible: a chat docked beside a
@@ -2947,12 +2964,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
           // Whether the diff panel takes the keyboard now — the ONE gate its keys share:
           // the viewer is drawn (its split, or its fullscreen shape) and nobody else wants
-          // the keyboard — the field is empty, and no y/n, question or `:` line stands over
-          // the panel. The dispatcher reads it and so do the exit keys: a key the panel
-          // takes never arms them.
+          // the keyboard — the field is empty (the fullscreen drops that clause: its frame
+          // shows no field and holds its keys whatever a draft holds), and no y/n, question
+          // or `:` line stands over the panel. The dispatcher reads it and so do the exit
+          // keys: a key the panel takes never arms them.
           const diffTakesKeys = (): boolean =>
             diffOpenRef.current && (diffShownRef.current || diffFullRef.current)
-            && fieldEmpty() && !conv.confirm && !conv.question && !childAskNow() && !hostKeys().line;
+            && (fieldEmpty() || diffFullRef.current) && !conv.confirm && !conv.question && !childAskNow() && !hostKeys().line;
           // The typing grace a question owes the person's sentence (ask-children-spec.md
           // (subagent y/n)): it takes the keyboard only once the last key the chat took is
           // older than ASK_GRACE_MS, and never while the `:` line is open — a half-written
@@ -3437,6 +3455,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (isKey(host.keys.diffPageDown ?? [], key)) { diffBodyRef.current.scrollPage(1); return true; }
                   if (isKey(host.keys.diffPageUp ?? [], key)) { diffBodyRef.current.scrollPage(-1); return true; }
                   if (isKey(host.keys.diffClose ?? [], key)) { closeDiff(); return true; }
+                  // `f` grows the panel over the chat's whole area and back — the
+                  // fullscreen holds these keys whatever the draft holds.
+                  if (isKey(host.keys.diffFullscreen ?? [], key)) { toggleDiffFull(); return true; }
+                  // `?` opens the help of the keys that act here — the host's own help
+                  // modal, over its keys and the commands. The chat draws it over
+                  // itself while it is open (the chat's return, below).
+                  if (isKey(host.keys.diffHelp ?? [], key)) {
+                    (host.store as { help?: { setHelpModal?: (o: boolean) => void } }).help?.setHelpModal?.(true);
+                    return true;
+                  }
                   // The mark is the panel's own: `m` marks the file the cursor rests in
                   // reviewed, on its binding alone.
                   if (isKey(host.keys.diffMarkReviewed ?? [], key)) { markDiffReviewed(); return true; }
@@ -3449,6 +3477,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The offer is the host's recovery from a limit and outranks a fold: the
                   // field's own row says `⏎ continue`, so ⏎ is the field's then.
                   if (key.name === 'return' && !key.ctrl && !key.meta && !conv.continueOffer) { toggleDiffFile(); return true; }
+                  // In the fullscreen the viewer holds EVERY key while it is drawn: its
+                  // frame shows no field, so a key that is none of the viewer's goes
+                  // nowhere here — never into the draft behind it. Esc is the one key
+                  // that falls through: it keeps stopping a running turn first, on the
+                  // order set above its close clause.
+                  if (diffFullRef.current && key.name !== 'escape') return true;
                 }
               }
               if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
@@ -4003,15 +4037,45 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Whether the panel is drawn: the split the layout gave, which the key handlers read.
           diffShownRef.current = !!room.split && (room.split.mode === 'side' || room.split.diff.height > 0);
           // The rows the panel's body draws in this layout — the pane's height less its
-          // frame and the hint row — for the half-page key's rows.
-          diffBodyRowsRef.current = room.split ? room.split.diff.height - 3 : 0;
+          // frame and the hint row — for the half-page key's rows. The fullscreen draws at
+          // the chat's whole area: its frame and hint row take the same three rows.
+          diffBodyRowsRef.current = diffFull ? height - 3 : room.split ? room.split.diff.height - 3 : 0;
           // The conversation's rows are laid out at its half while the panel stands beside
           // them — the measure `renderChatModal` draws them at — so a click's row
           // arithmetic, an anchor and the pager's `blockRows` act on what the screen shows.
           chatWrapRef.current = room.split && room.split.mode === 'side'
             ? Math.max(20, room.split.chat.width - 2)
             : chatWrapWidth(width, fullscreenRef.current);
-          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)(chatProps);
+          const chatNode = (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)(chatProps);
+          // `f`'s fullscreen grown over the chat's whole area — with the rows of a pending
+          // y/n or question drawn over it at a higher zIndex. The viewer's own dialog
+          // takes the screen instead of it while it is up, as it takes the chat's place
+          // in the split.
+          const diffFullDrawn = diffOpenRef.current && diffFullRef.current && !panel;
+          // Core's help is drawn in the host's own layer (the plugin side), which the
+          // chat's slot is painted over — with the chat up its help would open behind the
+          // chat. While its flag is set the chat draws the very render the help is made
+          // of over itself, at the chat area's own origin: what the person sees is here,
+          // and the host's own copy is painted beneath it, the same frame, pixel for
+          // pixel (the dim backdrop flags cells; two draws of it darken nothing twice).
+          const helpOpen = !!(host.store as { help?: { helpModal?: boolean } }).help?.helpModal;
+          if (!diffFullDrawn && !helpOpen) return chatNode;
+          return ui.h(ui.Fragment, undefined,
+            chatNode,
+            diffFullDrawn ? renderDiffFull({
+              width,
+              height,
+              theme: host.config.theme as never,
+              view: chatProps.diffPanel as DiffPanelView,
+              bodyRef: diffBodyRef.current,
+              question: chatProps.pendingQuestion as AskState | null,
+              confirm: chatProps.pendingConfirm as ConfirmAsk | null,
+              askWrap: room.wrap,
+            }) : null,
+            helpOpen
+              ? ui.h(ui.Box, { position: 'absolute', top: 0, left: 0, width, height, zIndex: 16, flexDirection: 'column', justifyContent: 'center', alignItems: 'center' },
+                  (host.viewRegistry.help as (p: Record<string, unknown>) => unknown)({ width, height, theme: host.config.theme, helpOpen: true, commands: host.commandRegistry, keys: host.keys }))
+              : null);
         };
       },
     },

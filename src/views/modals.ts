@@ -2692,13 +2692,7 @@ export function renderChatModal({
             : contextPanel
             ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
             : confirmAsk
-            ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
-                h(Text, { bold: true, color: 'yellow' }, confirmAsk.title),
-                confirmAsk.command != null
-                  ? h(Text, { wrap: 'wrap' }, confirmAsk.command)
-                  : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
-                confirmAsk.input != null ? h(Text, { dim: true, wrap: 'wrap' }, confirmAsk.input) : null,
-                h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
+            ? confirmBox(confirmAsk, m.bg, theme?.error)
             // The field is where the person types — its caret, prompt and placeholder are
             // not text to copy, and a drag over it must not pick them up.
             : h(Box, { flexDirection: 'column', width: '100%' },
@@ -3845,6 +3839,18 @@ function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): numb
   // Three pieces with a gap between each — four, with the input line.
   return 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner) + (v.input != null ? 1 + textRows(v.input, inner) : 0);
 }
+// The y/n block's own rows — the chat's field place draws them, and the diff viewer's
+// fullscreen draws the same rows over itself at a higher zIndex: what waits on the
+// person is answered first in either shape.
+function confirmBox(v: ReturnType<typeof confirmView>, bg: string | undefined, errorColor?: string) {
+  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: bg },
+    h(Text, { bold: true, color: 'yellow' }, v.title),
+    v.command != null
+      ? h(Text, { wrap: 'wrap' }, v.command)
+      : h(Text, { dim: true, wrap: 'truncate' }, v.args),
+    v.input != null ? h(Text, { dim: true, wrap: 'wrap' }, v.input) : null,
+    h(Text, { color: errorColor, selectable: false }, v.hint));
+}
 function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, recallLine = ''): number {
   const legend = contextLegend(r).length;
   const body = wrap >= GRID_COLS * 2 + 30 ? Math.max(GRID_ROWS, legend) : GRID_ROWS + 1 + legend;
@@ -3986,6 +3992,12 @@ const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
   open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
   toEnd: 'to the end of the conversation', work: 'the work picker — /work does the same',
+  // The `/diff` viewer's keys, in the plain words the hint row and the ticket use.
+  diffNextHunk: 'next change', diffPrevHunk: 'previous change', diffNextFile: 'next file', diffPrevFile: 'previous file',
+  diffScrollDown: 'scroll down', diffScrollUp: 'scroll up', diffPageDown: 'page down', diffPageUp: 'page up',
+  diffHalfPageDown: 'half page down', diffHalfPageUp: 'half page up', diffFirst: 'to the first change', diffLast: 'to the last change',
+  diffMarkReviewed: 'mark reviewed', diffSinglePatch: 'one file / all files', diffSource: 'diff source', diffFullscreen: 'full screen',
+  diffHelp: 'the diff panel', diffClose: 'close the diff panel',
 };
 // Keys the HOST acts on from anywhere — the assistant's `chat`, `sessions` and `work`
 // included, whose keys work on every screen. Everything else in the key map belongs to a
@@ -4050,6 +4062,54 @@ export function renderHelp({
       h(Text, { dim: true, selectable: false }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`),
     ),
   );
+}
+
+// ─── The diff viewer's fullscreen (pure render) ───────────────────────────────
+// The viewer grown over the chat's whole area: the panel's own body and hint row in
+// `frame`'s shape (renderHelp is the model), over the chat. A pending y/n or question
+// draws over it at a higher zIndex — the same block rows the chat's field place draws —
+// so what waits on the person is answered first while the viewer holds every other key.
+export function renderDiffFull({
+  width,
+  height,
+  theme,
+  view,
+  bodyRef,
+  question = null,
+  confirm = null,
+  askWrap,
+}: {
+  width: number;
+  height: number;
+  theme: Theme | undefined;
+  // What the chat hands the panel's draw already (`DiffPanelView`): the walk's rows as
+  // they are now, the folds, the marks, the cursor and the caps the hint reads.
+  view: DiffPanelView;
+  bodyRef?: DiffBodyScroll;
+  // A pending y/n or question, drawn over the frame: the rows the chat's field place
+  // draws, at the width it draws them (`askWrap`).
+  question?: AskState | null;
+  confirm?: ConfirmAsk | null;
+  askWrap?: number;
+}) {
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const items = diffPanelItems(view.sections, view.collapsed);
+  // The panel's inner width — the frame's border, its padding and the body's scrollbar.
+  const wrap = Math.max(10, width - 10);
+  const { rows, cursorRow } = diffPanelBody({ ...view, items, wrap, palette: m });
+  const hint = diffHint(view.caps, wrap);
+  return h(Fragment, null,
+    h(Box, overlay(width, height),
+      h(Box, frame(m, 'Diff', { width, height }),
+        h(DiffBody, { rows, cursorRow, cursor: view.cursor, scrollNonce: view.scrollNonce, isActive: true, bodyRef }),
+        hint ? h(Text, { key: 'hint', dim: true, wrap: 'truncate', selectable: false }, hint) : null)),
+    question || confirm
+      ? h(Box, overlay(width, height, 15),
+          h(Box, { width: (askWrap ?? wrap) + 2 },
+            question
+              ? renderAsk(question, m.bg, askWrap ?? wrap)
+              : confirmBox(confirmView(confirm!, askWrap ?? wrap), m.bg, theme?.error)))
+      : null);
 }
 
 // ─── Reminder banner (pure render) ─────────────────────────────────────────────

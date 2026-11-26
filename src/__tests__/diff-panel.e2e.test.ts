@@ -1171,3 +1171,224 @@ test('last turn draws what the write tools reported', async () => {
   expect(ui.backend.lastFrame).not.toContain('+changed');
   ui.app.unmount();
 }, 15_000);
+
+// ─── fullscreen, the help and the door ──────────────────────────────────────────
+// `f` grows the panel over the chat's whole area and back, `?` opens the help of the
+// keys that act here, `q`/Esc close the viewer from either shape. The assembled
+// dispatcher block is the promise the hint row makes: one live handler per key it
+// names.
+
+test('f grows the panel to the terminal and back', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  await ui.press('f');
+  await settle(4);
+  const lines = frameLines(ui);
+  const frame = ui.backend.lastFrame;
+  // The frame over the terminal, titled `Diff` — `renderHelp`'s shape, one frame.
+  const titleAt = lines.findIndex((l) => l.includes('╭─ Diff'));
+  const headerAt = lines.findIndex((l) => l.includes('diff · 1 file'));
+  expect(titleAt).toBeGreaterThanOrEqual(0);
+  expect(headerAt).toBeGreaterThanOrEqual(0);
+  // The panel's own header is the first body row, just under the frame's top.
+  expect(headerAt - titleAt).toBeLessThanOrEqual(3);
+  // The chat's frame, field and split are not drawn inside it.
+  expect(frame).not.toContain('⏎ send');
+  expect(frame).not.toContain('Flow Assist');
+  // `f` grows it back to the split — the chat returns with its field.
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Diff');
+  expect(ui.backend.lastFrame).toContain('diff · 1 file');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  ui.app.unmount();
+}, 15_000);
+
+test('the fullscreen keeps its keys while a draft exists', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  await ui.press('f');
+  await settle(4);
+  // A key that is none of the viewer's: the fullscreen frame shows no field, and the
+  // keystroke must not type into the draft behind it.
+  await ui.type('x');
+  expect(ui.backend.lastFrame).not.toContain('⏎ send');
+  expect(ui.backend.lastFrame).not.toContain('› x');
+  // The viewer's keys hold while it is drawn: `m` still marks the cursor's file.
+  await ui.press('m');
+  expect(ui.backend.lastFrame).toContain('✓');
+  // The draft never formed — back in the split the field is as it was.
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  expect(ui.backend.lastFrame).not.toContain('› x');
+  ui.app.unmount();
+}, 15_000);
+
+test('a question drawn over the fullscreen is answered first', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  // Turn one freezes mid-answer; once the panel is fullscreen its next step is a write
+  // whose y/n lands over the fullscreen.
+  model.script(
+    [{ text: 'I will run it. ' }, { hold: true }, { tool: 'run_command', args: { command: 'echo two >> a.txt; echo new > b.txt', cwd: root } }],
+    [{ text: 'ran it' }],
+  );
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  await ui.type('run the command');
+  await ui.press('return');
+  await settleUntil(() => model.held);
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('╭─ Diff');
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  // The y/n draws OVER the fullscreen — and the fullscreen stays under it.
+  const waiting = ui.backend.lastFrame;
+  expect(waiting).toContain('Confirm write: run_command');
+  expect(waiting).toContain('╭─ Diff');
+  await ui.press('y');
+  // The write lands and the walk reads the tree again — under the still-standing
+  // fullscreen (the answer's own rows are behind it and are seen once it drops).
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 2 files'), 8000);
+  expect(ui.backend.lastFrame).toContain('╭─ Diff');
+  // The write's own row landed in the chat behind the fullscreen — seen once it drops.
+  await ui.press('f');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Diff');
+  await settleUntil(() => ui.backend.lastFrame.includes('ran it'));
+  // The write's call — its folded trail row under the question it answered.
+  expect(ui.backend.lastFrame).toContain('+ 1 command');
+  ui.app.unmount();
+}, 20_000);
+
+test('? opens the help and q closes the viewer', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  await ui.press('?');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('╭─ Help');
+  // Esc closes the help and leaves the viewer standing.
+  await ui.press('escape');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Help');
+  expect(ui.backend.lastFrame).toContain('diff · 1 file');
+  // `q` is the viewer's door — it closes the viewer, and the chat is back.
+  await ui.press('q');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  ui.app.unmount();
+}, 15_000);
+
+test('while the : line is open the panel takes nothing', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root, chatMode: 'panel' });
+  await openDiff(ui);
+  // The plugin's side takes the keys (Ctrl+] hands them over) and `:` opens the host's
+  // command line from there. With the line open the panel gets no key at all: `m` types
+  // into the line and marks nothing.
+  ui.backend.press({ name: ']', ctrl: true });
+  await settle(4);
+  await ui.press(':');
+  await settle(4);
+  await ui.type('m');
+  await settle(4);
+  expect(ui.backend.lastFrame).toMatch(/: m/);
+  expect(ui.backend.lastFrame).not.toContain('✓');
+  expect(ui.backend.lastFrame).toContain('diff ·');
+  ui.app.unmount();
+}, 15_000);
+
+test('a click over the fullscreen folds its file and nothing behind it', async () => {
+  const root = scratchTree();
+  const model = new ScriptedModel();
+  // A turn with one tool call: the trail it leaves (`▸ + 1 tool`) is a fold line in the
+  // conversation — the rows the fullscreen now covers.
+  model.script([{ tool: 'datetime', args: {} }], [{ text: 'Done.' }]);
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await ui.press('F');
+  await ui.type('what day is it');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  await settle(8);
+  await ui.type('/diff');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
+  await settle(6);
+  await ui.press('f');
+  await settle(6);
+  // A click on the viewer's own row folds the file under it.
+  const lines = frameLines(ui);
+  const fileY = lines.findIndex((l) => l.includes('M a.txt'));
+  expect(fileY).toBeGreaterThanOrEqual(0);
+  const fileX = lines[fileY]!.indexOf('a.txt');
+  ui.backend.mouse('down', fileX, fileY);
+  ui.backend.mouse('up', fileX, fileY);
+  await settle(6);
+  expect(ui.backend.lastFrame).not.toContain('+changed');
+  // A sweep of clicks over the whole viewer: the transcript behind it keeps its folds —
+  // a click folds nothing in the conversation the fullscreen stands in for, as under
+  // the pager.
+  for (let y = 4; y < 32; y++) {
+    ui.backend.mouse('down', 20, y);
+    ui.backend.mouse('up', 20, y);
+    await settle(3);
+  }
+  await ui.press('f');
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('▸ + 1 tool');
+  ui.app.unmount();
+}, 20_000);
+
+test('every key the hint row advertises acts', async () => {
+  const root = scratchPair();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui, 'diff · 2 files');
+  // The hint is a promise on screen — the assembled dispatcher keeps every one of it.
+  // Grown to the terminal the hint draws whole; in the narrow split it is cut.
+  await ui.press('f');
+  await settle(4);
+  const hint = frameLines(ui).find((l) => l.includes('see all'));
+  expect(hint).toBeDefined();
+  for (const words of ['m reviewed', 's one file', 'd source', 'f full', '? see all']) expect(hint).toContain(words);
+  expect(hint!.toLowerCase()).toContain('esc close');
+  await ui.press('f');
+  await settle(4);
+  // `m` marks reviewed.
+  await ui.press('m');
+  expect(ui.backend.lastFrame).toContain('✓');
+  // `s` shows one file and counts its place; `s` again gives the list back.
+  await ui.press('s');
+  expect(ui.backend.lastFrame).toMatch(/diff · \d of 2/);
+  await ui.press('s');
+  expect(ui.backend.lastFrame).not.toMatch(/diff · \d of 2/);
+  // `d` opens the source dialog and Esc pops it back to the viewer.
+  await ui.press('d');
+  expect(ui.backend.lastFrame).toContain('Diff source');
+  await ui.press('escape');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('Diff source');
+  expect(ui.backend.lastFrame).toContain('diff ·');
+  // `f` grows the panel over the terminal and back.
+  await ui.press('f');
+  expect(ui.backend.lastFrame).toContain('╭─ Diff');
+  await ui.press('f');
+  expect(ui.backend.lastFrame).not.toContain('╭─ Diff');
+  // `?` opens the help and Esc closes it.
+  await ui.press('?');
+  expect(ui.backend.lastFrame).toContain('╭─ Help');
+  await ui.press('escape');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('╭─ Help');
+  // `q` closes the viewer from the docked shape too.
+  await ui.press('q');
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('diff ·');
+  expect(ui.backend.lastFrame).toContain('⏎ send');
+  ui.app.unmount();
+}, 20_000);
