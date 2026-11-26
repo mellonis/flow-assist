@@ -2101,7 +2101,11 @@ test('the chat draws a watched child: breadcrumb title, its rows, state and keys
 async function diffFrame(props: {
   sections: DiffSection[];
   collapsed: ReadonlySet<string>;
-  cursor: string | null;
+  cursor: DiffCursor | null;
+  source?: 'branch-local' | 'committed' | 'worktree' | 'turn';
+  reviewed?: ReadonlySet<string>;
+  single?: boolean;
+  caps?: Record<string, string>;
   palette?: Record<string, string | undefined>;
   width?: number;
   wrap?: number;
@@ -2109,10 +2113,15 @@ async function diffFrame(props: {
   gitless?: boolean;
   failed?: boolean;
 }) {
-  const { width, wrap, ...rest } = props;
+  const { width, wrap, source, reviewed, single, caps, ...rest } = props;
   const backend = new TestBackend(width ?? 80, 24);
   const handle = await render(h(renderDiffPanel, {
     ...rest,
+    cursor: props.cursor,
+    source: source ?? 'branch-local',
+    reviewed: reviewed ?? new Set<string>(),
+    single: single ?? false,
+    caps: caps ?? {},
     gitless: props.gitless ?? false,
     failed: props.failed ?? false,
     wrap: wrap ?? 74,
@@ -2124,13 +2133,13 @@ async function diffFrame(props: {
 
 test('the diff panel lists a file with its hunks and folds what is collapsed', async () => {
   const section: DiffSection = {
-    root: '/r', base: 'HEAD',
+    root: '/r', base: 'main',
     files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
   };
   const key = diffFileKey('/r', 'a.txt');
-  const open = await diffFrame({ sections: [section], collapsed: new Set(), cursor: key });
+  const open = await diffFrame({ sections: [section], collapsed: new Set(), cursor: { fileKey: key, hunk: -1 } });
   // The header counts the section, the row says which file and how much it changed.
-  expect(open.frame).toContain('diff · 1 file +1 −1 · vs HEAD');
+  expect(open.frame).toContain('diff · 1 file +1 −1 · vs main');
   expect(open.frame).toContain('▾ M a.txt');
   // The hunks are drawn whole, each row a line of its own with the FILE's number in
   // the gutter; the `@@` row is not drawn — the numbers say what it says, per row.
@@ -2147,10 +2156,10 @@ test('the diff panel lists a file with its hunks and folds what is collapsed', a
     files: [section.files[0]!, { status: 'A', path: 'b.txt', added: 2, removed: 0, hunks: '@@ -0,0 +1,2 @@\n+p\n+q' }],
   };
   const plural = await diffFrame({ sections: [two], collapsed: new Set(), cursor: null });
-  expect(plural.frame).toContain('diff · 2 files +3 −1 · vs HEAD');
+  expect(plural.frame).toContain('diff · 2 files +3 −1 · vs main');
   plural.handle.unmount();
 
-  const folded = await diffFrame({ sections: [section], collapsed: new Set([key]), cursor: key });
+  const folded = await diffFrame({ sections: [section], collapsed: new Set([key]), cursor: { fileKey: key, hunk: -1 } });
   expect(folded.frame).toMatch(/▸ M a\.txt/);
   expect(folded.frame).not.toContain('-one');
   expect(folded.frame).not.toContain('+two');
@@ -2226,18 +2235,18 @@ test('a file the panel cannot show says why, in its row and under it when open',
 test('two sections keep their own header, totals and fold', async () => {
   const sections: DiffSection[] = [
     {
-      root: '/a', base: 'HEAD',
+      root: '/a', base: 'main',
       files: [{ status: 'M', path: 'a.txt', added: 2, removed: 1, hunks: '@@ -1 +1 @@\n-x\n+y\n+z' }],
     },
     {
-      root: '/b', base: 'HEAD',
+      root: '/b', base: 'main',
       files: [{ status: 'A', path: 'a.txt', added: 3, removed: 0, hunks: '@@ -0,0 +1,3 @@\n+p\n+q\n+r' }],
     },
   ];
   const folded = await diffFrame({ sections, collapsed: new Set([diffFileKey('/a', 'a.txt')]), cursor: null });
   // Each section sums its own files, under its own header.
-  expect(folded.frame).toContain('diff · 1 file +2 −1 · vs HEAD');
-  expect(folded.frame).toContain('diff · 1 file +3 −0 · vs HEAD');
+  expect(folded.frame).toContain('diff · 1 file +2 −1 · vs main');
+  expect(folded.frame).toContain('diff · 1 file +3 −0 · vs main');
   // The same relative path is two rows, and folding one leaves the other open.
   expect(folded.frame).toMatch(/▸ M a\.txt/);
   expect(folded.frame).toMatch(/▾ A a\.txt/);
@@ -2257,7 +2266,7 @@ test('a file row says what it changed, in the palette the chat hands over', asyn
     files: [{ status: 'M', path: 'src/app.ts', added: 12, removed: 3, hunks: '@@ -1,3 +1,12 @@\n-gone\n+here' }],
   };
   const drawn = await diffFrame({
-    sections: [section], collapsed: new Set(), cursor: diffFileKey('/r', 'src/app.ts'),
+    sections: [section], collapsed: new Set(), cursor: { fileKey: diffFileKey('/r', 'src/app.ts'), hunk: -1 },
     palette: { accent: 'cyan', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000' },
   });
   expect(drawn.frame).toContain('· +12 −3');
@@ -2339,7 +2348,7 @@ test('a hunk longer than the chat\'s 80-line cap is drawn whole', async () => {
     files: [{ status: 'M', path: 'big.txt', added: 100, removed: 0, hunks: `@@ -0,0 +1,100 @@\n${added}` }],
   };
   const backend = new TestBackend(80, 130);
-  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: null, wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: null, source: 'branch-local' as const, reviewed: new Set<string>(), single: false, caps: {}, wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
   const frame = backend.lastFrame ?? '';
   // Every added line is a row of its own: the last one is drawn and nothing is counted
   // away, which a cap on the rows would do.
@@ -2358,7 +2367,7 @@ test('the cursor file\'s row is drawn inverse, and a reader without colour still
     ],
   };
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: diffFileKey('/r', 'b.txt'), wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
+  const handle = await render(h(renderDiffPanel, { sections: [section], collapsed: new Set<string>(), cursor: { fileKey: diffFileKey('/r', 'b.txt'), hunk: -1 }, source: 'branch-local' as const, reviewed: new Set<string>(), single: false, caps: {}, wrap: 74, gitless: false, failed: false, bg: 'black' }), backend);
   const lines = (backend.lastFrame ?? '').split('\n');
   const y = (t: string) => {
     const at = lines.findIndex((l) => l.includes(t));
@@ -2408,7 +2417,17 @@ const splitSections: DiffSection[] = [{
   root: '/r', base: 'HEAD',
   files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
 }];
-const splitPanel = { sections: splitSections, collapsed: new Set<string>(), cursor: diffFileKey('/r', 'a.txt'), gitless: false, failed: false };
+const splitPanel = {
+  sections: splitSections,
+  collapsed: new Set<string>(),
+  cursor: { fileKey: diffFileKey('/r', 'a.txt'), hunk: -1 } as DiffCursor | null,
+  source: 'branch-local' as const,
+  reviewed: new Set<string>(),
+  single: false,
+  caps: {},
+  gitless: false,
+  failed: false,
+};
 
 test('the panel stands beside the conversation in a wide chat', async () => {
   const wide = new TestBackend(160, 40);
@@ -2477,14 +2496,16 @@ test('the body is one walk: the files ↑/↓ move among, in the drawn order, an
   const a = diffFileKey('/r', 'a.txt');
   const b = diffFileKey('/r', 'b.txt');
   expect(diffPanelFileKeys(sections)).toEqual([a, b]);
+  const items = diffPanelItems(sections, new Set([a]));
   // The header is the first row; with the first file folded the second sits under it.
-  const body = diffPanelBody({ sections, collapsed: new Set([a]), cursor: b, wrap: 40, gitless: false, failed: false });
+  const body = diffPanelBody({ sections, collapsed: new Set([a]), cursor: { fileKey: b, hunk: -1 }, items, wrap: 40, gitless: false, failed: false, source: 'branch-local', reviewed: new Set<string>(), single: false, caps: {} });
   expect(body.cursorRow).toBe(2);
   // Every file is expanded by default: the folded one stops at its row, the other
   // draws its hunks under it.
   expect(body.rows.map((r) => (r as { key: string | null }).key)).toEqual(['s0', 'f0-0', 'f0-1', 'h0-1-0']);
+  expect(body.itemRows).toEqual([1, 2, 3]);
   // A refresh that finds no such file: nothing to scroll to, the rows still drawn.
-  const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: 'missing', wrap: 40, gitless: false, failed: false });
+  const gone = diffPanelBody({ sections, collapsed: new Set([a]), cursor: { fileKey: 'missing', hunk: -1 }, items, wrap: 40, gitless: false, failed: false, source: 'branch-local', reviewed: new Set<string>(), single: false, caps: {} });
   expect(gone.cursorRow).toBe(-1);
   expect(gone.rows).toHaveLength(4);
 });
@@ -2554,6 +2575,238 @@ test('diffFirstItem and diffLastItem are the ends of the list', () => {
   expect(diffLastItem(items)).toEqual(items[items.length - 1]!);
   expect(diffFirstItem([])).toBeNull();
   expect(diffLastItem([])).toBeNull();
+});
+
+// ─── /diff: the panel draws the walk ─────────────────────────────────────────
+// The body stays ONE walk: `itemRows[i]` is the drawn row of `items[i]`, so the row
+// and the key a press moves to cannot disagree. The cursor row is lit and inverted
+// wherever it rests, and every hint glyph is a cap the chat handed over.
+
+test("the body's rows and items agree", () => {
+  // Two files — the first with two hunks (three rows, then two), the second folded.
+  // The fold takes its hunks out of the DRAWN rows, so even an item naming one of
+  // them answers -1.
+  const items = [...diffPanelItems(walkSections, new Set([bFile.fileKey])), bHunk0];
+  const body = diffPanelBody({ sections: walkSections, collapsed: new Set([bFile.fileKey]), cursor: null, items, wrap: 40, gitless: false, failed: false, source: 'branch-local', reviewed: new Set<string>(), single: false, caps: {} });
+  // The rows: the section's header (0), a.txt's row (1), its hunk 0's three rows
+  // (2–4), its hunk 1's two (5–6), b.txt's row (7). Each item rests where its row of
+  // interest starts — a file's own row, a hunk's first row.
+  expect(body.itemRows).toEqual([1, 2, 5, 7, -1]);
+  expect((body.rows[2] as { key: string | null }).key).toBe('h0-0-0');
+  expect((body.rows[5] as { key: string | null }).key).toBe('h0-0-3');
+
+  // A file keyed by something other than its drawn path keys its rows the way the
+  // items, the fold set and `diffPanelFileKeys` do — one key for all of them.
+  const keyed: DiffSection[] = [{ root: '/r', base: 'main', files: [{ status: 'M', path: 'draft.md', key: 'notes.md', added: 1, removed: 0, hunks: '@@ -1 +1 @@\n-a\n+b' }] }];
+  const noteKey = diffFileKey('/r', 'notes.md');
+  expect(diffPanelFileKeys(keyed)).toEqual([noteKey]);
+  const on = diffPanelBody({ sections: keyed, collapsed: new Set(), cursor: { fileKey: noteKey, hunk: -1 }, items: diffPanelItems(keyed, new Set()), wrap: 40, gitless: false, failed: false, source: 'branch-local', reviewed: new Set<string>(), single: false, caps: {} });
+  expect(on.cursorRow).toBe(1);
+  expect(on.itemRows).toEqual([1, 2]);
+});
+
+test('the cursor row is lit wherever it rests', async () => {
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'a.txt', added: 3, removed: 2, hunks: '@@ -1,2 +1,3 @@\n-x\n+y\n+z\n@@ -20,2 +21,2 @@\n-p\n+q' }],
+  };
+  const litAt = (drawn: { frame: string; backend: TestBackend }, text: string) => {
+    const rows = drawn.frame.split('\n');
+    const y = rows.findIndex((r) => r.includes(text));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const style = drawn.backend.lastBuffer!.get(rows[y]!.indexOf(text), y).style;
+    return style.inverse === true && style.fg === 'cyan';
+  };
+  // A hunk cursor lights that hunk's FIRST row — and no other row of the file.
+  const onHunk = await diffFrame({ sections: [section], collapsed: new Set(), cursor: { fileKey: diffFileKey('/r', 'a.txt'), hunk: 1 }, palette: { accent: 'cyan' } });
+  expect(litAt(onHunk, '-p')).toBe(true);
+  expect(litAt(onHunk, '+q')).toBe(false); // the rest of the hunk follows, unmarked
+  expect(litAt(onHunk, '-x')).toBe(false); // the first hunk's rows are not it
+  expect(litAt(onHunk, 'a.txt')).toBe(false);
+  onHunk.handle.unmount();
+  // A file cursor lights the file's own row, and no hunk under it.
+  const onFile = await diffFrame({ sections: [section], collapsed: new Set(), cursor: { fileKey: diffFileKey('/r', 'a.txt'), hunk: -1 }, palette: { accent: 'cyan' } });
+  expect(litAt(onFile, 'a.txt')).toBe(true);
+  expect(litAt(onFile, '-x')).toBe(false);
+  onFile.handle.unmount();
+});
+
+test('the source tail names what is compared', async () => {
+  // A base that is NOT `HEAD`: an answer of `vs HEAD` while `base` says `main` is the
+  // bug this pins.
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const tail = async (source: 'branch-local' | 'committed' | 'worktree' | 'turn') => {
+    const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, source });
+    const frame = drawn.frame;
+    drawn.handle.unmount();
+    return frame;
+  };
+  expect(await tail('branch-local')).toContain('diff · 1 file +1 −1 · vs main');
+  expect(await tail('committed')).toContain('diff · 1 file +1 −1 · vs main — committed only');
+  expect(await tail('worktree')).toContain('diff · 1 file +1 −1 · vs HEAD — working tree only');
+  expect(await tail('turn')).toContain('diff · 1 file +1 −1 · last turn');
+  // The tail names the base it actually compares against — never a `HEAD` nobody chose.
+  expect(await tail('branch-local')).not.toContain('vs HEAD');
+});
+
+test('a reported change is drawn like the chat draws it', async () => {
+  const tree: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 0, hunks: '@@ -1 +1 @@\n-one\n+one more' }],
+  };
+  const reported: DiffSection = {
+    root: '', base: '', kind: 'reported',
+    files: [{ status: 'M', path: 'ABC-1 · description', key: '\u00000', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-a\n+b' }],
+  };
+  const drawn = await diffFrame({ sections: [tree, reported], collapsed: new Set(), cursor: null, source: 'turn' });
+  const rows = drawn.frame.split('\n');
+  // The group's own dim header, and its rows — no status letter, the counts after
+  // the title with the break the title cannot be read into (a title holds `·`).
+  expect(drawn.frame).toContain('changes that are not files');
+  expect(drawn.frame).toContain('· ABC-1 · description  +1 −1');
+  // Its hunks draw under it as any file's — the file's numbers in the gutter.
+  expect(drawn.frame).toMatch(/1 -a/);
+  expect(drawn.frame).toMatch(/1 \+b/);
+  // And the group stands after the tree sections.
+  expect(rows.findIndex((l) => l.includes('changes that are not files')))
+    .toBeGreaterThan(rows.findIndex((l) => l.includes('a.txt')));
+  drawn.handle.unmount();
+});
+
+test('single shows one file and counts its place', async () => {
+  const files: FileDiff[] = Array.from({ length: 7 }, (_, i) => ({
+    status: 'M' as const, path: `f${i + 1}.txt`, added: 1, removed: 0, hunks: '@@ -1 +1 @@\n-a\n+b',
+  }));
+  const section: DiffSection = { root: '/r', base: 'main', files };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: { fileKey: diffFileKey('/r', 'f3.txt'), hunk: -1 }, single: true });
+  const frame = drawn.frame;
+  // The header counts the shown file's place in the walk over the file rows.
+  expect(frame).toContain('diff · 3 of 7 · vs main');
+  expect(frame).toContain('f3.txt');
+  // One file — the cursor's — where the whole list drew seven.
+  for (const n of [1, 2, 4, 5, 6, 7]) expect(frame).not.toContain(`f${n}.txt`);
+  drawn.handle.unmount();
+});
+
+test('the hint row carries the caps', async () => {
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'a.txt', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two' }],
+  };
+  const drawn = await diffFrame({
+    sections: [section], collapsed: new Set(), cursor: null,
+    caps: { diffPrevFile: '↑', diffNextFile: '↓', diffHelp: '?', diffClose: 'Esc' },
+  });
+  // Every glyph is a cap the chat handed over, every label a plain word.
+  expect(drawn.frame).toContain('↑↓ file');
+  expect(drawn.frame).toContain('? see all');
+  expect(drawn.frame.toLowerCase()).toContain('esc close');
+  drawn.handle.unmount();
+  // A segment whose cap is absent is dropped — the row never spells a key of its own.
+  const bare = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, caps: {} });
+  expect(bare.frame).not.toContain('see all');
+  expect(bare.frame).not.toContain('reviewed');
+  expect(bare.frame).not.toContain('one file');
+  expect(bare.frame).not.toContain('change ·');
+  expect(bare.frame).not.toContain('close');
+  bare.handle.unmount();
+});
+
+// What is drawn is what the items name: a folded file and a `binary`/`too large`
+// file draw their row alone, while a CUT record keeps its kept hunks — and so keeps
+// its hunk items.
+test('items name only the rows the panel draws', () => {
+  const sections: DiffSection[] = [{
+    root: '/r', base: 'main',
+    files: [
+      { status: 'M', path: 'img.png', added: 0, removed: 0, hunks: '', note: 'binary' },
+      { status: 'M', path: 'dump.sql', added: 0, removed: 0, hunks: '', note: 'too large' },
+      { status: 'M', path: 'big.md', added: 2, removed: 1, hunks: '@@ -1,2 +1,3 @@\n-x\n+y\n+z', note: 'cut', hidden: 7 },
+    ],
+  }];
+  const big = diffFileKey('/r', 'big.md');
+  expect(diffPanelItems(sections, new Set())).toEqual([
+    { fileKey: diffFileKey('/r', 'img.png'), hunk: -1 },
+    { fileKey: diffFileKey('/r', 'dump.sql'), hunk: -1 },
+    { fileKey: big, hunk: -1 },
+    { fileKey: big, hunk: 0 },
+  ]);
+});
+
+test('a cut record draws its kept hunks and says what was not kept', async () => {
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'big.md', added: 1, removed: 1, hunks: '@@ -1 +1 @@\n-one\n+two', note: 'cut', hidden: 7 }],
+  };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, source: 'turn' });
+  const rows = drawn.frame.split('\n');
+  expect(drawn.frame).toContain('+two');
+  expect(drawn.frame).toContain('· +1 −1');
+  // The note rides under the hunks, where the `binary`/`too large` rows sit.
+  expect(rows.findIndex((l) => l.includes('… 7 lines not kept')))
+    .toBeGreaterThan(rows.findIndex((l) => l.includes('+two')));
+  drawn.handle.unmount();
+});
+
+// The two honest wordings for a source that has nothing to draw. Neither may read as
+// `no changes in the working tree` — that claim belongs to a clean tree read to the end.
+test('a base the walk could not resolve is worded, never guessed', async () => {
+  const section: DiffSection = { root: '/r', base: '', files: [] };
+  const drawn = await diffFrame({ sections: [section], collapsed: new Set(), cursor: null, caps: { diffSource: 'd' } });
+  expect(drawn.frame).toContain('pick a base to compare against');
+  expect(drawn.frame).not.toContain('no changes');
+  expect(drawn.frame).not.toContain('vs HEAD');
+  drawn.handle.unmount();
+});
+
+test('a turn with no reports does not read as a clean working tree', async () => {
+  const drawn = await diffFrame({ sections: [], collapsed: new Set(), cursor: null, source: 'turn' });
+  expect(drawn.frame).toContain('the last turn reported no file changes');
+  expect(drawn.frame).not.toContain('no changes in the working tree');
+  drawn.handle.unmount();
+});
+
+// The one channel from the chat's key handler to the list's scroll: rows and pages,
+// clamped at both ends. (The cursor's own scroll — `DiffBody.carry` — is another
+// thing: it moves on cursor moves only.)
+test("the body scrolls on the caller's word", async () => {
+  const added = Array.from({ length: 30 }, (_, i) => `+line ${i + 1}`).join('\n');
+  const section: DiffSection = {
+    root: '/r', base: 'main',
+    files: [{ status: 'M', path: 'big.txt', added: 30, removed: 0, hunks: `@@ -0,0 +1,30 @@\n${added}` }],
+  };
+  const bodyRef = { scrollBy: (_rows: number) => {}, scrollPage: (_pages: number) => {} };
+  const backend = new TestBackend(80, 12);
+  const handle = await render(h(renderDiffPanel, {
+    sections: [section], collapsed: new Set<string>(), cursor: null,
+    source: 'branch-local' as const,
+    reviewed: new Set<string>(), single: false, caps: {},
+    wrap: 74, gitless: false, failed: false, bg: 'black', bodyRef, scroll: { isActive: false },
+  }), backend);
+  const seen = () => (backend.lastFrame ?? '').split('\n')
+    .map((l) => /\+line (\d+)/.exec(l))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => Number(m[1]));
+  const before = seen();
+  expect(before[0]).toBe(1); // '+line 1', under the header and the file row
+  expect(before).not.toContain(9);
+  bodyRef.scrollBy(6);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const afterRows = seen();
+  // Six rows down: the header and the file row have scrolled away and what is at the
+  // top is six rows deeper into the hunks.
+  expect(afterRows[0]).toBe(5);
+  expect(afterRows).not.toContain(4);
+  bodyRef.scrollPage(1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const afterPage = seen();
+  // One page is one viewport — ten rows here: the box's twelve less its frame (the
+  // caps are empty, so the hint row draws nothing and the list takes the height).
+  expect(afterPage[0]).toBe(15);
+  handle.unmount();
 });
 
 // ─── The question wizard (ticket 4) ─────────────────────────────────────────

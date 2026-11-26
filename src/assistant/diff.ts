@@ -156,7 +156,7 @@ export function changeCounts(v: ChangeView): string {
 
 // What the `/diff` panel's file row says after the path: `· +N −M` in `changeCounts`'
 // wording, or why the file is not drawn at all. A cut record keeps its counts — its
-// hunks draw, and a note row beside them says how much was not kept. The argument is
+// hunks draw, and a note row under them says how much was not kept. The argument is
 // the fields the answer needs rather than a `FileDiff`: `working-tree.ts` imports this
 // module, so a type import back would close a cycle, and this module stays
 // dependency-free.

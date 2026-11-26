@@ -44,6 +44,16 @@ const openDiff = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('diff · 1 file'));
 };
+// The header names what is compared against: the branch the walk resolved as the
+// base — `main` in these fixtures — never a `HEAD` hardcoded in the row.
+test('the panel header says what it compares against', async () => {
+  const root = scratchTree();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, undefined, { shell: { roots: [root] } }, { startDir: root });
+  await openDiff(ui);
+  expect(ui.backend.lastFrame).toContain('diff · 1 file +1 −1 · vs main');
+  expect(ui.backend.lastFrame).not.toContain('vs HEAD');
+  ui.app.unmount();
+});
 // One commit, then TWO files changed since it: two blocks to fold independently.
 const scratchPair = () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-pair-')));
@@ -67,7 +77,7 @@ test('/diff opens the split panel on the tree\'s changes, folds a file and close
   await openDiff(ui);
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('diff · 1 file');
-  expect(frame).toContain('vs HEAD');
+  expect(frame).toContain('vs main');
   expect(frame).not.toContain('no changes');
   // Every file is expanded by default: the hunks are rows of their own.
   expect(frame).toContain('+changed');

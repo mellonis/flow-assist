@@ -3581,8 +3581,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               });
             })() : null,
             // `/diff`: the working tree as the panel draws it — what the last walk answered,
-            // and the files the person folded.
-            diffPanel: diffOpen ? { sections: diffSections, collapsed: diffCollapsed, cursor: diffCursor, loading: diffLoading, gitless: diffGitless, failed: diffFailed, onFold: foldDiffFile } : null,
+            // and the files the person folded. The cursor rests on a file's own row; the
+            // source, the marks, the one-file view and the key caps are what the chat
+            // holds for the viewer.
+            diffPanel: diffOpen ? {
+              sections: diffSections,
+              collapsed: diffCollapsed,
+              cursor: diffCursor ? { fileKey: diffCursor, hunk: -1 } : null,
+              source: 'branch-local' as const,
+              reviewed: new Set<string>(),
+              single: false,
+              caps: {},
+              loading: diffLoading, gitless: diffGitless, failed: diffFailed, onFold: foldDiffFile,
+            } : null,
             // What a click acts on is underlined under the pointer when the backend
             // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
             hover: hoverEnabled(host.config as Record<string, unknown>),
