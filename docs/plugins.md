@@ -37,7 +37,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
+{ "name": "notes", "version": "0.1.0", "hostApi": 3, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -51,7 +51,7 @@ A manifest may also list `agents` — paths of agent files inside the plugin's d
 a Markdown file that describes a named subagent (docs/usage.md, "Agent files"):
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "agents": ["agents/summarize.md"] }
+{ "name": "notes", "version": "0.1.0", "hostApi": 3, "agents": ["agents/summarize.md"] }
 ```
 
 An agent is named `<plugin>/<file name without .md>` (`notes/summarize`), and `@summarize`
@@ -69,7 +69,7 @@ A manifest may also list `skills` — directories inside the plugin's directory,
 is accepted too:
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "skills": ["skills/new-ticket"] }
+{ "name": "notes", "version": "0.1.0", "hostApi": 3, "skills": ["skills/new-ticket"] }
 ```
 
 A skill is named `<plugin>/<directory name>` (`notes/new-ticket`), and `new-ticket` reaches it
@@ -619,6 +619,9 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   ```json
   {
     "name": "board",
+    "version": "0.1.0",
+    "hostApi": 3,
+    "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
     "colors": {
       "dark":  { "laneBg": "${base.panelBg}", "laneText": "${base.text}", "alert": "#ff8787" },
       "light": { "laneBg": "${base.panelBg}", "laneText": "${base.text}", "alert": "#b00020" }
@@ -627,10 +630,11 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   ```
 
   An optional `preview` is a static node tree in the remote frame format
-  (`[type, props, ...children]`) whose colour props name the plugin's keys
-  (`${laneBg}`) or base roles (`${base.text}`); the theme tuner draws it as the
-  plugin's specimen, with the nodes the declared flowtty range draws. Without one it
-  draws one row per key.
+  (`[type, props, ...children]`). The host reads it, checks that it is a well-formed
+  node tree, and keeps it for the theme tuner, a separate tool; a malformed one is
+  dropped with a line in the log. The host does not draw it or check its colours: by
+  convention the colour props name the plugin's own keys (`${laneBg}`) or base roles
+  (`${base.text}`), which is what the tuner reads.
 - **Write a ground as a base role, not a literal:** `bg: '${base.panelBg}'`, not
   `bg: '#1a1b26'`. The host follows the terminal between light and dark while it runs
   (macOS switches by itself at sunset and sunrise), and resolves every `${base.<role>}`
@@ -764,7 +768,7 @@ plugin (checked the same way — [Compatibility](#compatibility)) plus how its p
 reached:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 3, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
   "run": ["bun", "src/index.ts"] }
 ```
 
@@ -1024,9 +1028,9 @@ its stdout. Nothing here is specific to `@flow-assist/remote` — a plugin in C,
 language that reads stdin and writes stdout, exchanges lines exactly like these:
 
 ```
-→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.37","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
+→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":3,"flowtty":"1.0.0-alpha.37","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
 ← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
-← {"jsonrpc":"2.0","id":1,"result":{"hostApi":2,"name":"remote-login","keys":{"open":"S","next":"tab","login":"enter","close":"esc"},"entry":["open"],"commands":[],"tools":[]}}
+← {"jsonrpc":"2.0","id":1,"result":{"hostApi":3,"name":"remote-login","keys":{"open":"S","next":"tab","login":"enter","close":"esc"},"entry":["open"],"commands":[],"tools":[]}}
 → {"jsonrpc":"2.0","method":"resize","params":{"terminal":{"width":100,"height":29},"surface":{"width":100,"height":23}}}
 → {"jsonrpc":"2.0","method":"focus"}
 ← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
@@ -1263,7 +1267,7 @@ member of `host` or `ui` a plugin checks for before it uses it (`screens` and
 must run on an older host too checks for each.
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
-shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
+shows `incompatible: built for host API 1, host provides 3` (or `incompatible: needs
 flowtty ^1.1.0, host has 1.0.0-alpha.37`) beside it — a plugin linked into
 `plugins-enabled/` from a repository of its own is listed too, marked `(linked)` — the log (`L`) has a line, and
 `plugins install` refuses it — an archive before anything is unpacked into place. A

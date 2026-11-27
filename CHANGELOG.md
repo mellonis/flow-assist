@@ -26,7 +26,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   `${base.panelBg}`, `${highlightBg}` → `${base.highlight}`, `${accentBg}` →
   `${base.highlightStrong}`, `${highlightText}` → `${base.highlightText}`,
   `${selected}` → `${base.selected}`, `${error}` → `${base.danger}`, `${success}` →
-  `${base.ok}`. A manifest says `hostApi: 3`; the host refuses another value. The
+  `${base.ok}`. A manifest's `hostApi` must name 3 (a list may include it); the host refuses one that does not. The
   bundled plugins and the example are on it.
 
 - **The old palette format is not applied; `config migrate-theme` moves it.** The flat

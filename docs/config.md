@@ -29,7 +29,7 @@ assistant may set or save".
   overrides per scheme: `theme.dark` and `theme.light` each hold `base` — the 16 roles
   (`bg text muted border accent selected highlight danger ok warn fieldBg fieldText
   fieldBorder panelBg highlightStrong highlightText`, meant in [plugins.md](plugins.md),
-  "Plugins") — and one record per surface (`chat`, `log`, each plugin that declares
+  "Screens") — and one record per surface (`chat`, `log`, each plugin that declares
   `colors`). A value is a colour or `${base.<role>}`, which resolves inside its scheme.
   Only what you set is saved: a key you leave out takes the host's default for that
   scheme, so `:config set theme.dark.base.accent '#d77757'` moves everything that
