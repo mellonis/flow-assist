@@ -301,8 +301,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
   `src/views/modals.ts`; a modal that draws its own frame doubles up. A window
   that paints its own ground sets its own ink (`color: m.text`). The palette
   follows the terminal's scheme and is the base-role model
-  (`src/playback/palette-defaults.ts`, `HOST_PALETTE`); a new colour goes into the
-  host palette defaults for each scheme, and a ground a plugin paints is
+  (`src/playback/palette-defaults.ts`); a new colour goes into the host palette
+  defaults for dark and light (`HOST_PALETTE`) and into `UNKNOWN_RESOLVED` beside
+  them — the scheme a terminal never names — unless it is one that keeps flowtty's own
+  colour there, as the markdown prose keys do; a ground a plugin paints is
   `${base.<role>}`, never a literal. A modal is as tall as what it holds; what does
   not fit scrolls (`<ScrollBox scrollbar>`). The one fixed height is a command
   panel's bottom strip (`look: 'bottom'`): twelve rows over the chat box's
