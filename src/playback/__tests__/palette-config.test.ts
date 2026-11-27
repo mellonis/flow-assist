@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { z } from 'zod';
 import { hostConfigSchema } from '../../config/schema';
 import { validateConfigWriteValue } from '../../config/load';
 import { isColorValue, oldThemeKeys, readThemeOverrides } from '../palette-config';
@@ -49,4 +50,25 @@ test('oldThemeKeys finds the flat theme and every plugin colors', () => {
   expect(oldThemeKeys(old).sort()).toEqual(['plugins.chat.colors', 'theme.canvas', 'theme.modals', 'theme.panelBg', 'theme.selected']);
   expect(oldThemeKeys({ theme: { dark: { base: { bg: 'red' } } } })).toEqual([]);
   expect(oldThemeKeys({})).toEqual([]);
+});
+
+test('a passthrough schema does not make every unknown key writable', () => {
+  const unknown = write('nope', 'red') as { ok: false; error: string };
+  expect(unknown.ok).toBe(false);
+  expect(unknown.error).toContain('unknown key nope');
+  const plugin = z.object({ a: z.string().optional() }).passthrough();
+  const viaPlugin = validateConfigWriteValue(hostConfigSchema, 'plugins.p.zzz', 'x', { p: plugin }) as { ok: false; error: string };
+  expect(viaPlugin.ok).toBe(false);
+  expect(viaPlugin.error).toContain('unknown key');
+  expect(write('theme.dark.chat.userBg', '#010203').ok).toBe(true);
+});
+
+test('a flat theme key is refused as the old format, naming the migration', () => {
+  for (const key of ['theme.modals', 'theme.selected', 'theme.modals.chat.bg']) {
+    const refused = write(key, 'red') as { ok: false; error: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('old format');
+    expect(refused.error).toContain('flow-assist config migrate-theme');
+  }
+  expect((write('theme.dark.base.nope', 'red') as { error: string }).error).not.toContain('old format');
 });

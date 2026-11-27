@@ -584,7 +584,9 @@ export function getSchemaAtPath(schema: any, path: string): any {
     cur = unwrapNode(cur);
     const shape = cur?.shape;
     if (shape) {
-      cur = shape[part] ?? cur.def?.catchall;
+      // A catchall that names a type (`.catchall(x)`) types the keys the shape lacks; `.passthrough()` and `.strict()` name none.
+      const extra = cur.def?.catchall;
+      cur = shape[part] ?? (extra && extra.type !== 'unknown' && extra.type !== 'never' ? extra : undefined);
       if (!cur) return null;
     } else if (cur?.type === 'record') {
       cur = unwrapNode(cur.valueType);
@@ -698,6 +700,10 @@ export function validateConfigWriteValue(rootSchema: any, key: string, value: un
   const node = configSchemaAt(rootSchema, key, pluginConfigs);
   if (!node) {
     const plugin = /^plugins\.([^.]+)\./.exec(key)?.[1];
+    const flat = /^theme\.(?!dark\b|light\b)[^.]+/.exec(key)?.[0];
+    if (flat) {
+      return { ok: false, error: `config: ${key} — ${flat} is the old format; colours live under theme.dark / theme.light — run \`flow-assist config migrate-theme\`` };
+    }
     return { ok: false, error: plugin && !pluginConfigs?.[plugin]
       ? `config: unknown key ${key} — the plugin «${plugin}» is not loaded or declares no settings`
       : `config: unknown key ${key}` };
