@@ -245,7 +245,7 @@ function runMigrateTheme(config: Record<string, unknown>, io: ConfigIo): void {
     if (!res.ok) return fail(res.error);
     io.out(`set ${key} ${value}`);
   }
-  for (const key of plan.dropped) io.out(`dropped ${key} (${droppedReason(key)})`);
+  for (const key of plan.dropped) io.out(`dropped ${key} (${droppedReason(key, config)})`);
   // Sources first: an unset changes what `configSource` answers.
   const sources = new Map(plan.unset.map((key) => [key, configSource(config, key)]));
   for (const key of plan.unset) {

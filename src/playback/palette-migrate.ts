@@ -38,9 +38,22 @@ const DROPPED_WHY: Record<string, string> = {
   'theme.canvas': 'a resolved palette, not an override',
 };
 
-/** Why `key` is not carried over, for the line the command prints. */
-export function droppedReason(key: string): string {
-  return DROPPED_WHY[key] ?? (/^theme\.[^.]+$/.test(key) ? 'an object, not a colour' : 'not a colour the new theme knows');
+// A dropped key that has a place in the new theme: its value is what kept it out.
+function knownKey(key: string): boolean {
+  const flat = /^theme\.([^.]+)$/.exec(key)?.[1];
+  if (flat !== undefined) return FLAT_KEYS.includes(flat);
+  const modal = /^theme\.modals\.([^.]+)$/.exec(key)?.[1];
+  if (modal !== undefined) return MODAL_KEYS.includes(modal);
+  return /^plugins\.[^.]+\.colors\.[^.]+$/.test(key);
+}
+
+/** Why `key` of `config` is not carried over, for the line the command prints. */
+export function droppedReason(key: string, config: Record<string, unknown>): string {
+  const fixed = DROPPED_WHY[key];
+  if (fixed !== undefined) return fixed;
+  if (!knownKey(key)) return 'not a key the new theme knows';
+  const value = key.split('.').reduce<unknown>((v, part) => (isRecord(v) ? v[part] : undefined), config);
+  return isRecord(value) ? 'an object, not a colour' : 'not a colour';
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

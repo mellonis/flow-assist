@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { migrateTheme } from '../palette-migrate';
+import { droppedReason, migrateTheme } from '../palette-migrate';
 import { oldThemeKeys } from '../palette-config';
 
 const PERSON = {"theme":{"modals":{"bg":"black","border":"cyan","borderBg":"black","text":"white","selected":"green","fieldBg":"gray","fieldBorder":"cyan"},"selected":"green","error":"red","success":"green","panelBg":"#1a1b26","highlightBg":"#3c3c3c","accentBg":"#20456b","highlightText":"white","canvas":{"modals":{"bg":"black"},"selected":"yellow"}},"plugins":{"chat":{"colors":{"userBg":"#232323","accent":"#fab283","shell":"#56b6c2","assistantAccent":"#7fd88f","fieldBg":"#141414","bgAccent":"#9d7cd8","bgBg":"#262335","warn":"#fcd53a","ok":"#7fd88f","idleBorder":"#4c4c4c","askBg":"#1b2a2a","askInk":"#d8e6e3"}}}};
@@ -81,4 +81,24 @@ test('nothing old means nothing to do, and a second pass over the result changes
     delete cur[parts.at(-1)!];
   }
   expect(migrateTheme(cfg)).toEqual({ set: [], unset: [], dropped: [] });
+});
+
+test('each dropped key is given the reason that fits its value', () => {
+  const cfg = {
+    theme: { mystery: 'red', odd: { a: 1 }, panelBg: 'not-a-colour', accentBg: { a: 1 }, modals: { zzz: 'red', bg: 'nope', borderBg: 'black' }, canvas: { bg: 'black' } },
+    plugins: { board: { colors: { lane: 'nope' } } },
+  };
+  const r = migrateTheme(clone(cfg));
+  const why = Object.fromEntries(r.dropped.map((k) => [k, droppedReason(k, cfg)]));
+  expect(why).toEqual({
+    'theme.mystery': 'not a key the new theme knows',
+    'theme.odd': 'not a key the new theme knows',
+    'theme.panelBg': 'not a colour',
+    'theme.accentBg': 'an object, not a colour',
+    'theme.modals.zzz': 'not a key the new theme knows',
+    'theme.modals.bg': 'not a colour',
+    'theme.modals.borderBg': 'a frame\'s ground is base.bg',
+    'theme.canvas': 'a resolved palette, not an override',
+    'plugins.board.colors.lane': 'not a colour',
+  });
 });
