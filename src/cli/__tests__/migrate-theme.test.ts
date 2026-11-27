@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, loadConfig, resetSessionConfig } from '../../config/load';
@@ -61,5 +61,39 @@ test('migrate-theme with no old keys says there is nothing to do', async () => {
   fs.mkdirSync(hostStateDir(), { recursive: true });
   fs.writeFileSync(local(), '{}');
   fs.rmSync(base(), { force: true });
+  expect(await run()).toEqual(['nothing to migrate']);
+});
+
+test('a migration that stops after the sets completes on the next run, setting nothing twice', async () => {
+  fs.mkdirSync(hostStateDir(), { recursive: true });
+  fs.rmSync(base(), { force: true });
+  fs.writeFileSync(local(), JSON.stringify(OLD));
+  // The disk refuses every write to config.local.json after the two sets (userBg, accent).
+  const real = fs.writeFileSync;
+  let writes = 0;
+  const spy = spyOn(fs, 'writeFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (String(file) === local() && ++writes > 2) throw new Error('EACCES: simulated');
+    return (real as (...a: unknown[]) => void)(file, ...rest);
+  }) as typeof fs.writeFileSync);
+  let first: string[];
+  try {
+    first = await run();
+  } finally {
+    spy.mockRestore();
+  }
+  expect(process.exitCode).toBe(1);
+  expect(first.some((l) => l.includes('could not unset'))).toBe(true);
+  const half = JSON.parse(fs.readFileSync(local(), 'utf8'));
+  expect(half.theme.dark.chat).toEqual({ userBg: '#232323', accent: '#fab283' });
+  expect(half.theme.modals).toBeDefined();
+
+  process.exitCode = 0;
+  const second = await run();
+  expect(second.filter((l) => l.startsWith('set '))).toEqual([]);
+  expect(second).toContain('unset theme.modals');
+  expect(process.exitCode).toBe(0);
+  const done = JSON.parse(fs.readFileSync(local(), 'utf8'));
+  expect(done.theme).toEqual({ dark: { chat: { userBg: '#232323', accent: '#fab283' } } });
+  expect(done.plugins?.chat?.colors).toBeUndefined();
   expect(await run()).toEqual(['nothing to migrate']);
 });
