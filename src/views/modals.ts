@@ -310,10 +310,10 @@ const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 // A band of light travels along the running tool's label — movement says "still
 // working" where a static label reads as "stuck". The whole label changing colour
 // four times a second would read as blinking; the band moves instead,
-// and the label keeps one colour. The gradient is the chat's own accents, brightest at
-// the band's leading edge; the window's own ink stands in for white, which vanished on
-// a light ground.
-const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text ?? 'white', 'cyanBright', m.accent ?? 'cyan'];
+// and the label keeps one colour. The gradient is the chat's own inks, brightest at
+// the band's leading edge: the window's ink, the palette's `pulse`, the accent. A key
+// the palette does not name is left out of the gradient.
+const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text, m.pulse, m.accent].filter((c): c is string => c !== undefined);
 // ─── Markdown → styled lines ──────────────────────────────────────────────────
 // flowtty's layoutMarkdown does the whole layout, GFM tables included; the host
 // only softens the heading marker below.
@@ -329,12 +329,23 @@ export function chatMarkdownOptions(m: Record<string, string | undefined>): Mark
     ...(ink === undefined ? {} : { color: ink }),
     background: band ?? 'default',
   });
+  // Prose roles: a role the palette does not name keeps flowtty's own colour.
+  const prose: Record<string, string> = {};
+  const role = (name: string, ink?: string) => { if (ink !== undefined) prose[name] = ink; };
+  role('heading1', m.mdHeading);
+  role('heading2', m.mdHeading);
+  role('heading3', m.mdHeading);
+  role('code', m.mdCode);
+  role('link', m.mdLink);
+  role('listMarker', m.mdList);
+  role('quote', m.mdQuote);
   return {
     tokenColors: {
       added: style(m.add, m.addBg),
       removed: style(m.del, m.delBg),
       ...(m.accent === undefined ? {} : { hunk: m.accent }),
     },
+    proseColors: prose,
   };
 }
 
@@ -1624,7 +1635,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
         if (pulsing) parts.push(h(PulseMark, { key: 'p', color: m.shell, glyph: String(spans[0]?.text ?? '') }));
         spans.forEach((s, j) => {
           if (pulsing && j === 0) return;
-          const ink = rec.kind === 'thought' ? { dim: true, color: 'magenta' }
+          const ink = rec.kind === 'thought' ? { dim: true, color: m.thought }
             : s.mark === 'error' ? { color: errorColor }
             : s.mark === 'warn' ? { color: m.warn }
             : s.mark === 'ok' ? { dim: true, color: m.ok }
@@ -1636,7 +1647,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
         return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)), ...parts);
       }
-      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: m.thought, selectable: false, wrap: 'truncate' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
       // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
       // across the answer returns what the model SAID, never the host's one-line
       // account of it. It is cut to the width above, and truncated here as well so
@@ -2632,7 +2643,7 @@ export function renderChatModal({
         selectionScope: true,
       },
       chatRow,
-      error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
+      error ? h(Text, { color: m.danger }, `⚠ ${error}`) : null,
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. In a chat
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
@@ -2640,19 +2651,19 @@ export function renderChatModal({
       // field never shrinks and the conversation keeps a row (`planFit`).
       pager || watch ? null : oneLine
         ? h(Box, { key: 'plan', flexDirection: 'row', width: '100%', flexShrink: 0, overflow: 'hidden' },
-            h(Text, { dim: true, color: 'magenta', wrap: 'truncate' }, `▸ ${oneLine.head}`),
-            h(Text, { color: oneLine.inProgress ? 'yellow' : oneLine.marker.color }, `${oneLine.marker.text} `),
-            h(Text, { wrap: 'truncate', color: oneLine.inProgress ? 'yellow' : undefined }, oneLine.text))
+            h(Text, { dim: true, color: m.plan, wrap: 'truncate' }, `▸ ${oneLine.head}`),
+            h(Text, { color: oneLine.inProgress ? m.warn : oneLine.marker.color }, `${oneLine.marker.text} `),
+            h(Text, { wrap: 'truncate', color: oneLine.inProgress ? m.warn : undefined }, oneLine.text))
         : planShape === 'full'
         ? h(Box, { key: 'plan', flexDirection: 'column', width: '100%', flexShrink: 0 },
-            h(Text, { dim: true, color: 'magenta' }, '▾ plan'),
+            h(Text, { dim: true, color: m.plan }, '▾ plan'),
             planShown.map((t) => {
               const marker = todoMarker(t.status);
               return h(Box, { key: `plan-${t.id}`, flexDirection: 'row' },
-                h(Text, { color: t.status === 'in_progress' ? 'yellow' : marker.color }, `${marker.text} `),
-                h(Text, { wrap: 'truncate', dim: t.status === 'done', color: t.status === 'in_progress' ? 'yellow' : undefined }, t.text));
+                h(Text, { color: t.status === 'in_progress' ? m.warn : marker.color }, `${marker.text} `),
+                h(Text, { wrap: 'truncate', dim: t.status === 'done', color: t.status === 'in_progress' ? m.warn : undefined }, t.text));
             }),
-            planSummary ? h(Text, { dim: true, color: 'yellow' }, planSummary) : null,
+            planSummary ? h(Text, { dim: true, color: m.warn }, planSummary) : null,
           )
         : null,
       !pager && !watch && queued.length
@@ -2686,13 +2697,13 @@ export function renderChatModal({
       h(Box, { key: 'field-strip', flexDirection: 'column', width: '100%', flexShrink: 0, gap: 1 },
         pager || (watch && !confirmAsk && !watch.question) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
           pendingQuestion
-            ? renderAsk(pendingQuestion, m.bg, wrap)
+            ? renderAsk(pendingQuestion, m, wrap)
             : watch?.question
-            ? renderAsk(watch.question, m.bg, wrap)
+            ? renderAsk(watch.question, m, wrap)
             : contextPanel
-            ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
+            ? renderContextPanel(contextPanel, m, wrap, contextCacheLine, contextRecallLine)
             : confirmAsk
-            ? confirmBox(confirmAsk, m.bg, theme?.base?.danger)
+            ? confirmBox(confirmAsk, m, theme?.base?.danger)
             // The field is where the person types — its caret, prompt and placeholder are
             // not text to copy, and a drag over it must not pick them up.
             : h(Box, { flexDirection: 'column', width: '100%' },
@@ -2772,17 +2783,17 @@ export function renderChatModal({
               toolLabel
                 // `Shimmer` takes the label as a string and colours it per character, so
                 // it is the label itself that is handed over, not a styled child.
-                ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
+                ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent, highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
                 // No tool: the request's own word, with the tool's shimmer — the colour
-                // says which phase, magenta while the model thinks, the assistant's
+                // says which phase, the thought colour while the model thinks, the assistant's
                 // accent while its text arrives.
                 : h(Box, { overflow: 'hidden' }, h(Shimmer, {
-                    color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+                    color: phase === 'thinking' ? m.thought : m.assistantAccent,
                     highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
                     children: `${verb || VERBS[0]}…`,
                   })),
               stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
-          : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+          : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
           armedHint
             ? armedHint
             : escArmed
@@ -2818,11 +2829,11 @@ export function renderChatModal({
                 : [hintKeys, ...(bgBadge ? [h(TextSpan, bgWaiting > 0 ? { color: m.warn, dim: false } : {}, ` · ${bgBadge}`)] : [])])),
         waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
           waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
-          unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
+          unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent }, `  ● ${unreadElsewhere}`) : null) : null,
         // A sibling of the hint, not part of it: the left cell is the hint OR the status
         // of a running turn, and the mode has to stay on screen through both.
         autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
-        contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null)
+        contextBadge ? h(Text, contextWarn ? { color: m.warn } : { dim: true }, `  ${contextBadge}`) : null)
       ),
       // `/diff` on a terminal too narrow to stand beside the conversation: the panel
       // takes its rows below the field strip, the column above keeps the rest. Its last
@@ -2900,7 +2911,7 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
     const mark = status === 'held' ? { text: 'in use elsewhere', style: { color: m.warn } }
       : r.lock === 'ours' ? { text: status === 'idle' ? 'this chat' : `this chat · ${status}`, style: status === 'waiting' ? { color: m.warn } : { dim: true } }
       : r.lock === 'here' ? { text: status === 'idle' ? 'here' : `here · ${status}`, style: status === 'waiting' ? { color: m.warn } : { dim: true } }
-      : status === 'done' ? { text: 'done', style: { color: m.assistantAccent ?? 'green' } }
+      : status === 'done' ? { text: 'done', style: { color: m.assistantAccent } }
       : null;
     // The title is what a person picks by, so it keeps up to half the row; the meta gives
     // way first (it shrinks far faster), then whose it is — each cut, never pushed off.
@@ -2942,10 +2953,10 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
   const oneLine = inner - cellWidth(`Delete «»? ${deleteKeys}`) >= Math.min(8, cellWidth(doomed));
   const field = picker.mode === 'delete'
     ? oneLine
-      ? h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${cutStep(doomed, inner - cellWidth(`Delete «»? ${deleteKeys}`))}»? ${deleteKeys}`)
+      ? h(Text, { bold: true, color: m.warn, wrap: 'truncate' }, `Delete «${cutStep(doomed, inner - cellWidth(`Delete «»? ${deleteKeys}`))}»? ${deleteKeys}`)
       : h(Box, { flexDirection: 'column', width: '100%' },
-          h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${cutStep(doomed, Math.max(1, inner - cellWidth('Delete «»?')))}»?`),
-          h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, deleteKeys))
+          h(Text, { bold: true, color: m.warn, wrap: 'truncate' }, `Delete «${cutStep(doomed, Math.max(1, inner - cellWidth('Delete «»?')))}»?`),
+          h(Text, { bold: true, color: m.warn, wrap: 'truncate' }, deleteKeys))
     : picker.mode === 'rename'
     ? pickerField('title › ', picker.name, picker.nameCaret, m)
     : pickerField('filter › ', picker.filter, picker.caret, m);
@@ -2973,7 +2984,7 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
       // Keys are the picker's (`isActive: false`): the offset follows the cursor.
       h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
         shown.length ? lines : h(Text, { dim: true }, empty)),
-      message ? h(Text, { color: error ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
+      message ? h(Text, { color: error ? m.danger : m.warn, wrap: 'wrap' }, message) : null,
       h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, backgroundColor: m.fieldBg }, field),
       hint ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint) : null));
 }
@@ -3043,7 +3054,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   const listRows = strip
     ? Math.max(0, boxH - 2 - tabRows - 1)
     : Math.max(1, boxH - 4 - 2 - (message ? 1 + textRows(message, inner) : 0));
-  const toneColor = (tone?: string) => (tone === 'ok' ? m.ok ?? 'green' : tone === 'warn' ? m.warn : tone === 'error' ? 'red' : undefined);
+  const toneColor = (tone?: string) => (tone === 'ok' ? m.ok : tone === 'warn' ? m.warn : tone === 'error' ? m.danger : undefined);
   // The texts form a column as wide as the widest, up to half the row, so the details
   // line up.
   const textCol = Math.min(Math.max(0, ...panel.rows.map((r) => cellWidth(r.text))), Math.floor((inner - 2) / 2));
@@ -3112,9 +3123,9 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
       lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')) : null,
     strip
       ? h(Text, message
-        ? { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'truncate', selectable: false }
+        ? { color: error || message.startsWith('⚠') ? m.danger : m.warn, wrap: 'truncate', selectable: false }
         : { dim: true, wrap: 'truncate', selectable: false }, message || hint)
-      : message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
+      : message ? h(Text, { color: error || message.startsWith('⚠') ? m.danger : m.warn, wrap: 'wrap' }, message) : null,
     strip ? null : h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint));
   // A strip is the chat BOX's bottom sheet: its bottom border sits on the box's bottom
   // border row, however the box is centred in the area, so what it covers — the field and
@@ -3160,7 +3171,7 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
   return h(Box, { key: 'chat-status', flexDirection: 'row', flexShrink: 0, selectable: false },
     h(Text, { dim: true }, `${spin(elapsed)} ${formatDuration(elapsed)} · `),
     h(Shimmer, {
-      color: toolLabel ? (m.accent ?? 'cyan') : phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+      color: toolLabel ? m.accent : phase === 'thinking' ? m.thought : m.assistantAccent,
       highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
       children: toolLabel || `${verb || VERBS[0]}…`,
     }),
@@ -3207,26 +3218,28 @@ export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0
 // like a write confirmation: a look at the conversation, not a message in it. The
 // colours only tell the parts apart; the legend carries the same glyph in the same
 // colour, so it reads without them too (each row names its part).
-const PART_COLORS: Record<string, string> = {
-  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', 'on screen': 'greenBright', messages: 'white', images: 'cyanBright',
+const PART_KEYS: Record<string, string> = {
+  instructions: 'ctxInstructions', tools: 'ctxTools', memory: 'ctxMemory', plan: 'ctxPlan', summary: 'ctxSummary', 'on screen': 'ctxScreen', messages: 'ctxMessages', images: 'ctxImages',
 };
-function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number, cacheLine = '', recallLine = '') {
+function renderContextPanel(r: ContextReading, m: Record<string, string | undefined>, wrap: number, cacheLine = '', recallLine = '') {
+  const bg = m.bg;
+  const partColor = (label: string) => m[PART_KEYS[label]!];
   const cells = contextGrid(r);
   const warn = r.ratio >= CONTEXT_WARN_AT;
   const gridRows = Array.from({ length: GRID_ROWS }, (_, y) => cells.slice(y * GRID_COLS, (y + 1) * GRID_COLS));
-  const cell = (c: GridCell, i: number) => h(Text, c.label ? { key: i, color: PART_COLORS[c.label] } : { key: i, dim: true }, `${c.glyph} `);
+  const cell = (c: GridCell, i: number) => h(Text, c.label ? { key: i, color: partColor(c.label) } : { key: i, dim: true }, `${c.glyph} `);
   const grid = h(Box, { flexDirection: 'column', flexShrink: 0 },
     gridRows.map((row, y) => h(Box, { key: y, flexDirection: 'row' }, row.map(cell))));
   const legend = h(Box, { flexDirection: 'column', flexShrink: 1 },
     contextLegend(r).map((l, i) => h(Box, { key: i, flexDirection: 'row' },
-      h(Text, l.label ? { color: PART_COLORS[l.label] } : { dim: true }, `${l.label ? CELL_FULL : CELL_FREE} `),
+      h(Text, l.label ? { color: partColor(l.label) } : { dim: true }, `${l.label ? CELL_FULL : CELL_FREE} `),
       h(Text, { wrap: 'truncate' }, l.text))));
   // The grid is 40 cells wide; beside it the legend needs ~26. Narrower — stack them.
   const sideBySide = wrap >= GRID_COLS * 2 + 30;
-  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: warn ? 'yellow' : undefined, backgroundColor: bg },
+  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: warn ? m.warn : undefined, backgroundColor: bg },
     h(Box, { flexDirection: 'row' },
       h(Text, { bold: true }, 'Context  '),
-      h(Text, warn ? { color: 'yellow' } : {}, contextHeading(r))),
+      h(Text, warn ? { color: m.warn } : {}, contextHeading(r))),
     h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
     cacheLine ? h(Text, { dim: true, wrap: 'truncate' }, cacheLine) : null,
@@ -3842,9 +3855,10 @@ function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): numb
 // The y/n block's own rows — the chat's field place draws them, and the diff viewer's
 // fullscreen draws the same rows over itself at a higher zIndex: what waits on the
 // person is answered first in either shape.
-function confirmBox(v: ReturnType<typeof confirmView>, bg: string | undefined, errorColor?: string) {
-  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: bg },
-    h(Text, { bold: true, color: 'yellow' }, v.title),
+function confirmBox(v: ReturnType<typeof confirmView>, m: Record<string, string | undefined>, errorColor?: string) {
+  const bg = m.bg;
+  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: m.warn, backgroundColor: bg },
+    h(Text, { bold: true, color: m.warn }, v.title),
     v.command != null
       ? h(Text, { wrap: 'wrap' }, v.command)
       : h(Text, { dim: true, wrap: 'truncate' }, v.args),
@@ -3860,7 +3874,8 @@ function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, re
   return 2 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
 }
 
-function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
+function renderAsk(state: AskState, m: Record<string, string | undefined>, wrap: number) {
+  const bg = m.bg;
   const { q, d, title, tabs, submitRows, rows, hint, fieldRows } = askView(state, wrap);
   const inner = Math.max(1, wrap - 2);
   const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
@@ -3869,8 +3884,8 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
   const answerRow = (r: AskSubmitRow, i: number) => h(Box, { key: `s${i}`, flexDirection: 'column' },
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, cutStep(r.title, inner)),
     h(Text, { dim: !r.answered, wrap: 'truncate' }, `  ${cutStep(r.answer, Math.max(1, inner - 2))}`));
-  return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
-    h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
+  return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: m.accent, backgroundColor: bg },
+    h(Text, { bold: true, color: m.accent, wrap: 'wrap' }, title),
     tabs.length ? askTabRow(tabs, inner) : null,
     ...(submitRows
       ? submitRows.map(answerRow)
@@ -3912,13 +3927,13 @@ const frame = (m: Record<string, string | undefined>, title: string, extra: Reco
 // What a line is decides how loud it is: a failure is red, a background task's line
 // carries the background's colour, the model-round bookkeeping is dim, and the time
 // stamp is always quiet so the message is what the eye lands on.
-function logLine(line: string, m: Record<string, string | undefined>, errorColor?: string) {
+function logLine(line: string, m: Record<string, string | undefined>, errorColor?: string, bgColor?: string) {
   const at = /^(\d\d:\d\d:\d\d) ([\s\S]*)$/.exec(line);
   const stamp = at ? at[1] : '';
   const text = at ? at[2]! : line;
   const failed = /error|failed|⚠|denied|declined/i.test(text);
   const quiet = /^\[round \d+\]/.test(text);
-  const color = failed ? errorColor ?? 'red' : /^\[bg\]/.test(text) ? 'magenta' : text.startsWith('⏰') ? 'yellow' : m.text;
+  const color = failed ? errorColor : /^\[bg\]/.test(text) ? bgColor : text.startsWith('⏰') ? m.warn : m.text;
   return [
     stamp ? h(Text, { key: 's', dim: true }, `${stamp} `) : null,
     h(Text, { key: 't', wrap: 'truncate', dim: quiet, color }, text),
@@ -3953,7 +3968,7 @@ export function renderLogModal({
     h(Box, frame(m, title, { width: Math.max(40, Math.floor(width * 0.7)), paddingY: 1, gap: 1 }),
       h(Box, { flexDirection: 'column' },
         visible.length
-          ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.base?.danger)))
+          ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.base?.danger, theme?.chat?.bgAccent)))
           : h(Text, { dim: true }, 'Nothing has happened yet — tool calls, background tasks and errors land here.')),
       h(Text, { dim: true, selectable: false }, `${more ? `${CAP.upDown} ${CAP.page} scroll · Home/End · ` : ''}${CAP.esc} close`),
     ),
@@ -4031,7 +4046,7 @@ export function renderHelp({
   const anywhere = HOST_ACTIONS.map((a) => bound.find((k) => k.action === a)).filter((k): k is (typeof bound)[number] => !!k);
   const inPlugins = bound.filter((k) => !HOST_ACTIONS.includes(k.action));
   const keyRow = (k: (typeof bound)[number]) => h(Box, { key: `k-${k.action}`, flexDirection: 'row', flexShrink: 0 },
-    h(Text, { bold: true, color: 'cyan' }, `  ${k.cap}${' '.repeat(Math.max(0, capW - cellWidth(k.cap)))}  `),
+    h(Text, { bold: true, color: m.accent }, `  ${k.cap}${' '.repeat(Math.max(0, capW - cellWidth(k.cap)))}  `),
     h(Text, null, k.label));
   const entries = helpEntries(commands);
   // The usage column is as wide as most usages need; one longer than that (`config
@@ -4107,8 +4122,8 @@ export function renderDiffFull({
       ? h(Box, overlay(width, height, 15),
           h(Box, { width: (askWrap ?? wrap) + 2 },
             question
-              ? renderAsk(question, m.bg, askWrap ?? wrap)
-              : confirmBox(confirmView(confirm!, askWrap ?? wrap), m.bg, theme?.base?.danger)))
+              ? renderAsk(question, m, askWrap ?? wrap)
+              : confirmBox(confirmView(confirm!, askWrap ?? wrap), m, theme?.base?.danger)))
       : null);
 }
 

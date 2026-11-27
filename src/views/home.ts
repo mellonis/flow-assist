@@ -24,7 +24,7 @@ export const LOGO = [
 
 interface HomePlugin { name: string; description?: string; entry?: string[]; tools?: unknown[]; aiTools?: unknown[] }
 
-export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote, starting = [], untrusted = [], trustNotes = [] }: {
+export function renderHome({ title, plugins, keys, builtins, width = 80, accent, pluginsNote, starting = [], untrusted = [], trustNotes = [] }: {
   title: string;
   plugins: HomePlugin[];
   // The resolved key map — so what is shown is what is bound NOW.

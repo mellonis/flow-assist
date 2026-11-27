@@ -4,7 +4,7 @@ import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { buildModels, resolveAppTheme } from '../../playback/theme.js';
 import { CHAT_KEYS } from '../../playback/palette-defaults.js';
-import { chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
+import { chatMarkdownOptions, chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
 import { changeView, unifiedDiff, CHANGE_DIFF_MAX_BYTES, CHANGE_DRAW_MAX_LINES, fileDiffCounts, type ChangeView } from '../../assistant/diff.js';
 import { diffFileKey, type DiffSection, type FileDiff } from '../../assistant/working-tree.js';
@@ -3096,4 +3096,14 @@ test('a change block in an opened stretch takes the same palette', () => {
   const spans = rows.flatMap((r) => r.spans ?? []);
   expect(spans.find((s) => s.text === '-a')).toMatchObject({ color: 'redBright', background: '#654321' });
   expect(spans.find((s) => s.text === '+b')).toMatchObject({ color: 'greenBright', background: '#123456' });
+});
+
+test('chatMarkdownOptions carries the palette\'s markdown prose roles', () => {
+  const opts = chatMarkdownOptions({ mdHeading: '#111111', mdCode: '#222222', mdLink: '#333333', mdList: '#444444', mdQuote: '#555555' });
+  expect(opts.proseColors).toEqual({ heading1: '#111111', heading2: '#111111', heading3: '#111111', code: '#222222', link: '#333333', listMarker: '#444444', quote: '#555555' });
+});
+
+test('chatMarkdownOptions leaves a prose role out when the palette does not name it', () => {
+  expect(chatMarkdownOptions({ mdCode: '#222222' }).proseColors).toEqual({ code: '#222222' });
+  expect(chatMarkdownOptions({}).proseColors).toEqual({});
 });

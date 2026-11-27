@@ -69,10 +69,24 @@ for (const scheme of ['dark', 'light'] as const) {
   });
 }
 
+// The keys that were literals in the drawing code: dark keeps the colour the chat drew,
+// light names one readable on a light ground.
+const DRAWN: Record<Scheme, Record<string, string>> = {
+  dark: { pulse: 'cyanBright', thought: 'magenta', plan: 'magenta', ctxInstructions: 'cyan', ctxTools: 'magenta', ctxMemory: 'yellow', ctxPlan: 'green', ctxSummary: 'blue', ctxScreen: 'greenBright', ctxMessages: 'white', ctxImages: 'cyanBright' },
+  light: { pulse: 'blue', thought: 'magenta', plan: 'magenta', ctxInstructions: 'blue', ctxTools: 'magenta', ctxMemory: '#9a6700', ctxPlan: 'green', ctxSummary: '#005f87', ctxScreen: '#2e7d32', ctxMessages: 'black', ctxImages: '#007b83' },
+};
+for (const scheme of ['dark', 'light'] as const) {
+  test(`${scheme}: the keys the drawing code used to hard-code resolve`, () => {
+    const chat = resolveSurface(HOST_PALETTE[scheme], 'chat');
+    for (const [key, value] of Object.entries(DRAWN[scheme])) expect(chat[key]).toBe(value);
+  });
+}
+
 test('CHAT_KEYS lists the chat keys', () => {
   expect([...CHAT_KEYS]).toEqual([
     'accent', 'shell', 'assistantAccent', 'userBg', 'fieldBg', 'bgAccent', 'bgBg', 'warn', 'ok', 'add', 'del',
     'addBg', 'delBg', 'idleBorder', 'askBg', 'askInk', 'mdHeading', 'mdCode', 'mdLink', 'mdList', 'mdQuote',
+    'pulse', 'thought', 'plan', 'ctxInstructions', 'ctxTools', 'ctxMemory', 'ctxPlan', 'ctxSummary', 'ctxScreen', 'ctxMessages', 'ctxImages',
   ]);
 });
 

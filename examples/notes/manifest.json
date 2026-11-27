@@ -2,7 +2,7 @@
   "name": "notes",
   "version": "0.1.0",
   "hostApi": 2,
-  "flowtty": ">=1.0.0-alpha.41 <1.0.0-alpha.42",
+  "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
   "description": "A notebook the assistant reads and writes",
   "tools": ["notes"]
 }
