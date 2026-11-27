@@ -9,7 +9,10 @@ import { join } from 'node:path';
 import { NAMED_COLORS } from '@flowtty/core';
 
 const ROOT = join(import.meta.dir, '..', '..');
-const SCOPES = ['src/views/**/*.ts', 'src/views/**/*.tsx', 'src/runtime/**/*.tsx'];
+const SCOPES = [
+  'src/views/**/*.ts', 'src/views/**/*.tsx', 'src/runtime/**/*.tsx',
+  'src/remote/**/*.ts', 'src/remote/**/*.tsx', 'src/plugins/**/*.ts', 'src/plugins/**/*.tsx',
+];
 const COLOUR = new Set<string>(NAMED_COLORS);
 const HEX = /^#[0-9a-fA-F]{3,6}$/;
 

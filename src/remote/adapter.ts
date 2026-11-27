@@ -409,7 +409,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
         // An open modal of the plugin's has the keyboard, as the host's own modals do over
         // a surface: a focused field under it must not hear what is typed into the modal.
         const hasKeyboard = host.hasKeyboard() && openModals().length === 0;
-        if (stopped) return ui.h(ui.Box, { padding: 1, flexDirection: 'column' }, ui.h(ui.Text, { color: 'red' }, stopped), ...stoppedTail.map((l, i) => ui.h(ui.Text, { key: i, dim: true, wrap: 'truncate' }, l)));
+        // The stop is said in the palette's danger ink, on the scheme on screen.
+        const danger = (host.config.theme as { base?: { danger?: string } } | undefined)?.base?.danger;
+        if (stopped) return ui.h(ui.Box, { padding: 1, flexDirection: 'column' }, ui.h(ui.Text, { color: danger }, stopped), ...stoppedTail.map((l, i) => ui.h(ui.Text, { key: i, dim: true, wrap: 'truncate' }, l)));
         return draw(frame.surface ?? null, treeCtx(ui, hasKeyboard));
       };
     },
