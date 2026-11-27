@@ -2,6 +2,11 @@ import { expect, test } from 'bun:test';
 import { chatMarkdownOptions } from '../../views/modals';
 import { baseInk, buildModels, resolveAppTheme, themeStartNotes, type ResolvedTheme } from '../theme';
 import { HOST_PALETTE, UNKNOWN_RESOLVED } from '../palette-defaults';
+import { resolveSurface } from '../palette';
+
+// The host's own resolved defaults: tests compare against them, not against literals,
+// so the palette's values can change without these tests restating them.
+const def = (scheme: 'dark' | 'light', surface: string): Record<string, string> => resolveSurface(HOST_PALETTE[scheme], surface);
 
 const resolved = (theme: unknown, scheme: 'dark' | 'light' | 'unknown', plugins: Parameters<typeof buildModels>[1] = []): ResolvedTheme =>
   resolveAppTheme(buildModels(theme, plugins), scheme);
@@ -32,7 +37,7 @@ test('an override on one scheme stays on it, and a chat key that names the role 
   expect(followed.chat!.askBg).toBe('#010203');
   // Every surface carries every role beside its own keys.
   expect(dark.chat!.bg).toBe('#010203');
-  expect(dark.chat!.userBg).toBe('#2b2b40');
+  expect(dark.chat!.userBg).toBe(def('dark', 'chat').userBg!);
 });
 
 test("a plugin's manifest palette is a surface, resolved on both schemes", () => {
@@ -43,7 +48,7 @@ test("a plugin's manifest palette is a surface, resolved on both schemes", () =>
   expect(resolved({ light: { board: { swimlaneBg: 'red' } } }, 'light', plugins).board!.swimlaneBg).toBe('red');
   // A plugin's palette never replaces a host surface of the same name.
   const chat = [{ name: 'chat', palette: { dark: { userBg: 'red' }, light: { userBg: 'red' } } }];
-  expect(resolved({}, 'dark', chat).chat!.userBg).toBe('#2b2b40');
+  expect(resolved({}, 'dark', chat).chat!.userBg).toBe(def('dark', 'chat').userBg!);
 });
 
 test('a value the theme does not take is left out and listed', () => {
@@ -55,8 +60,8 @@ test('a value the theme does not take is left out and listed', () => {
 
 test('a theme still in the old format applies nothing of it', () => {
   const out = resolved({ modals: { bg: 'red' }, error: 'yellow' }, 'dark');
-  expect(out.base.bg).toBe('black');
-  expect(out.base.danger).toBe('red');
+  expect(out.base.bg).toBe(def('dark', 'log').bg!);
+  expect(out.base.danger).toBe(def('dark', 'log').danger!);
   expect(out.modals).toBeUndefined();
 });
 
@@ -66,8 +71,8 @@ test('an unknown terminal gets the resolved unknown palette, plugin surfaces res
   expect(out.base).toEqual(UNKNOWN_RESOLVED.base as ResolvedTheme['base']);
   expect(out.chat!.userBg).toBe('default');
   // A host surface on unknown carries every role too: a frame keeps its border.
-  expect(out.log!.border).toBe('cyan');
-  expect(out.chat!.border).toBe('cyan');
+  expect(out.log!.border).toBe(UNKNOWN_RESOLVED.base.border!);
+  expect(out.chat!.border).toBe(UNKNOWN_RESOLVED.base.border!);
   expect(out.board!.lane).toBe('default');
   expect(out.board!.mark).toBe('#123456');
 });
@@ -89,12 +94,12 @@ test('every colour the host ships is one flowtty can paint', async () => {
 test("each scheme has its own grounds, and the person's colour is theirs on its scheme", () => {
   const dark = resolved(undefined, 'dark');
   const light = resolved(undefined, 'light');
-  expect(dark.chat!.bg).toBe('black');
-  expect(light.chat!.bg).toBe('#f4f4f6');
-  expect(light.chat!.text).toBe('black');
+  expect(dark.chat!.bg).toBe(def('dark', 'chat').bg!);
+  expect(light.chat!.bg).toBe(def('light', 'chat').bg!);
+  expect(light.chat!.text).toBe(def('light', 'chat').text!);
   expect(light.chat!.userBg).not.toBe(dark.chat!.userBg);
-  expect(dark.keycaps!.bg).toBe('#1a1b26');
-  expect(light.keycaps!.bg).toBe('#ececf2');
+  expect(dark.keycaps!.bg).toBe(def('dark', 'log').panelBg!);
+  expect(light.keycaps!.bg).toBe(def('light', 'log').panelBg!);
   expect(resolved({ light: { base: { danger: 'magenta' } } }, 'light').base.danger).toBe('magenta');
 });
 
@@ -151,8 +156,8 @@ test('baseInk takes the base roles, and leaves the terminal what the palette lef
   // `default` is the palette saying "the terminal's": nothing of the app's own is
   // painted where it is — the honest ground for a scheme that was never said.
   expect(baseInk(resolved({}, 'unknown'))).toEqual({ bg: undefined, text: undefined, border: 'cyan', selected: 'green' });
-  expect(baseInk(resolved({}, 'light'))).toEqual({ bg: '#f4f4f6', text: 'black', border: 'blue', selected: 'green' });
-  expect(baseInk(resolved({}, 'dark'))).toEqual({ bg: 'black', text: 'white', border: 'cyan', selected: 'green' });
+  { const b = def('light', 'log'); expect(baseInk(resolved({}, 'light'))).toEqual({ bg: b.bg, text: b.text, border: b.border, selected: b.selected }); }
+  { const b = def('dark', 'log'); expect(baseInk(resolved({}, 'dark'))).toEqual({ bg: b.bg, text: b.text, border: b.border, selected: b.selected }); }
   // A person's own value on its scheme reaches the host's side too.
   expect(baseInk(resolved({ dark: { base: { bg: 'blue' } } }, 'dark'))).toMatchObject({ bg: 'blue' });
   expect(baseInk(undefined)).toEqual({ bg: undefined, text: undefined, border: undefined, selected: undefined });

@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -23,16 +24,16 @@ test('an open chat repaints when the terminal goes from dark to light, and back'
   await settle();
   await ui.press('F');
   await settle();
-  expect(hintCell(ui)).toMatchObject({ bg: 'black', fg: 'white' });
+  expect(hintCell(ui)).toMatchObject({ bg: hostColour('dark', 'log', 'bg'), fg: hostColour('dark', 'log', 'text') });
 
   // Sunrise: the same window, the light palette — no restart, no key pressed.
   ui.backend.setColorScheme('light', '#ffffff');
   await settle();
-  expect(hintCell(ui)).toMatchObject({ bg: '#f4f4f6', fg: 'black' });
+  expect(hintCell(ui)).toMatchObject({ bg: hostColour('light', 'log', 'bg'), fg: hostColour('light', 'log', 'text') });
 
   ui.backend.setColorScheme('dark', '#000000');
   await settle();
-  expect(hintCell(ui)).toMatchObject({ bg: 'black', fg: 'white' });
+  expect(hintCell(ui)).toMatchObject({ bg: hostColour('dark', 'log', 'bg'), fg: hostColour('dark', 'log', 'text') });
   ui.app.unmount();
 });
 

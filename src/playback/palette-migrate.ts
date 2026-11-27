@@ -1,7 +1,9 @@
 // `config migrate-theme`: the old flat `theme.*` and each plugin's `colors` become
 // overrides under `theme.dark`. Pure — the command applies the result. Only what
 // differs from the host's dark palette is set; a value already written in the new
-// format is kept as the person wrote it.
+// format is kept as the person wrote it. An old flat theme was often a copy of the
+// colours the host drew when it was written (`OLD_DARK`), not the person's choice:
+// a value equal to that is not carried either, so it does not pin the old look.
 
 import { HOST_PALETTE } from './palette-defaults.js';
 import { expand, resolveSurface, type Role } from './palette.js';
@@ -27,6 +29,19 @@ const ROLE_OF: Record<string, Role> = {
   highlightBg: 'highlight',
   accentBg: 'highlightStrong',
   highlightText: 'highlightText',
+};
+
+// The dark colours the host drew under the flat theme, per new surface and key.
+const OLD_DARK: Record<string, Record<string, string>> = {
+  base: {
+    bg: 'black', text: 'white', border: 'cyan', selected: 'green', fieldBg: 'gray', fieldBorder: 'cyan',
+    danger: 'red', ok: 'green', panelBg: '#1a1b26', highlight: '#3c3c3c', highlightStrong: '#20456b', highlightText: 'white',
+  },
+  chat: {
+    userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta',
+    bgBg: '#2a2438', warn: 'yellow', ok: 'green', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000', idleBorder: 'gray',
+    askBg: '#243036', askInk: '#dfe8e6',
+  },
 };
 
 // `theme.modals.<k>` and `theme.<k>` keys that carry over, in the order they are listed.
@@ -84,6 +99,7 @@ export function migrateTheme(config: Record<string, unknown>): Migration {
     if (written !== undefined) return;
     const dflt = surface === 'base' ? expand(model.base, model.base[key as Role]) : resolveSurface(model, surface)[key];
     if (expand(model.base, value) === dflt) return;
+    if (OLD_DARK[surface]?.[key] === value) return;
     out.set.push([`theme.dark.${surface}.${key}`, value]);
   };
 

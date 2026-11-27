@@ -11,6 +11,7 @@ import { keyGlyph } from '../playback/keys.ts';
 import { ScriptedModel, bootApp, firstUser, settle, settleUntil as settleUntilShared, type Turn } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 const realNow = askClock.now;
 const clock = { t: 10_000 };
@@ -90,7 +91,7 @@ test('the hint badge names the ↓ door and who waits, and the door opens on it'
   const hintAt = rowsOf(ui).findIndex((r) => r.includes('1 waiting'));
   const style = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; dim?: boolean } } } | null }).lastBuffer!
     .get(rowsOf(ui)[hintAt]!.indexOf('1 waiting'), hintAt).style;
-  expect(style.fg).toBe('yellow');
+  expect(style.fg).toBe(hostColour('dark', 'chat', 'warn'));
   // ↓ before the question takes the keys: the door opens, on the row that waits.
   await ui.press('down');
   await settleUntil(() => panelUp(ui));

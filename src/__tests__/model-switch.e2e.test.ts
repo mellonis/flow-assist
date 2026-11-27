@@ -13,6 +13,7 @@ import { sessionFiles } from './helpers/session-files';
 import { resetSessionConfig } from '../config/load';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
@@ -150,7 +151,7 @@ test('/model opens the panel: default, the roles and the ids, each with its wind
   expect(panelRows(ui)[at('other-model')]).toContain('128k');
   // The mark: the session runs ai.model, so the reset's row is the choice it is on — its
   // window in the panel's `ok` tone, the others dim.
-  expect(detailFg(ui, 'default (default-model)', '262k')).toBe('green');
+  expect(detailFg(ui, 'default (default-model)', '262k')).toBe(hostColour('dark', 'chat', 'ok'));
   expect(detailFg(ui, 'other-model', '128k')).not.toBe('green');
   await ui.press('escape');
   await settle();
@@ -207,7 +208,7 @@ test('a mapped id marks the role\'s row in the panel', async () => {
   await command(ui, '/model big-model');
   await noteOnce(ui, 'model: big-model');
   await openModelPanel(ui);
-  expect(detailFg(ui, 'deep → big-model', '512k')).toBe('green');
+  expect(detailFg(ui, 'deep → big-model', '512k')).toBe(hostColour('dark', 'chat', 'ok'));
   expect(detailFg(ui, 'default (default-model)', '262k')).not.toBe('green');
   await ui.press('escape');
   await settle();

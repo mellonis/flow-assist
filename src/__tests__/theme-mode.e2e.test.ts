@@ -7,6 +7,7 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
@@ -24,8 +25,8 @@ async function command(ui: Awaited<ReturnType<typeof bootApp>>, line: string) {
   await settle();
 }
 
-const LIGHT = { bg: '#f4f4f6', fg: 'black' };
-const DARK = { bg: 'black', fg: 'white' };
+const LIGHT = { bg: hostColour('light', 'log', 'bg'), fg: hostColour('light', 'log', 'text') };
+const DARK = { bg: hostColour('dark', 'log', 'bg'), fg: hostColour('dark', 'log', 'text') };
 const NONE = [undefined, 'default'];
 
 test('a pinned scheme survives a terminal flip', async () => {

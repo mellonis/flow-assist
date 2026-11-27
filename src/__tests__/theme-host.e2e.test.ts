@@ -7,6 +7,7 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
@@ -47,11 +48,11 @@ test('the host’s own screen takes the theme', async () => {
 
   // A pinned mode paints the host's side at once, and the ink with it.
   await command(ui, 'config set --session ui.theme dark');
-  expect(hintCell(ui)).toMatchObject({ bg: 'black', fg: 'white' });
-  expect(homeCell(ui)).toMatchObject({ bg: 'black', fg: 'white' });
+  expect(hintCell(ui)).toMatchObject({ bg: hostColour('dark', 'log', 'bg'), fg: hostColour('dark', 'log', 'text') });
+  expect(homeCell(ui)).toMatchObject({ bg: hostColour('dark', 'log', 'bg'), fg: hostColour('dark', 'log', 'text') });
   await command(ui, 'config set --session ui.theme light');
-  expect(hintCell(ui)).toMatchObject({ bg: '#f4f4f6', fg: 'black' });
-  expect(homeCell(ui)).toMatchObject({ bg: '#f4f4f6', fg: 'black' });
+  expect(hintCell(ui)).toMatchObject({ bg: hostColour('light', 'log', 'bg'), fg: hostColour('light', 'log', 'text') });
+  expect(homeCell(ui)).toMatchObject({ bg: hostColour('light', 'log', 'bg'), fg: hostColour('light', 'log', 'text') });
 
   // `system` gives the terminal the say again — here it never said, so nothing is left.
   await command(ui, 'config set --session ui.theme system');
@@ -72,8 +73,8 @@ test('the command prompt takes the palette’s border colour, not a literal', as
   expect(y).toBeGreaterThanOrEqual(0);
   expect(rows[y]!.trimStart().startsWith(':')).toBe(true);
   const x = rows[y]!.indexOf(':');
-  // The light palette's border is blue; the dark and unknown ones are cyan.
-  expect(ui.backend.lastBuffer!.get(x, y).style.fg).toBe('blue');
+  // The light palette's own border colour.
+  expect(ui.backend.lastBuffer!.get(x, y).style.fg).toBe(hostColour('light', 'log', 'border'));
   await ui.press('escape');
   ui.app.unmount();
 });

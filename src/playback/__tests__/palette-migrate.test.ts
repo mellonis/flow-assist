@@ -9,7 +9,7 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 test('the person\'s config: only what differs from the dark defaults is set', () => {
   const r = migrateTheme(clone(PERSON));
   const keys = r.set.map(([k]) => k);
-  // The flat theme equals today's dark defaults: no base value is set.
+  // The flat theme is a copy of the colours the host drew under it: no base value is set.
   expect(keys.filter((k) => k.startsWith('theme.dark.base.'))).toEqual([]);
   expect(r.set.filter(([k]) => k.startsWith('theme.dark.chat.'))).toHaveLength(12);
   expect(r.set).toContainEqual(['theme.dark.chat.userBg', '#232323']);

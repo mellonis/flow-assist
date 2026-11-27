@@ -84,9 +84,9 @@ test('chat marks a background result with its own marker and ground, never as th
   expect(backend.lastFrame).not.toContain('[background]');
   // Its ground differs from the person's, so the two are told apart at a glance.
   const cell = backend.lastBuffer!.get(rows[y]!.indexOf('◆'), y).style;
-  expect(cell.fg).toBe('magenta');
-  expect(cell.bg).toBe('#2a2438');
-  expect(cell.bg).not.toBe('#2b2b40');
+  expect(cell.fg).toBe(CHAT_DEFAULTS.bgAccent);
+  expect(cell.bg).toBe(CHAT_DEFAULTS.bgBg);
+  expect(cell.bg).not.toBe(CHAT_DEFAULTS.userBg);
   handle.unmount();
 });
 
@@ -212,14 +212,14 @@ test("a command block's gutter marker is dim while it runs, ok on exit 0, the er
   // Live: the shell colour (same as the `!`/`‼` prompt it was typed with), pinned —
   // never the ok or the error colour, an outcome the run has not reached yet.
   const liveAt0 = await markerStyle(shellMsg({}, 'live'), 0);
-  expect(liveAt0.fg).toBe('magentaBright');
+  expect(liveAt0.fg).toBe(CHAT_DEFAULTS.shell);
   // The pulse alternates dim on and off over the same clock the elapsed-seconds tail
   // reads, off a `now` sample half a period apart — no timer of its own.
   const liveAt600 = await markerStyle(shellMsg({}, 'live'), 600);
-  expect(liveAt600.fg).toBe('magentaBright');
+  expect(liveAt600.fg).toBe(CHAT_DEFAULTS.shell);
   expect(liveAt0.dim).not.toBe(liveAt600.dim);
   // Exit 0: ok (green).
-  expect(await markerFg(shellMsg({ exitCode: 0, ms: 10, status: 'exit 0' }, 'done'))).toBe('green');
+  expect(await markerFg(shellMsg({ exitCode: 0, ms: 10, status: 'exit 0' }, 'done'))).toBe(CHAT_DEFAULTS.ok);
   // A non-zero exit, and a run the tool call itself failed on: the error colour.
   expect(await markerFg(shellMsg({ exitCode: 1, ms: 10, status: 'exit 1' }, 'done'))).toBe('red');
   expect(await markerFg(shellMsg({}, 'failed'))).toBe('red');
@@ -287,7 +287,7 @@ test("a group line marks a failure in the trail's tone, and a write that showed 
   };
   // Recovered: tool a failed, then succeeded — yellow, not red.
   const recovered = await marked([{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }]);
-  expect(recovered.fg).toBe('yellow');
+  expect(recovered.fg).toBe(CHAT_DEFAULTS.warn);
   // Unrecovered: the failing tool never ran again — red.
   expect((await marked([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).fg).toBe('red');
   // A write with nothing failed: no ✗ at all, and its own ✎ — in the chat's ok ink,
@@ -295,7 +295,7 @@ test("a group line marks a failure in the trail's tone, and a write that showed 
   const wrote = await marked([{ name: 'w', outcome: 'applied' }]);
   expect(wrote.line).not.toContain('✗');
   expect(wrote.line).toContain('✎');
-  expect(wrote.wrote).toBe('green');
+  expect(wrote.wrote).toBe(CHAT_DEFAULTS.ok);
 });
 
 // A record's tone is the trail's, read FORWARD from its own call: a failure a later call
@@ -321,9 +321,9 @@ test("a record line takes the trail's tone, a recovered failure included", async
     expect(at).toBeGreaterThanOrEqual(0);
     return backend.lastBuffer!.get(at, y).style.fg;
   };
-  // The head and the recovered call's record line are both the trail's yellow.
-  expect(fgOf('+ 2 tools', '✗')).toBe('yellow');
-  expect(fgOf('⌁ a · error', '✗')).toBe('yellow');
+  // The head and the recovered call's record line both take the trail's warn colour.
+  expect(fgOf('+ 2 tools', '✗')).toBe(CHAT_DEFAULTS.warn);
+  expect(fgOf('⌁ a · error', '✗')).toBe(CHAT_DEFAULTS.warn);
   handle.unmount();
 });
 

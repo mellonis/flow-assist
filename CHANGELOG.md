@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The default look follows the Claude Code CLI.** Both schemes take its dark and
+  light colours by purpose — its accent orange for the prompt and the assistant's mark,
+  its inactive grey, its prompt-border grey, its permission lavender for the selection,
+  inline code and links, its error, success and warning colours, its user-message,
+  diff and shell grounds. Claude Code draws on the terminal's own ground, so `bg` is a
+  chosen neutral (`#1a1a1a` dark, `#ffffff` light). `flow-assist config migrate-theme`
+  leaves out an old value equal to the colour the host drew under the flat theme, so a
+  copied palette does not pin the previous look.
+
 - **The palette is a base-role set per scheme.** The look is `theme.dark` and
   `theme.light`, each with `base` — 16 roles (`bg text muted border accent selected
   highlight danger ok warn fieldBg fieldText fieldBorder panelBg highlightStrong

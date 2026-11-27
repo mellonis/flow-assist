@@ -9,6 +9,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -40,7 +41,7 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   // The glyph switched and the `!` itself never landed in the field's text.
   expect(ui.backend.lastFrame).toContain('! ');
   expect(ui.backend.lastFrame).not.toMatch(/›\s*!/);
-  expect(styleAt(ui.backend, '! ').fg).toBe('magentaBright');
+  expect(styleAt(ui.backend, '! ').fg).toBe(hostColour('dark', 'chat', 'shell'));
 
   await ui.type('echo hi');
   await ui.press('return');
@@ -58,7 +59,7 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   expect(model.requests).toHaveLength(0); // no turn spent — same as the legacy `!command`
   // The result's `! ` gutter marker shares the shell-mode prompt's colour only while
   // it runs; once it exits 0 it turns the `ok` colour.
-  expect(styleAt(ui.backend, '! echo hi').fg).toBe('green');
+  expect(styleAt(ui.backend, '! echo hi').fg).toBe(hostColour('dark', 'chat', 'ok'));
 
   // Back to the normal prompt: one command per `!`. The command's own block keeps
   // its `! ` mark for good — the only one left is that one, not a stray second copy
@@ -176,7 +177,7 @@ test('`!` again on an empty shell-mode field steps to interactive mode — the p
   expect(ui.backend.lastFrame).toContain('! ');
   await ui.type('!'); // field still empty — the second bang steps up, not typed
   expect(ui.backend.lastFrame).toContain('‼');
-  expect(styleAt(ui.backend, '‼').fg).toBe('magentaBright');
+  expect(styleAt(ui.backend, '‼').fg).toBe(hostColour('dark', 'chat', 'shell'));
 
   await ui.press('backspace'); // level 2 → 1, nothing to delete
   expect(ui.backend.lastFrame).toContain('! ');

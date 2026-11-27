@@ -6,6 +6,7 @@ import path from 'node:path';
 import { CELL_FREE, CELL_FULL, CELL_PART, contextBadge, contextGrid, contextHeading, contextLegend, estimateTokens, readContext } from '../assistant/context-meter.js';
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted.js';
 import { sessionFiles } from './helpers/session-files';
+import { hostColour } from './helpers/palette';
 
 const parts = (over: Partial<Parameters<typeof readContext>[0]> = {}) => ({
   system: 'x'.repeat(4000), memory: '', plan: '', summary: '', tools: [], messages: [], ...over,
@@ -217,7 +218,7 @@ test('past 80% the figure is drawn as a warning', async () => {
   const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('ctx 85%'));
   expect(row).toBeGreaterThan(-1);
   const col = ui.backend.lastFrame.split('\n')[row]!.indexOf('ctx 85%');
-  expect(((ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer.get(col, row)).style.fg).toBe('yellow');
+  expect(((ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer.get(col, row)).style.fg).toBe(hostColour('dark', 'chat', 'warn'));
 });
 
 // Cache usage (model-wire-spec.md, "How full the context is, is shown"): the last request's

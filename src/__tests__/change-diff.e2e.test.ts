@@ -12,6 +12,7 @@ import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { listTree } from './helpers/session-files';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -108,7 +109,7 @@ test('the numbers are chrome: a drag copies the code alone, and the title is tex
   expect(titleAt).toBeGreaterThan(-1);
   const buf = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; dim?: boolean } } } }).lastBuffer;
   const pathX = Array.from(rows[titleAt]!.slice(0, rows[titleAt]!.indexOf('clone/app.ts'))).length;
-  expect(buf.get(pathX, titleAt).style.fg).toBe('blue'); // the chat's accent, not code's cyan
+  expect(buf.get(pathX, titleAt).style.fg).toBe(hostColour('light', 'chat', 'accent')); // the chat's accent, not code's cyan
   const countsX = Array.from(rows[titleAt]!.slice(0, rows[titleAt]!.indexOf('· +1'))).length;
   expect(buf.get(countsX, titleAt).style.dim).toBe(true);
 

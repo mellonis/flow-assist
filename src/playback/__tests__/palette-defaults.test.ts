@@ -1,45 +1,46 @@
-// The host's palettes written as base roles: resolving them gives the colours the
-// host has always drawn, and the chat's own keys follow the roles they name.
+// The host's palettes written as base roles: resolving them gives Claude Code's own
+// dark and light colours, and the chat's own keys follow the roles they name.
 import { expect, test } from 'bun:test';
 import { CHAT_KEYS, HOST_PALETTE, UNKNOWN_RESOLVED } from '../palette-defaults';
 import { ROLES, resolveSurface, type Scheme } from '../palette';
 
-// The colours the host drew before the palette was written as roles, kept here as
-// the fixture for "the look did not change".
-const OLD_BASE: Record<Scheme, Record<string, string>> = {
+// The colours of the Claude Code CLI's dark and light themes, as the host resolves them.
+const CLAUDE_BASE: Record<Scheme, Record<string, string>> = {
   dark: {
-    bg: 'black', border: 'cyan', text: 'white', selected: 'green', fieldBg: 'gray', fieldBorder: 'cyan',
-    panelBg: '#1a1b26', highlight: '#3c3c3c', highlightStrong: '#20456b', highlightText: 'white',
-    danger: 'red', ok: 'green',
+    bg: '#1a1a1a', border: '#888888', text: '#ffffff', muted: '#999999', accent: '#d77757', selected: '#b1b9f9',
+    fieldBg: '#1a1a1a', fieldBorder: '#888888', panelBg: '#262626', highlight: '#264f78', highlightStrong: '#20456b',
+    highlightText: '#ffffff', danger: '#ff6b80', ok: '#4eba65', warn: '#ffc107',
   },
   light: {
-    bg: '#f4f4f6', border: 'blue', text: 'black', selected: 'green', fieldBg: '#e2e2e8', fieldBorder: 'blue',
-    panelBg: '#ececf2', highlight: '#e2e2e2', highlightStrong: '#d4e3f5', highlightText: 'black',
-    danger: 'red', ok: 'green',
+    bg: '#ffffff', border: '#8a8a8a', text: '#000000', muted: '#666666', accent: '#d77757', selected: '#5769f7',
+    fieldBg: '#ffffff', fieldBorder: '#8a8a8a', panelBg: '#f5f5f5', highlight: '#b4d5ff', highlightStrong: '#d4e3f5',
+    highlightText: '#000000', danger: '#ab2b3f', ok: '#2c7a39', warn: '#966c1e',
   },
 };
-const OLD_CHAT: Record<Scheme, Record<string, string>> = {
-  dark: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', add: 'green', del: 'red', addBg: '#003b00', delBg: '#3b0000', idleBorder: 'gray', askBg: '#243036', askInk: '#dfe8e6' },
-  light: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', add: 'green', del: '#a40000', addBg: '#e6f4e6', delBg: '#fce8e8', idleBorder: '#a0a0b0', askBg: '#e3eeec', askInk: '#2b3f3b' },
+const CLAUDE_CHAT: Record<Scheme, Record<string, string>> = {
+  dark: { userBg: '#373737', accent: '#d77757', shell: '#fd5db1', assistantAccent: '#d77757', fieldBg: '#262626', bgAccent: '#00cccc', bgBg: '#374146', warn: '#ffc107', ok: '#4eba65', add: '#ffffff', del: '#ffffff', addBg: '#225c2b', delBg: '#7a2936', idleBorder: '#505050', askBg: '#262626', askInk: '#ffffff' },
+  light: { userBg: '#f0f0f0', accent: '#d77757', shell: '#ff0087', assistantAccent: '#d77757', fieldBg: '#f5f5f5', bgAccent: '#009999', bgBg: '#e6f5fa', warn: '#966c1e', ok: '#2c7a39', add: '#000000', del: '#000000', addBg: '#69db7c', delBg: '#ffa8b4', idleBorder: '#afafaf', askBg: '#f5f5f5', askInk: '#000000' },
 };
+// The unknown scheme keeps the terminal's own colours (it is not Claude Code's).
+const OLD_CHAT_DARK: Record<string, string> = { accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', bgAccent: 'magenta', warn: 'yellow', ok: 'green', add: 'green', del: 'red', idleBorder: 'gray' };
 const OLD_UNKNOWN_BASE: Record<string, string> = {
   bg: 'default', border: 'cyan', text: 'default', selected: 'green', fieldBg: 'default', fieldBorder: 'cyan',
   panelBg: 'default', highlight: 'default', highlightStrong: 'default', highlightText: 'default',
   danger: 'red', ok: 'green',
 };
 const OLD_UNKNOWN_CHAT: Record<string, string> = {
-  ...OLD_CHAT.dark, userBg: 'default', fieldBg: 'default', bgBg: 'default', addBg: 'default', delBg: 'default', askBg: 'default', askInk: 'default',
+  ...OLD_CHAT_DARK, userBg: 'default', fieldBg: 'default', bgBg: 'default', addBg: 'default', delBg: 'default', askBg: 'default', askInk: 'default',
 };
 
 for (const scheme of ['dark', 'light'] as const) {
-  test(`${scheme}: the base roles equal the colours the host drew`, () => {
+  test(`${scheme}: the base roles are Claude Code's`, () => {
     const base = resolveSurface(HOST_PALETTE[scheme], 'log');
-    for (const [role, value] of Object.entries(OLD_BASE[scheme])) expect(base[role]).toBe(value);
+    for (const [role, value] of Object.entries(CLAUDE_BASE[scheme])) expect(base[role]).toBe(value);
   });
 
-  test(`${scheme}: the chat resolves to the colours it drew`, () => {
+  test(`${scheme}: the chat resolves to Claude Code's colours`, () => {
     const chat = resolveSurface(HOST_PALETTE[scheme], 'chat');
-    for (const [key, value] of Object.entries(OLD_CHAT[scheme])) expect(chat[key]).toBe(value);
+    for (const [key, value] of Object.entries(CLAUDE_CHAT[scheme])) expect(chat[key]).toBe(value);
   });
 
   test(`${scheme}: every chat key and every role resolves to a non-empty string`, () => {
@@ -69,11 +70,12 @@ for (const scheme of ['dark', 'light'] as const) {
   });
 }
 
-// The keys that were literals in the drawing code: dark keeps the colour the chat drew,
-// light names one readable on a light ground.
+// The keys that were literals in the drawing code: the phase colours follow Claude
+// Code (pulse = claudeShimmer, thought = autoAccept, plan = planMode); the context
+// meter keeps its own.
 const DRAWN: Record<Scheme, Record<string, string>> = {
-  dark: { pulse: 'cyanBright', thought: 'magenta', plan: 'magenta', ctxInstructions: 'cyan', ctxTools: 'magenta', ctxMemory: 'yellow', ctxPlan: 'green', ctxSummary: 'blue', ctxScreen: 'greenBright', ctxMessages: 'white', ctxImages: 'cyanBright' },
-  light: { pulse: 'blue', thought: 'magenta', plan: 'magenta', ctxInstructions: 'blue', ctxTools: 'magenta', ctxMemory: '#9a6700', ctxPlan: 'green', ctxSummary: '#005f87', ctxScreen: '#2e7d32', ctxMessages: 'black', ctxImages: '#007b83' },
+  dark: { pulse: '#eb9f7f', thought: '#af87ff', plan: '#48968c', ctxInstructions: '#d77757', ctxTools: 'magenta', ctxMemory: '#ffc107', ctxPlan: '#4eba65', ctxSummary: 'blue', ctxScreen: 'greenBright', ctxMessages: '#ffffff', ctxImages: 'cyanBright' },
+  light: { pulse: '#f59575', thought: '#8700ff', plan: '#006666', ctxInstructions: '#d77757', ctxTools: 'magenta', ctxMemory: '#966c1e', ctxPlan: '#2c7a39', ctxSummary: '#005f87', ctxScreen: '#2e7d32', ctxMessages: '#000000', ctxImages: '#007b83' },
 };
 for (const scheme of ['dark', 'light'] as const) {
   test(`${scheme}: the keys the drawing code used to hard-code resolve`, () => {

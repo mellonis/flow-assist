@@ -6,6 +6,7 @@ import { fakeRemote } from '../../__tests__/helpers/remote-fake';
 import { resetSessionConfig } from '../../config/load';
 
 import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
+import { hostColour } from '../../__tests__/helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
@@ -15,13 +16,13 @@ test('a system-mode app on a light terminal flipping to dark refills the same th
   const theme = { dark: { chat: { userBg: '#010203' } } };
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { ui: { theme: 'system' }, theme }, { scheme: 'light' });
   const held = ui.config.theme as Resolved;
-  expect(held.base.bg).toBe('#f4f4f6');
-  expect(held.chat.userBg).toBe('#e4e4f0');
+  expect(held.base.bg).toBe(hostColour('light', 'log', 'bg'));
+  expect(held.chat.userBg).toBe(hostColour('light', 'chat', 'userBg'));
 
   ui.backend.setColorScheme('dark', '#000000');
   await settle();
   expect(ui.config.theme).toBe(held);
-  expect(held.base.bg).toBe('black');
+  expect(held.base.bg).toBe(hostColour('dark', 'log', 'bg'));
   expect(held.chat.userBg).toBe('#010203');
   ui.app.unmount();
 });
@@ -38,7 +39,7 @@ test('a theme still in the old format is said once at start, and not applied', a
   // Where the person sees the start: the start screen.
   expect(ui.backend.lastFrame).toContain('theme.modals is from the old format');
   expect(ui.backend.lastFrame).toContain('theme.dark.base.bg is not a colour');
-  expect((ui.config.theme as Resolved).base.bg).toBe('black');
+  expect((ui.config.theme as Resolved).base.bg).toBe(hostColour('dark', 'log', 'bg'));
   ui.app.unmount();
 });
 
@@ -51,7 +52,7 @@ test('a plugin that joins after start gets its surface on the same theme object'
   fake.answerHello();
   await settleUntil(() => held.fake?.lane !== undefined, 200, 'the late plugin\'s surface');
   expect(ui.config.theme).toBe(held);
-  expect(held.fake!.lane).toBe('#3c3c3c');
+  expect(held.fake!.lane).toBe(hostColour('dark', 'log', 'highlight'));
   // The person's overrides survive the rebuild.
   expect(held.fake!.mark).toBe('red');
   ui.app.unmount();

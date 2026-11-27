@@ -8,6 +8,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle, settleUntil as settleUntilShared } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -15,8 +16,8 @@ const statusRow = (frame: string) => frame.split('\n').find((r) => /Esc stops/.t
 // The seconds the status line is showing — of whatever is running now.
 const secondsOn = (frame: string) => ((s) => (s === undefined ? -1 : s === '<1' ? 0 : Number(s)))(/(<1|\d+)s/.exec(statusRow(frame))?.[1]);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-// The word the line says while no tool runs, and what phase its colour says: magenta
-// while the model thinks, the assistant's accent (green) while its text arrives. The
+// The word the line says while no tool runs, and what phase its colour says: the
+// chat's `thought` while the model thinks, its `assistantAccent` while text arrives. The
 // shimmer's highlight passes over a few cells; the rest carry the phase's colour.
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 function verbOn(ui: Ui): { word: string; phase: 'thinking' | 'writing' | '?' } {
@@ -27,7 +28,7 @@ function verbOn(ui: Ui): { word: string; phase: 'thinking' | 'writing' | '?' } {
   const x0 = Array.from(rows[y]!.slice(0, m.index)).length;
   const buf = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer;
   const fgs = Array.from(m[1]!).map((_c, i) => buf.get(x0 + i, y).style.fg);
-  const phase = fgs.includes('magenta') ? 'thinking' : fgs.includes('green') ? 'writing' : '?';
+  const phase = fgs.includes(hostColour('dark', 'chat', 'thought')) ? 'thinking' : fgs.includes(hostColour('dark', 'chat', 'assistantAccent')) ? 'writing' : '?';
   return { word: m[1]!, phase };
 }
 // A real process finishes on its own clock, not the test backend's.

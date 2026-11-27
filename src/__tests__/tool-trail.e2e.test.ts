@@ -8,6 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle, settleUntil } from './helpers/scripted';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -143,7 +144,7 @@ test('a turn that runs out of rounds says so where the answer would be, in the w
   const y = frame.split('\n').findIndex((r) => r.includes('stopped after 5 rounds'));
   const x = Array.from(frame.split('\n')[y]!.slice(0, frame.split('\n')[y]!.indexOf('stopped'))).length;
   const cell = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; dim?: boolean } } } }).lastBuffer.get(x, y);
-  expect(cell.style.fg).toBe('yellow'); // the chat's warn colour
+  expect(cell.style.fg).toBe(hostColour('dark', 'chat', 'warn')); // the chat's warn colour
   expect(cell.style.dim).toBeFalsy();
   ui.app.unmount();
 });

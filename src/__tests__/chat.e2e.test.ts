@@ -5,6 +5,7 @@ import { PLAN_REMINDER } from '../assistant/plan';
 import { keyGlyph } from '../playback/keys';
 
 import { nativeFetch } from './helpers/test-setup.ts';
+import { hostColour } from './helpers/palette';
 const realFetch = nativeFetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -27,8 +28,8 @@ test('messages carry a marker and colour instead of a role label', async () => {
 
   // The input reads as a field: a prompt in the accent colour, on its own ground.
   expect(ui.backend.lastFrame).toContain('› ');
-  expect(styleAt(ui.backend, '› ').fg).toBe('cyan');
-  expect(styleAt(ui.backend, '› ').bg).toBe('#1f1f2e');
+  expect(styleAt(ui.backend, '› ').fg).toBe(hostColour('dark', 'chat', 'accent'));
+  expect(styleAt(ui.backend, '› ').bg).toBe(hostColour('dark', 'chat', 'fieldBg'));
 
   await ui.type('how far is my branch');
   await ui.press('return');
@@ -42,16 +43,16 @@ test('messages carry a marker and colour instead of a role label', async () => {
 
   // The person's message: the same accent prompt as the field, on the user ground.
   const mine = styleAt(ui.backend, '› how far is my branch');
-  expect(mine.fg).toBe('cyan');
-  expect(mine.bg).toBe('#2b2b40');
-  expect(styleAt(ui.backend, '› how far is my branch', 2).bg).toBe('#2b2b40');
+  expect(mine.fg).toBe(hostColour('dark', 'chat', 'accent'));
+  expect(mine.bg).toBe(hostColour('dark', 'chat', 'userBg'));
+  expect(styleAt(ui.backend, '› how far is my branch', 2).bg).toBe(hostColour('dark', 'chat', 'userBg'));
   // The answer carries the assistant's own mark — ƒ, in its own colour — on the plain
   // modal ground, its text aligned under the message text.
   expect(frame).toMatch(/│ ƒ Three commits ahead/);
   const its = styleAt(ui.backend, 'ƒ Three commits ahead');
-  expect(its.fg).toBe('green');
-  expect(its.bg).toBe('black');
-  expect(styleAt(ui.backend, 'Three commits ahead').bg).toBe('black');
+  expect(its.fg).toBe(hostColour('dark', 'chat', 'assistantAccent'));
+  expect(its.bg).toBe(hostColour('dark', 'chat', 'bg'));
+  expect(styleAt(ui.backend, 'Three commits ahead').bg).toBe(hostColour('dark', 'chat', 'bg'));
   // The same mark signs the frame; the title dangles no preposition without a context.
   expect(frame).toContain('ƒ Flow Assist');
   expect(frame).not.toContain('Chat about');
@@ -158,7 +159,7 @@ test('a slash command completes inline: the rest of it is shown in the field, Ta
   expect(styleAt(ui.backend, '› /compact', 2).dim).toBeFalsy();
   const ghost = styleAt(ui.backend, '› /compact', 6); // the "p" of com|pact — past the caret cell
   expect(ghost.dim).toBe(true);
-  expect(ghost.fg).toBe('cyan');
+  expect(ghost.fg).toBe(hostColour('dark', 'chat', 'accent'));
 
   // Tab takes it; the field now holds the whole command and nothing is suggested.
   await ui.press('tab');
@@ -207,7 +208,7 @@ test('a blank line between two thoughts is a row of the field on screen', async 
   // Exactly one row between them, and it is an empty row of the field itself.
   expect(second - first).toBe(2);
   expect(rows[first + 1]!.replace(/[│\s]/g, '')).toBe('');
-  expect(ui.backend.lastBuffer!.get(rows[first]!.indexOf('›') + 4, first + 1).style.bg).toBe('#1f1f2e');
+  expect(ui.backend.lastBuffer!.get(rows[first]!.indexOf('›') + 4, first + 1).style.bg).toBe(hostColour('dark', 'chat', 'fieldBg'));
   ui.app.unmount();
 });
 
