@@ -94,7 +94,11 @@ test('unknown: the resolved records hold plain strings and the colours the host 
   const base = UNKNOWN_RESOLVED.base!;
   for (const role of ROLES) expect(base[role]?.length).toBeGreaterThan(0);
   for (const [role, value] of Object.entries(OLD_UNKNOWN_BASE)) expect(base[role]).toBe(value);
-  for (const key of CHAT_KEYS) expect(UNKNOWN_RESOLVED.chat![key]?.length).toBeGreaterThan(0);
+  // The markdown prose keys are absent: on unknown the prose keeps flowtty's own colours.
+  for (const key of CHAT_KEYS) {
+    if (key.startsWith('md')) expect(UNKNOWN_RESOLVED.chat![key]).toBeUndefined();
+    else expect(UNKNOWN_RESOLVED.chat![key]?.length).toBeGreaterThan(0);
+  }
   for (const [key, value] of Object.entries(OLD_UNKNOWN_CHAT)) expect(UNKNOWN_RESOLVED.chat![key]).toBe(value);
   expect(UNKNOWN_RESOLVED.log).toEqual({});
   expect(UNKNOWN_RESOLVED.keycaps).toEqual({ bg: 'default', text: 'default' });

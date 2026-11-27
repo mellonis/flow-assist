@@ -134,7 +134,8 @@ export const HOST_PALETTE: PaletteModel = { dark: DARK, light: LIGHT };
 
 // The `unknown` scheme as resolved records: `default` is flowtty's "no colour of the
 // app's own" sentinel, so grounds and inks stay the terminal's; the accents the host
-// names on every scheme stay named.
+// names on every scheme stay named. The chat sets no markdown prose key (`md*`): the
+// prose there keeps flowtty's own colours.
 export const UNKNOWN_RESOLVED: Record<string, Record<string, string>> = {
   base: {
     bg: 'default',
@@ -171,11 +172,6 @@ export const UNKNOWN_RESOLVED: Record<string, Record<string, string>> = {
     idleBorder: 'gray',
     askBg: 'default',
     askInk: 'default',
-    mdHeading: 'cyan',
-    mdCode: 'green',
-    mdLink: 'green',
-    mdList: 'default',
-    mdQuote: 'default',
     pulse: 'cyanBright',
     thought: 'magenta',
     plan: 'magenta',

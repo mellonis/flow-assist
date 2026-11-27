@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { chatMarkdownOptions } from '../../views/modals';
 import { baseInk, buildModels, resolveAppTheme, themeStartNotes, type ResolvedTheme } from '../theme';
 import { HOST_PALETTE, UNKNOWN_RESOLVED } from '../palette-defaults';
 
@@ -220,4 +221,12 @@ test('the start notes say what is not applied, by count, and where an old key is
     'theme.selected, plugins.board.colors in config.json are from the old format and are not applied — run flow-assist config migrate-theme, then remove them from config.json',
   ]);
   for (const line of themeStartNotes([{ path: 'theme.dark', why: 'value' }], ['theme.modals'], none)) expect(line.startsWith('theme: ')).toBe(false);
+});
+
+test('on the unknown scheme the markdown prose keeps flowtty\'s own colours', () => {
+  const chat = resolved({}, 'unknown').chat!;
+  for (const key of ['mdHeading', 'mdCode', 'mdLink', 'mdList', 'mdQuote']) expect(chat[key]).toBeUndefined();
+  expect(chatMarkdownOptions(chat).proseColors).toEqual({});
+  // On a scheme that is tuned, the prose follows the palette.
+  expect(chatMarkdownOptions(resolved({}, 'dark').chat!).proseColors?.link).toBe(HOST_PALETTE.dark.base.selected);
 });
