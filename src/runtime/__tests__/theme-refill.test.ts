@@ -1,7 +1,8 @@
 // The app resolves its palette from both schemes' models built at start; a scheme
 // flip refills the theme object every plugin and renderer was handed, never a new one.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from '../../__tests__/helpers/scripted';
+import { ScriptedModel, bootApp, settle, settleUntil } from '../../__tests__/helpers/scripted';
+import { fakeRemote } from '../../__tests__/helpers/remote-fake';
 import { resetSessionConfig } from '../../config/load';
 
 import { nativeFetch } from '../../__tests__/helpers/test-setup.ts';
@@ -31,5 +32,20 @@ test('a theme still in the old format is said once at start, and not applied', a
   expect(lines.filter((l) => l.includes('theme.modals from the old format is not applied — flow-assist config migrate-theme moves it'))).toHaveLength(1);
   expect(lines.filter((l) => l.includes('theme.dark.base.bg'))).toHaveLength(1);
   expect((ui.config.theme as Resolved).base.bg).toBe('black');
+  ui.app.unmount();
+});
+
+test('a plugin that joins after start gets its surface on the same theme object', async () => {
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'], colors: { lane: '${highlightBg}' } });
+  fake.holdHello();
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme: { dark: { fake: { mark: 'red' } } } }, { late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
+  const held = ui.config.theme as Record<string, Record<string, string>>;
+  expect(held.fake?.lane).toBeUndefined();
+  fake.answerHello();
+  await settleUntil(() => held.fake?.lane !== undefined, 200, 'the late plugin\'s surface');
+  expect(ui.config.theme).toBe(held);
+  expect(held.fake!.lane).toBe('#3c3c3c');
+  // The person's overrides survive the rebuild.
+  expect(held.fake!.mark).toBe('red');
   ui.app.unmount();
 });

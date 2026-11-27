@@ -424,7 +424,7 @@ export async function renderApp(
   let pinnedScheme: ThemeMode | null = seenConfigMode ?? 'system';
   let terminalScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
   let themeScheme: ColorScheme = schemeFor(pinnedScheme, terminalScheme);
-  config.theme = resolveAppTheme(themeModels.models, themeScheme);
+  config.theme = resolveAppTheme(themeModels, themeScheme);
   // The ONE place a resolved palette is laid into the running app's theme object — the
   // same object the plugins and the renderers were given (a plugin may hold the
   // reference), emptied and refilled, never replaced. The resolve above builds it; every
@@ -432,7 +432,7 @@ export async function renderApp(
   const applyTheme = (scheme: ColorScheme) => {
     themeScheme = scheme;
     const theme = config.theme as Record<string, unknown>;
-    const next = resolveAppTheme(themeModels.models, scheme);
+    const next = resolveAppTheme(themeModels, scheme);
     for (const key of Object.keys(theme)) delete theme[key];
     Object.assign(theme, next);
   };

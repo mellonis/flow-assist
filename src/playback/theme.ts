@@ -69,16 +69,23 @@ function shapeSurfaces(plugins: readonly (PalettePlugin & ShapeColors)[], taken:
   return out;
 }
 
+/** Both schemes' models with the person's overrides laid on, and the defaults they were laid on. */
+export interface ThemeModels {
+  models: PaletteModel;
+  defaults: PaletteModel;
+}
+
 /**
  * Both schemes' models: the host's surfaces, each plugin's palette as a surface of its
- * name (never over a host surface), the person's overrides laid on. `ignored` lists
- * each override path the theme does not take.
+ * name (never over a host surface), the person's overrides laid on. `defaults` is the
+ * same before the overrides; `ignored` lists each override path the theme does not take.
  */
-export function buildModels(theme: unknown, plugins: readonly (PalettePlugin & ShapeColors)[]): { models: PaletteModel; ignored: string[] } {
+export function buildModels(theme: unknown, plugins: readonly (PalettePlugin & ShapeColors)[]): ThemeModels & { ignored: string[] } {
   const { overrides, ignored } = readThemeOverrides(theme);
   const taken = new Set(['base', ...Object.keys(HOST_PALETTE.dark.surfaces), ...Object.keys(HOST_PALETTE.light.surfaces)]);
   const bridged = shapeSurfaces(plugins, taken);
   const models = {} as PaletteModel;
+  const defaultsOut = {} as PaletteModel;
   for (const scheme of SCHEMES) {
     const defaults = HOST_PALETTE[scheme];
     const surfaces: Record<string, Record<string, string>> = { ...defaults.surfaces };
@@ -86,20 +93,25 @@ export function buildModels(theme: unknown, plugins: readonly (PalettePlugin & S
       if (p.palette !== undefined && !taken.has(p.name)) surfaces[p.name] = { ...p.palette[scheme] };
     }
     for (const [name, keys] of Object.entries(bridged)) surfaces[name] ??= keys;
-    models[scheme] = layer({ base: defaults.base, surfaces }, overrides[scheme as Scheme] ?? {});
+    defaultsOut[scheme] = { base: defaults.base, surfaces };
+    models[scheme] = layer(defaultsOut[scheme], overrides[scheme as Scheme] ?? {});
   }
-  return { models, ignored };
+  return { models, defaults: defaultsOut, ignored };
 }
 
-/** The theme for the scheme on screen; `unknown` is the resolved unknown palette, a plugin's surface resolved against its base. */
-export function resolveAppTheme(models: PaletteModel, scheme: ColorScheme): ResolvedTheme {
+/**
+ * The theme for the scheme on screen. `unknown` is not tuned: the resolved unknown
+ * palette, and each plugin's surface from its own defaults (its dark ones) expanded
+ * against that palette's base — the person's overrides stay on their scheme.
+ */
+export function resolveAppTheme({ models, defaults }: ThemeModels, scheme: ColorScheme): ResolvedTheme {
   if (scheme === 'unknown') {
     const base = UNKNOWN_RESOLVED.base as Record<Role, string>;
     const out: Record<string, Record<string, string>> = { base: { ...base } };
     for (const [name, keys] of Object.entries(UNKNOWN_RESOLVED)) {
       if (name !== 'base') out[name] = { ...base, ...keys };
     }
-    for (const [name, keys] of Object.entries(models.dark.surfaces)) {
+    for (const [name, keys] of Object.entries(defaults.dark.surfaces)) {
       if (out[name] !== undefined) continue;
       out[name] = { ...base, ...Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, expand(base, v)])) };
     }

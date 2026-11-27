@@ -3,7 +3,7 @@ import { baseInk, buildModels, resolveAppTheme, type ResolvedTheme } from '../th
 import { HOST_PALETTE, UNKNOWN_RESOLVED } from '../palette-defaults';
 
 const resolved = (theme: unknown, scheme: 'dark' | 'light' | 'unknown', plugins: Parameters<typeof buildModels>[1] = []): ResolvedTheme =>
-  resolveAppTheme(buildModels(theme, plugins).models, scheme);
+  resolveAppTheme(buildModels(theme, plugins), scheme);
 
 // A pairing's readability is a relation: on a light terminal the band is the paler of
 // the two, on a dark one the deeper. A named terminal colour gets a stand-in hex —
@@ -22,9 +22,9 @@ function luminance(color: string): number {
 }
 
 test('an override on one scheme stays on it, and a chat key that names the role follows it', () => {
-  const models = buildModels({ dark: { base: { bg: '#010203' } } }, []).models;
-  expect(resolveAppTheme(models, 'light').base.bg).toBe(HOST_PALETTE.light.base.bg);
-  const dark = resolveAppTheme(models, 'dark');
+  const { models, defaults } = buildModels({ dark: { base: { bg: '#010203' } } }, []);
+  expect(resolveAppTheme({ models, defaults }, 'light').base.bg).toBe(HOST_PALETTE.light.base.bg);
+  const dark = resolveAppTheme({ models, defaults }, 'dark');
   expect(dark.base.bg).toBe('#010203');
   // `askBg` written as `${base.bg}` moves with the role it names.
   const followed = resolved({ dark: { base: { bg: '#010203' }, chat: { askBg: '${base.bg}' } } }, 'dark');
@@ -46,10 +46,10 @@ test("a plugin's manifest palette is a surface, resolved on both schemes", () =>
 });
 
 test('a value the theme does not take is left out and listed', () => {
-  const { models, ignored } = buildModels({ dark: { base: { bg: 'not-a-colour' }, chat: { userBg: '#123456' } } }, []);
+  const { models, defaults, ignored } = buildModels({ dark: { base: { bg: 'not-a-colour' }, chat: { userBg: '#123456' } } }, []);
   expect(ignored).toEqual(['theme.dark.base.bg']);
-  expect(resolveAppTheme(models, 'dark').base.bg).toBe(HOST_PALETTE.dark.base.bg);
-  expect(resolveAppTheme(models, 'dark').chat!.userBg).toBe('#123456');
+  expect(resolveAppTheme({ models, defaults }, 'dark').base.bg).toBe(HOST_PALETTE.dark.base.bg);
+  expect(resolveAppTheme({ models, defaults }, 'dark').chat!.userBg).toBe('#123456');
 });
 
 test('a theme still in the old format applies nothing of it', () => {
@@ -179,4 +179,14 @@ test('baseInk takes the base roles, and leaves the terminal what the palette lef
   // A person's own value on its scheme reaches the host's side too.
   expect(baseInk(resolved({ dark: { base: { bg: 'blue' } } }, 'dark'))).toMatchObject({ bg: 'blue' });
   expect(baseInk(undefined)).toEqual({ bg: undefined, text: undefined, border: undefined, selected: undefined });
+});
+
+test("an unknown terminal takes no tuned plugin colour: the person's tuning stays on its scheme", () => {
+  const plugins = [{ name: 'board', palette: { dark: { x: '#123456' }, light: { x: '#123456' } } }];
+  const theme = { dark: { board: { x: 'red' } } };
+  expect(resolved(theme, 'dark', plugins).board!.x).toBe('red');
+  expect(resolved(theme, 'unknown', plugins).board!.x).toBe('#123456');
+  // A bridged shape surface is the same: its default, not the person's tuning.
+  const shaped = [{ name: 'lanes', colors: { y: '${highlightBg}' } }];
+  expect(resolved({ dark: { lanes: { y: 'red' } } }, 'unknown', shaped).lanes!.y).toBe('default');
 });

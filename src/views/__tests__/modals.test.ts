@@ -18,7 +18,7 @@ import type { SessionRow } from '../../assistant/sessions.js';
 import type { ChatMsg } from '../../assistant/conversation-types.js';
 
 // The chat's own keys as the real app resolves them on a dark terminal.
-const DARK_CHAT = resolveAppTheme(buildModels({}, []).models, 'dark').chat!;
+const DARK_CHAT = resolveAppTheme(buildModels({}, []), 'dark').chat!;
 const CHAT_DEFAULTS: Record<string, string> = Object.fromEntries(CHAT_KEYS.map((k) => [k, DARK_CHAT[k]!]));
 
 // The trail condenses a run of one tool ending one way into a count — except a call
