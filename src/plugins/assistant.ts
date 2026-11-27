@@ -256,8 +256,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // bottom by itself on a terminal under 120 columns) and `panel.size` (percent of the
     // width on the right, of the height at the bottom). `notes` — how the
     // text the model writes between tool calls is drawn (`/notes` switches it for the
-    // conversation); `colors` — the chat's palette override
-    // (src/playback/theme.ts); `runOutputLines` — how many lines of a command's output
+    // conversation); `runOutputLines` — how many lines of a command's output
     // a click on its block shows (a display cap of its own, quite apart from
     // `shell.maxChars`, which is how much the MODEL is given); `^o` opens it in full.
     // The model may change where the chat opens and which side the panel docks on — a
@@ -282,7 +281,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
       // `step` (`notesMode`) — the plugin's config is checked only when it is written.
       notes: z.enum(['step', 'open']).optional(),
       runOutputLines: z.number().int().positive().optional(),
-      colors: z.record(z.string(), z.unknown()).optional(),
     }).optional(),
     // The footer's word for the chat while it is closed: the key that opens it and,
     // when background results landed meanwhile, how many are waiting. Open, the

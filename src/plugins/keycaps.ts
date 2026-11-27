@@ -35,16 +35,14 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     // panel follows the terminal between light and dark.
     colors: { bg: '${panelBg}' },
     // Schema of the config.plugins.keycaps namespace: enabled — show the panel at
-    // startup (read when the panel mounts; `:keycaps on|off` switches it for the run),
-    // colors — palette override (→ theme.keycaps). The model may change `enabled`: a
-    // display flag.
+    // startup (read when the panel mounts; `:keycaps on|off` switches it for the run). The
+    // model may change `enabled`: a display flag.
     configSchema: z.object({
       enabled: z.boolean()
         .register(modelMaySet, { reason: 'whether the panel of pressed keys is shown — a display flag' })
         .register(modelMaySave, { reason: 'whether the panel of pressed keys is shown — a display flag' })
         .register(appliesOnRestart, {})
         .optional(),
-      colors: z.record(z.string(), z.unknown()).optional(),
     }).optional(),
     components: {
       keycaps: (api) => {

@@ -91,10 +91,10 @@ test('the resolved theme the app holds is never overwritten under it', () => {
   const file = tempLocal();
   const palette = { modals: { chat: { accent: 'cyan' } } };
   const live: Record<string, unknown> = { theme: palette };
-  const res = setConfigValue(live, 'theme', { accent: 'red' }, { scope: 'session', filePath: file });
+  const res = setConfigValue(live, 'theme', { dark: { base: { accent: 'red' } } }, { scope: 'session', filePath: file });
   expect(res.ok).toBe(true);
   expect(live.theme).toBe(palette);
-  expect(getDeep(loadConfig({ localPath: file }), 'theme')).toEqual({ accent: 'red' });
+  expect(getDeep(loadConfig({ localPath: file }), 'theme')).toEqual({ dark: { base: { accent: 'red' } } });
 });
 
 test('a key read only at start is reported so, in both scopes', () => {

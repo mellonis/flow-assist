@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { themeSchema } from '../playback/palette-config.js';
 
 // ─── What the model may change ───────────────────────────────────────────────
 // Config is the person's, and much of it is the model's own leash, so a key is
@@ -46,7 +47,7 @@ export const hostConfigSchema = z.object({
   // Bound when the app starts (`buildKeys`).
   keys: z.record(z.string(), z.union([z.string(), z.array(z.string())])).register(appliesOnRestart, {}).optional(),
   // Resolved into the palette when the app starts.
-  theme: z.record(z.string(), z.unknown()).register(appliesOnRestart, {}).optional(),
+  theme: themeSchema.register(appliesOnRestart, {}).optional(),
   debug: z.object({ logTools: z.boolean() }).optional(),
   ai: z.object({
     // 'anthropic' — Anthropic's own Messages API; anything else, or unset, an

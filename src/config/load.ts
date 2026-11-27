@@ -584,7 +584,7 @@ export function getSchemaAtPath(schema: any, path: string): any {
     cur = unwrapNode(cur);
     const shape = cur?.shape;
     if (shape) {
-      cur = shape[part];
+      cur = shape[part] ?? cur.def?.catchall;
       if (!cur) return null;
     } else if (cur?.type === 'record') {
       cur = unwrapNode(cur.valueType);
@@ -846,7 +846,12 @@ export function saveConfigUnset(key: string, filePath: string = configLocalWrite
 // stderr and continues. Returns an empty array when the config looks usable.
 export function configWarnings(config: Record<string, unknown>): string[] {
   const out: string[] = [];
-  const check = hostConfigSchema.safeParse(config);
+  // A flat `theme.*` an older version wrote stays in the file for `config migrate-theme`; it is not a malformed value.
+  const theme = config.theme;
+  const checked = typeof theme === 'object' && theme !== null && !Array.isArray(theme)
+    ? { ...config, theme: Object.fromEntries(Object.entries(theme).filter(([k]) => k === 'dark' || k === 'light')) }
+    : config;
+  const check = hostConfigSchema.safeParse(checked);
   if (!check.success) {
     for (const issue of check.error.issues) {
       out.push(`config: ${issue.path.join('.')} — ${issue.message}`);

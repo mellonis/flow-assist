@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig, acceptedConfigPath, configMarks } from '../load';
+import { oldThemeKeys } from '../../playback/palette-config';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,7 +39,7 @@ test('a mode typed at `theme` is pointed at `ui.theme`', () => {
   expect(refused.ok).toBe(false);
   expect(refused.error).toContain('ui.theme');
   // A real palette record still passes, and no other key's refusal carries the hint.
-  expect(validateConfigWriteValue(hostConfigSchema, 'theme', { modals: { bg: 'black' } }).ok).toBe(true);
+  expect(validateConfigWriteValue(hostConfigSchema, 'theme', { dark: { base: { bg: 'black' } } }).ok).toBe(true);
   const other = validateConfigWriteValue(hostConfigSchema, 'cache.enabled', 'yes') as { ok: false; error: string };
   expect(other.error).not.toContain('ui.theme');
 });
@@ -185,5 +186,21 @@ test('under bun test the config is read from the run\'s own directory, never fro
     if (was === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = was;
     files.forEach((f, i) => (kept[i] === null ? fs.rmSync(f, { force: true }) : fs.writeFileSync(f, kept[i]!)));
     fs.rmSync(acceptedConfigPath(), { force: true });
+  }
+});
+
+test('a config in the old theme shape loads whole, warns of nothing, and refuses a write', () => {
+  const file = path.join(hostStateDir(), 'config.json');
+  const kept = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const old = { theme: { modals: { bg: 'black' }, selected: 'green' }, plugins: { chat: { colors: { userBg: '#232323' } } } };
+  try {
+    fs.writeFileSync(file, JSON.stringify(old));
+    const read = loadConfig({ session: false });
+    expect(read.theme).toEqual(old.theme);
+    expect(oldThemeKeys(read)).toEqual(['theme.modals', 'theme.selected', 'plugins.chat.colors']);
+    expect(configWarnings(read).filter((w) => w.includes('theme'))).toEqual([]);
+    expect(validateConfigWriteValue(hostConfigSchema, 'theme.modals', { bg: 'black' }).ok).toBe(false);
+  } finally {
+    if (kept === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, kept);
   }
 });
