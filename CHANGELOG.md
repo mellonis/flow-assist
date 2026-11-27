@@ -5,6 +5,39 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The palette is a base-role set per scheme.** The look is `theme.dark` and
+  `theme.light`, each with `base` — 16 roles (`bg text muted border accent selected
+  highlight danger ok warn fieldBg fieldText fieldBorder panelBg highlightStrong
+  highlightText`) — and one record of keys per surface (`chat`, `log`, `keycaps`, each
+  plugin's own). A value is a colour or `${base.<role>}`, resolved inside its scheme, so
+  one role moves every key that refers to it; a key left out inherits the host's default
+  for that scheme. The chat's keys now cover what it draws (`pulse`, `thought`, `plan`,
+  the context bar's `ctx…` segments) and are set at `theme.<scheme>.chat`.
+
+- **Markdown prose in the chat has colours of its own.** `mdHeading`, `mdCode`,
+  `mdLink`, `mdList` and `mdQuote` in the chat's palette colour a heading, inline code,
+  a link, a list marker and a quote; they refer to base roles by default, per scheme.
+
+- **`HOST_API` is 3.** A plugin's palette moves out of code into `manifest.json`:
+  `colors` (one record, or `{ dark, light }`; with one scheme given the other copies it)
+  and an optional `preview` node tree for the theme tuner. The plugin shape's `colors`
+  and `modalColors` and the remote registration's are gone, and `host.config.theme.<plugin>`
+  carries the resolved palette. The tokens become base roles: `${panelBg}` →
+  `${base.panelBg}`, `${highlightBg}` → `${base.highlight}`, `${accentBg}` →
+  `${base.highlightStrong}`, `${highlightText}` → `${base.highlightText}`,
+  `${selected}` → `${base.selected}`, `${error}` → `${base.danger}`, `${success}` →
+  `${base.ok}`. A manifest says `hostApi: 3`; the host refuses another value. The
+  bundled plugins and the example are on it.
+
+- **The old palette format is not applied; `config migrate-theme` moves it.** The flat
+  `theme.*` keys, `theme.modals.*` and `plugins.<name>.colors` are ignored, and the
+  start names the command. `flow-assist config migrate-theme` writes what differs from
+  the host's palette under `theme.dark`, with the tokens rewritten as `${base.<role>}`,
+  and unsets the old keys (one written in `config.json` is named, not touched).
+
+- **flowtty 1.0.0-alpha.42.** The host and the bundled plugins declare
+  `>=1.0.0-alpha.42 <1.0.0-alpha.43`.
+
 - **`/diff` is a diff viewer now.** Its rows are one walk with keys of their own:
   `]`/`[` step the changes, `↑`/`↓` the files, `j`/`k` scroll the rows without moving
   the cursor, `Home`/`End` go to the ends and `PageDown`/`PageUp` (or

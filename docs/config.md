@@ -25,14 +25,31 @@ assistant may set or save".
   read live: `:config set ui.theme dark` in the running app repaints it at once; a value
   written into `config.local.json` from outside a running app is read at the next start —
   there is no file watcher. See [usage.md](usage.md), "The look". The key is the
-  person's — the assistant has no mark for it. The chat's own colours live at
-  `theme.modals.chat`: `accent`, `shell`, `assistantAccent`, `userBg` (the person's
-  messages), `bgAccent`/`bgBg` (a background result), `askBg`/`askInk` (a kept question
-  and the answer it got), `fieldBg`, `warn`, `ok`, `add`/`del` (a diff row: what came in,
-  what went out — the `✎` block, a diff the assistant writes and the `/diff` panel alike)
-  with `addBg`/`delBg` (the ground those rows sit on), and `idleBorder`. A `theme` record
-  cannot set a per-modal token — a value at `theme.modals.chat.<key>` is inert (it nests
-  one level down); `config.plugins.chat.colors` is the path.
+  person's — the assistant has no mark for it. The palette is a set of
+  overrides per scheme: `theme.dark` and `theme.light` each hold `base` — the 16 roles
+  (`bg text muted border accent selected highlight danger ok warn fieldBg fieldText
+  fieldBorder panelBg highlightStrong highlightText`, meant in [plugins.md](plugins.md),
+  "Plugins") — and one record per surface (`chat`, `log`, each plugin that declares
+  `colors`). A value is a colour or `${base.<role>}`, which resolves inside its scheme.
+  Only what you set is saved: a key you leave out takes the host's default for that
+  scheme, so `:config set theme.dark.base.accent '#d77757'` moves everything that
+  refers to `accent` in the dark scheme and nothing in the light one, and
+  `:config unset theme.dark.base.accent` hands it back. The chat's keys, at
+  `theme.<scheme>.chat`: `accent`, `shell`, `assistantAccent`, `userBg` (the person's
+  messages), `fieldBg`, `bgAccent`/`bgBg` (a background result), `warn`, `ok`,
+  `add`/`del` (a diff row: what came in, what went out — the `✎` block, a diff the
+  assistant writes and the `/diff` panel alike) with `addBg`/`delBg` (the ground those
+  rows sit on), `idleBorder`, `askBg`/`askInk` (a kept question and the answer it got),
+  the markdown prose of an answer — `mdHeading`, `mdCode`, `mdLink`, `mdList`,
+  `mdQuote` — `pulse`, `thought`, `plan`, and the context bar's segments
+  (`ctxInstructions`, `ctxTools`, `ctxMemory`, `ctxPlan`, `ctxSummary`, `ctxScreen`,
+  `ctxMessages`, `ctxImages`). A plugin's keys live at `theme.<scheme>.<plugin>.<key>`.
+  An older config wrote the palette as flat `theme.*` keys, `theme.modals.*` and
+  `plugins.<name>.colors`; those are no longer applied, and the start says so.
+  `flow-assist config migrate-theme` moves them under `theme.dark` (what differs from
+  the host's palette, `${token}`s rewritten to `${base.<role>}`) and unsets the old
+  keys; a key written in `config.json` is named, not touched, and a value that has no
+  place in the new format is listed as dropped.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

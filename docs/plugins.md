@@ -608,16 +608,46 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
 - A setter in one component re-renders that component only; the host redraws after
   every key that was handled. For a change that does not come from a key (a fetch
   that finished, a timer) call `host.notify()`.
-- `colors` and `modalColors` give the plugin's screens and modals their palettes;
-  the person overrides them with `config.plugins.<name>.colors`.
-- **Write a ground as a theme token, not a literal:** `bg: '${panelBg}'`, not
+- **A plugin's palette lives in `manifest.json`.** `colors` is `{ key: value }`, one
+  record for both schemes, or `{ "dark": { … }, "light": { … } }` when they differ; when
+  only one of `dark`/`light` is given, the other copies it. A value is a colour flowtty
+  accepts or `${base.<role>}`. The plugin's keys are one surface of the theme: the
+  person overrides one at `theme.dark.<plugin>.<key>` or `theme.light.<plugin>.<key>`
+  (see [config.md](config.md), "The look"), and the plugin reads the resolved palette at
+  `host.config.theme.<plugin>`. The registration carries no `colors`.
+
+  ```json
+  {
+    "name": "board",
+    "colors": {
+      "dark":  { "laneBg": "${base.panelBg}", "laneText": "${base.text}", "alert": "#ff8787" },
+      "light": { "laneBg": "${base.panelBg}", "laneText": "${base.text}", "alert": "#b00020" }
+    }
+  }
+  ```
+
+  An optional `preview` is a static node tree in the remote frame format
+  (`[type, props, ...children]`) whose colour props name the plugin's keys
+  (`${laneBg}`) or base roles (`${base.text}`); the theme tuner draws it as the
+  plugin's specimen, with the nodes the declared flowtty range draws. Without one it
+  draws one row per key.
+- **Write a ground as a base role, not a literal:** `bg: '${base.panelBg}'`, not
   `bg: '#1a1b26'`. The host follows the terminal between light and dark while it runs
-  (macOS switches by itself at sunset and sunrise), and resolves every `${token}`
-  against that scheme's theme; a literal stays the colour it was written for. The
-  tokens: `panelBg` (a floating panel), `highlightBg` (a highlighted row),
-  `accentBg` (a stronger highlight), `highlightText` (the ink on either), and the
-  modal base under `theme.modals` (`bg`, `text`, `border`, `fieldBg`, …). Where the
-  terminal has not said which it is, they are `'default'`: the terminal's own.
+  (macOS switches by itself at sunset and sunrise), and resolves every `${base.<role>}`
+  against that scheme's palette; a literal stays the colour it was written for. A
+  reference is `${base.<role>}` only and resolves inside its scheme; a key cannot
+  reference another surface's key. The 16 roles:
+  - `bg`, `text` — the screen's ground and ink; `muted` — dim text, a quiet border;
+  - `border` — a frame; `accent` — what to look at; `selected` — the chosen row or key;
+  - `highlight` — a highlighted row's ground; `highlightStrong` — a second, stronger
+    step of it (the current column); `highlightText` — the ink on either;
+  - `danger`, `ok`, `warn` — what failed, what worked, what waits on the person;
+  - `fieldBg`, `fieldText`, `fieldBorder` — an input field;
+  - `panelBg` — a floating panel's ground, apart from `bg` so it does not melt into
+    the screen.
+
+  Where the terminal has not said which scheme it is, the resolved values are
+  `'default'`: the terminal's own.
 - **A screen that paints its own ground names its own ink.** The host's own side paints
   the palette's base ground and ink, and every surface inside it inherits that ink: a
   text with no colour of its own, and a border with no `borderColor`. That is usually
@@ -816,7 +846,7 @@ direction. The host makes these requests:
 
 | Request | Params | Result |
 |---|---|---|
-| `hello` | `{ hostApi, flowtty, size: { terminal, surface }, config, idleMs, locale? }` | the plugin's registration: `{ hostApi, name?, commands?, keys?, entry?, tools?, aiTools?, configSchema?, colors?, modalColors?, usesCache? }` |
+| `hello` | `{ hostApi, flowtty, size: { terminal, surface }, config, idleMs, locale? }` | the plugin's registration: `{ hostApi, name?, commands?, keys?, entry?, tools?, aiTools?, configSchema?, usesCache? }` (the palette is the manifest's `colors`) |
 | `tool.run` | `{ name, args, call: { id } }` | `{ result, views? }` — `views` is `[{ kind, data }]`, each a block the manifest's `views` declares (below) |
 | `command.run` | `{ name, arg }` | `{}` |
 | `view.render` | `{ kind, data, width }` | `{ lines: StyledSpan[][] }` — a line is a list of spans, each `{ text, bold?, dim?, color? }`; `underline` and `background` are accepted but not drawn |

@@ -113,7 +113,7 @@ past incident may motivate a rule; keep the rule, drop the incident.
   and a plugin that must also run on an older host checks that they are there.
   `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
   returned `shape` has optional `commands`, `keys`, `keyActions`, `views`,
-  `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`,
+  `surface`, `modals`, `configSchema`, `components`,
   `tools`, `services`, `aiTools`, `keycaps`, `entry`, `screens`, `setup`,
   `chatContext`, `chatSubject` (deprecated), `afterWrite`, `ready`; every hook
   receives the plugin's pair `{ ui, host }`.
@@ -160,11 +160,13 @@ past incident may motivate a rule; keep the rule, drop the incident.
   — <plugin> removed it` / `… was disabled` / `… is not loaded`. Never a bare
   `Unknown tool`, never a "call again" for a tool that is not coming back. A
   y/n never shows a bare name that now means another tool.
-- **`modalColors`** — per modal the plugin draws, what its palette differs in
-  from the host's modal base; `resolveModalPalettes` lays it on the base into
-  `theme.modals.<modal>`, the person overrides it with
-  `config.plugins.<modal>.colors`. The host's own palettes cover only the
-  modals the host draws; a plugin's same-named palette never replaces one.
+- **A plugin's palette is the manifest's `colors`** — `{ key: value }` or
+  `{ dark, light }` (one given: the other copies it), values a colour or
+  `${base.<role>}`, plus an optional `preview` node tree for the tuner. The host reads
+  it, lays the person's `theme.<scheme>.<plugin>` over it and hands the plugin the
+  result at `host.config.theme.<plugin>`. The plugin shape and the registration carry no
+  palette; the host's own palettes cover only what the host draws, and a plugin's
+  same-named surface never replaces one.
 - **The chat asks the plugins; it knows no plugin's data.** `chatContext` →
   what the plugin's screens show now as items `{ label, text }`, or `[]`.
   `services.chatContext()` asks every plugin in load order, each call guarded
@@ -298,9 +300,10 @@ past incident may motivate a rule; keep the rule, drop the incident.
 - **One look for every host modal** — `frame()` and `overlay()` in
   `src/views/modals.ts`; a modal that draws its own frame doubles up. A window
   that paints its own ground sets its own ink (`color: m.text`). The palette
-  follows the terminal's scheme (`themeFor(scheme)`, `modalColorDefaults`);
-  a new colour goes into all three palettes and a ground a plugin paints is a
-  `${token}`, never a literal. A modal is as tall as what it holds; what does
+  follows the terminal's scheme and is the base-role model
+  (`src/playback/palette-defaults.ts`, `HOST_PALETTE`); a new colour goes into the
+  host palette defaults for each scheme, and a ground a plugin paints is
+  `${base.<role>}`, never a literal. A modal is as tall as what it holds; what does
   not fit scrolls (`<ScrollBox scrollbar>`). The one fixed height is a command
   panel's bottom strip (`look: 'bottom'`): twelve rows over the chat box's
   bottom — the frame, a tab row, eight list rows, one hint row — capped to the
@@ -538,7 +541,7 @@ past incident may motivate a rule; keep the rule, drop the incident.
   result, `!`/`‼` a command. A kept question and the answer it got share a ground of
   their own (`askBg` in `askInk`; a dismissed answer's ink is dim). A marker is ONE
   narrow-width code point (a wide glyph shifts the row in a terminal that draws it two
-  cells wide). Colours come from `theme.modals.chat`.
+  cells wide). Colours come from `theme.chat`.
 - Markdown in answers is laid out by flowtty's `layoutMarkdown`; **the person's
   own message is drawn as typed, not as markdown** (every line break and
   indent kept). Only role `user`: a background result and a `!command`'s block
