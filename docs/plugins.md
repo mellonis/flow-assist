@@ -614,7 +614,9 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   accepts or `${base.<role>}`. The plugin's keys are one surface of the theme: the
   person overrides one at `theme.dark.<plugin>.<key>` or `theme.light.<plugin>.<key>`
   (see [config.md](config.md), "The look"), and the plugin reads the resolved palette at
-  `host.config.theme.<plugin>`. The registration carries no `colors`.
+  `host.config.theme.<plugin>`. The registration carries no `colors`. A person's
+  override is one of the 16 roles or a key `colors` declares: `config set` refuses any
+  other once the manifest can be read, and the start names one it finds in the file.
 
   ```json
   {

@@ -32,14 +32,14 @@ export default function ({ make }) {
 `);
 }
 
-async function oneShot(model: ScriptedModel, allowWrites: boolean, withPlugin = false) {
+async function oneShot(model: ScriptedModel, allowWrites: boolean, withPlugin = false, extra: Record<string, unknown> = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-')));
   const enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-enabled-'));
   if (withPlugin) fakeShellPlugin(enabledDir, path.join(root, 'plugin-ran'));
   const memory = { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-memory-')), 'memory.json') };
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, fs: { roots: [root] }, memory };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, fs: { roots: [root] }, memory, ...extra };
   const repo = { enabledPlugins: async () => (withPlugin ? ['fakesh'] : []), list: async () => [] } as never;
   const out: string[] = []; const err: string[] = [];
   await runPrompt(['make', 'the', 'file'], config, repo, { allowWrites, enabledDir, out: (s) => out.push(s), err: (s) => err.push(s) });
@@ -125,4 +125,13 @@ test('--allow-writes is read before the prompt and is not a word of it', () => {
   expect(parseCli(['--allow-writes'])).toEqual({ cmd: 'prompt', args: [], allowWrites: true });
   // After the prompt has begun it is part of the text.
   expect(parseCli(['explain', '--allow-writes'])).toEqual({ cmd: 'prompt', args: ['explain', '--allow-writes'] });
+});
+
+test('a theme the one-shot run cannot apply is said on stderr, as the app says it at start', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Fine.' }]);
+  const { out, err } = await oneShot(model, false, false, { theme: { modals: { bg: 'red' }, dark: { chat: { userBg: '#12' } } } });
+  expect(out).toBe('Fine.\n');
+  expect(err).toContain('[config] theme.modals is from the old format and is not applied — run flow-assist config migrate-theme');
+  expect(err).toContain('[config] theme.dark.chat.userBg is not a colour the theme takes');
 });

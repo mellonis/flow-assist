@@ -24,7 +24,7 @@ export const LOGO = [
 
 interface HomePlugin { name: string; description?: string; entry?: string[]; tools?: unknown[]; aiTools?: unknown[] }
 
-export function renderHome({ title, plugins, keys, builtins, width = 80, accent, pluginsNote, starting = [], untrusted = [], trustNotes = [] }: {
+export function renderHome({ title, plugins, keys, builtins, width = 80, accent, pluginsNote, starting = [], untrusted = [], trustNotes = [], configNotes = [] }: {
   title: string;
   plugins: HomePlugin[];
   // The resolved key map — so what is shown is what is bound NOW.
@@ -47,6 +47,9 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent,
   // What is said of the trust records, each on a quiet line under the list: the plugins
   // the first start trusted, a record that cannot be read.
   trustNotes?: string[];
+  // What of the config the start does not apply (a theme value it cannot take, a key
+  // from the old format), each on a quiet line under the list.
+  configNotes?: string[];
 }) {
   const cap = (action: string) => bindingGlyph(keys[action]);
   // What a person can do from here, each only if its key is bound.
@@ -115,6 +118,7 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent,
               h(Text, { dim: true, wrap: 'wrap' }, pluginsNote)))
         : null,
     trustNotes.length ? h(Box, { flexDirection: 'column' }, trustNotes.map((line, i) => quiet(`trust:${i}`, line))) : null,
+    configNotes.length ? h(Box, { flexDirection: 'column' }, configNotes.map((line, i) => quiet(`config:${i}`, line))) : null,
     starting.length ? quiet('starting', startingLine(starting)) : null));
 }
 

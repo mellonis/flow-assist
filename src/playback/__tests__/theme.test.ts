@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { baseInk, buildModels, resolveAppTheme, type ResolvedTheme } from '../theme';
+import { baseInk, buildModels, resolveAppTheme, themeStartNotes, type ResolvedTheme } from '../theme';
 import { HOST_PALETTE, UNKNOWN_RESOLVED } from '../palette-defaults';
 
 const resolved = (theme: unknown, scheme: 'dark' | 'light' | 'unknown', plugins: Parameters<typeof buildModels>[1] = []): ResolvedTheme =>
@@ -199,4 +199,25 @@ test('a plugin still starting keeps its overrides and is not judged before it jo
   const built = buildModels({ dark: { late: { x: 'red' } } }, [], { pending: ['late'] });
   expect(built.ignored).toEqual([]);
   expect(resolveAppTheme(built, 'dark').late!.x).toBe('red');
+});
+
+test('the start notes say what is not applied, by count, and where an old key is to be removed', () => {
+  const none = () => false;
+  expect(themeStartNotes([], [], none)).toEqual([]);
+  expect(themeStartNotes([{ path: 'theme.dark.chat.userBg', why: 'value' }], [], none)).toEqual([
+    'theme.dark.chat.userBg is not a colour the theme takes, and is not applied',
+  ]);
+  expect(themeStartNotes([{ path: 'theme.dark.a', why: 'value' }, { path: 'theme.dark.b', why: 'value' }, { path: 'theme.dark.chat.usrBg', why: 'key' }], [], none)).toEqual([
+    'theme.dark.a, theme.dark.b are not colours the theme takes, and are not applied',
+    'theme.dark.chat.usrBg is not a key that surface draws, and is not applied',
+  ]);
+  expect(themeStartNotes([], ['theme.modals'], none)).toEqual([
+    'theme.modals is from the old format and is not applied — run flow-assist config migrate-theme',
+  ]);
+  const inJson = (key: string) => key === 'theme.selected' || key === 'plugins.board.colors';
+  expect(themeStartNotes([], ['theme.modals', 'theme.selected', 'plugins.board.colors'], inJson)).toEqual([
+    'theme.modals is from the old format and is not applied — run flow-assist config migrate-theme',
+    'theme.selected, plugins.board.colors in config.json are from the old format and are not applied — run flow-assist config migrate-theme, then remove them from config.json',
+  ]);
+  for (const line of themeStartNotes([{ path: 'theme.dark', why: 'value' }], ['theme.modals'], none)) expect(line.startsWith('theme: ')).toBe(false);
 });

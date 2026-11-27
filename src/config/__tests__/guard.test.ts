@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { acceptedConfigPath, applyConfigChange, checkConfigFiles, configStartupNotes, declineConfigChange, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, saveConfigSetting, setConfigValue, unguardConfigFiles } from '../load';
+import { acceptedConfigPath, applyConfigChange, checkConfigFiles, configStartupNotes, declineConfigChange, guardConfigFiles, hostStateDir, inConfigJson, loadConfig, resetSessionConfig, saveConfigSetting, setConfigValue, unguardConfigFiles } from '../load';
 
 const local = () => path.join(hostStateDir(), 'config.local.json');
 const base = () => path.join(hostStateDir(), 'config.json');
@@ -169,4 +169,14 @@ test('the keys on the model\'s leash come first and are never cut; the rest are 
   expect(change!.lines.slice(0, 3)).toEqual(['ai.disabledTools: (unset) → []', 'shell.autoRun: (unset) → true', 'shell.passEnv: (unset) → ["GH_TOKEN"]']);
   expect(change!.lines.slice(3, -1)).toHaveLength(8);
   expect(change!.lines.at(-1)).toBe('+32 more keys');
+});
+
+test('inConfigJson tells a key config.json holds from one only config.local.json holds', () => {
+  external(base(), { theme: { selected: 'green' } });
+  external(local(), { theme: { modals: { bg: 'red' } } });
+  const config = loadConfig();
+  expect(inConfigJson(config, 'theme.selected')).toBe(true);
+  expect(inConfigJson(config, 'theme.modals')).toBe(false);
+  // A config built by hand has no files behind it.
+  expect(inConfigJson({ theme: { selected: 'green' } }, 'theme.selected')).toBe(false);
 });

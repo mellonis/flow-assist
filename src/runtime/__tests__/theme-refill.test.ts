@@ -29,8 +29,11 @@ test('a system-mode app on a light terminal flipping to dark refills the same th
 test('a theme still in the old format is said once at start, and not applied', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme: { modals: { bg: 'red' }, dark: { base: { bg: 'nope' } } } });
   const lines = ui.services.log.read();
-  expect(lines.filter((l) => l.includes('theme.modals from the old format is not applied — flow-assist config migrate-theme moves it'))).toHaveLength(1);
+  expect(lines.filter((l) => l.includes('theme.modals is from the old format and is not applied — run flow-assist config migrate-theme'))).toHaveLength(1);
   expect(lines.filter((l) => l.includes('theme.dark.base.bg'))).toHaveLength(1);
+  // Where the person sees the start: the start screen.
+  expect(ui.backend.lastFrame).toContain('theme.modals is from the old format');
+  expect(ui.backend.lastFrame).toContain('theme.dark.base.bg is not a colour');
   expect((ui.config.theme as Resolved).base.bg).toBe('black');
   ui.app.unmount();
 });
@@ -55,7 +58,7 @@ test('a configured key no surface draws is said at start; a late plugin\'s, once
   fake.holdHello();
   const theme = { dark: { chat: { usrBg: '#111111' }, nosuchplugin: { x: 'red' }, fake: { zzz: 'red' } } };
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme }, { late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
-  const undrawn = (path: string) => ui.services.log.read().filter((l) => l.includes(path) && l.includes('not a key that surface draws'));
+  const undrawn = (path: string) => ui.services.log.read().filter((l) => l.includes(path) && /not (a key that surface draws|keys their surfaces draw)/.test(l));
   expect(undrawn('theme.dark.chat.usrBg')).toHaveLength(1);
   expect(undrawn('theme.dark.nosuchplugin.x')).toHaveLength(1);
   // Still starting: not judged yet.

@@ -14,7 +14,7 @@
 import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
-import { configStartupNotes, guardConfigFiles, inModelShell, loadConfig, settingsChangedSince, settingsFileHashes } from './config/load.js';
+import { configStartupNotes, guardConfigFiles, inConfigJson, inModelShell, loadConfig, settingsChangedSince, settingsFileHashes } from './config/load.js';
 
 import {
   configSource,
@@ -27,6 +27,8 @@ import {
 import { parseConfigArgs } from './config/commands.js';
 import { droppedReason, migrateTheme } from './playback/palette-migrate.js';
 import { manifestSurfaceKeys } from './loader/palette-manifest.js';
+import { buildModels, themeStartNotes } from './playback/theme.js';
+import { oldThemeKeys } from './playback/palette-config.js';
 import { createPluginRepo } from './loader/repo.js';
 import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
@@ -434,6 +436,9 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
   let stateFiles: { stop(): void } | null = null;
   try {
     const plugins = await loadPlugins({ config, repo, renders, enabledDir: dir });
+    // What of the theme the app would not apply, said as its start says it — on stderr.
+    const theme = buildModels(config.theme, plugins);
+    for (const line of themeStartNotes(theme.ignored, oldThemeKeys(config), (key) => inConfigJson(config, key))) err(`[config] ${line}\n`);
     const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
     // On stderr, so an answer piped elsewhere stays clean.
     const note = noPluginsNote(dir, (await repo.enabledPlugins()).length, existsSync);

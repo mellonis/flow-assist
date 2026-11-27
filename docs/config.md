@@ -49,9 +49,10 @@ assistant may set or save".
   refuses any other key, naming it; a plugin whose manifest cannot be read (one not
   installed) is not checked. A hand-edited theme never keeps the app from starting: a
   value that is no colour, a key its surface does not draw, and a surface nothing draws
-  are left out and said once at start.
-  An older config wrote the palette as flat `theme.*` keys, `theme.modals.*` and
-  `plugins.<name>.colors`; those are no longer applied, and the start says so.
+  are left out and named once, on the start screen and in the log.
+  Flat `theme.*` keys, `theme.modals.*` and `plugins.<name>.colors` are the old format:
+  they are not applied, and the start screen and the log name them (a one-shot prompt
+  names them on stderr), with the words to remove one that `config.json` holds.
   `flow-assist config migrate-theme` moves them under `theme.dark` (what differs from
   the host's palette, `${token}`s rewritten to `${base.<role>}`) and unsets the old
   keys; a key written in `config.json` is named, not touched, and a value that has no

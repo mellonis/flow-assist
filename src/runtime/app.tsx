@@ -48,6 +48,7 @@ import {
   resetSessionConfig,
   saveConfigSetting,
   configSchemaAt,
+  inConfigJson,
   setConfigValue,
   unsetConfigValue,
 } from '../config/load.js';
@@ -60,7 +61,7 @@ import { legacyRootsNote } from '../assistant/shell.js';
 import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
-import { baseInk, buildModels, resolveAppTheme } from '../playback/theme.js';
+import { baseInk, buildModels, resolveAppTheme, themeStartNotes } from '../playback/theme.js';
 import type { ColorScheme, ResolvedTheme } from '../playback/theme.js';
 import { oldThemeKeys, paletteKeys, type SurfaceKeys } from '../playback/palette-config.js';
 import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
@@ -409,15 +410,12 @@ export async function renderApp(
   // point that takes them out of text reads this set (src/assistant/secrets.ts).
   refreshSecrets(config);
   const userTheme: unknown = config.theme;
-  // What of the person's theme is not applied, said once in the log below.
-  const themeNotes: string[] = [];
-  // A plugin still starting is judged when it joins (`rebuildFromPlugins`).
+  // What of the person's theme is not applied, said once: in the log and on the start
+  // screen (src/playback/theme.ts, `themeStartNotes`). A plugin still starting is judged
+  // when it joins (`rebuildFromPlugins`).
   let themeModels = buildModels(userTheme, plugins, { pending: late.starting() });
-  const badValues = themeModels.ignored.filter((i) => i.why === 'value').map((i) => i.path);
-  const undrawn = themeModels.ignored.filter((i) => i.why === 'key').map((i) => i.path);
-  if (badValues.length) themeNotes.push(`theme: ${badValues.join(', ')} is not a colour the theme takes, and is not applied`);
-  const saidUndrawn = new Set(undrawn);
-  if (undrawn.length) themeNotes.push(`theme: ${undrawn.join(', ')} is not a key that surface draws, and is not applied`);
+  const saidUndrawn = new Set(themeModels.ignored.filter((i) => i.why === 'key').map((i) => i.path));
+  const themeNotes = themeStartNotes(themeModels.ignored, oldThemeKeys(config), (key) => inConfigJson(config, key));
   // Which keys a loaded plugin's surface draws, for `:config set theme.*`: its manifest's
   // `colors` and the roles; a plugin not loaded here is not known, and its key is taken.
   const loadedSurfaceKeys: SurfaceKeys = (surface) => {
@@ -577,7 +575,7 @@ export async function renderApp(
     // A key of a plugin that has joined since is judged now; what was said is not said again.
     const fresh = themeModels.ignored.filter((i) => i.why === 'key' && !saidUndrawn.has(i.path)).map((i) => i.path);
     for (const p of fresh) saidUndrawn.add(p);
-    if (fresh.length) services.log.append(`[config] theme: ${fresh.join(', ')} is not a key that surface draws, and is not applied`);
+    for (const note of themeStartNotes(fresh.map((path) => ({ path, why: 'key' as const })), [], () => false)) services.log.append(`[config] ${note}`);
     applyTheme(schemeFor(pinnedScheme ?? 'system', terminalScheme));
     tools?.refresh?.();
     const aiTools = (services as unknown as HostServices).pluginAiTools;
@@ -1453,7 +1451,7 @@ export async function renderApp(
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, accent: base.selected, pluginsNote, starting: late?.starting(), untrusted, trustNotes }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, accent: base.selected, pluginsNote, starting: late?.starting(), untrusted, trustNotes, configNotes: themeNotes }) : null),
       // The bottom row, and the one place on this screen a drag has something to
       // copy: the command the person typed. Marking the box `selectable: false`
       // whole would be right for what surrounds the command, but would swallow the

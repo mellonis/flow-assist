@@ -498,6 +498,13 @@ export function configSource(config: Record<string, unknown>, key: string): Conf
   return 'default';
 }
 
+// Whether config.json — the file the host never writes — holds `key`. A config built by
+// hand has no files behind it, and holds it in neither.
+export function inConfigJson(config: Record<string, unknown>, key: string): boolean {
+  const layers = LAYERS.get(config);
+  return layers !== undefined && getDeep(layers.base, key) !== undefined;
+}
+
 export type ConfigSetResult = { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
 
 // The words a caller adds after a value whose key is read at start.

@@ -77,6 +77,44 @@ export function buildModels(
   return { models, defaults: defaultsOut, ignored };
 }
 
+const listed = (paths: readonly string[]): string => paths.join(', ');
+
+/**
+ * What the start says of the person's theme, one line per kind: values no colour, keys
+ * no surface draws, keys from the old format (`config migrate-theme` moves those; one in
+ * config.json, which the host never writes, is left there for the person to remove).
+ */
+export function themeStartNotes(ignored: readonly IgnoredPath[], oldKeys: readonly string[], inConfigJson: (key: string) => boolean): string[] {
+  const out: string[] = [];
+  const values = ignored.filter((i) => i.why === 'value').map((i) => i.path);
+  const keys = ignored.filter((i) => i.why === 'key').map((i) => i.path);
+  const one = (paths: readonly string[]) => paths.length === 1;
+  if (values.length) {
+    out.push(one(values)
+      ? `${values[0]} is not a colour the theme takes, and is not applied`
+      : `${listed(values)} are not colours the theme takes, and are not applied`);
+  }
+  if (keys.length) {
+    out.push(one(keys)
+      ? `${keys[0]} is not a key that surface draws, and is not applied`
+      : `${listed(keys)} are not keys their surfaces draw, and are not applied`);
+  }
+  const local = oldKeys.filter((k) => !inConfigJson(k));
+  const json = oldKeys.filter((k) => inConfigJson(k));
+  const run = 'run flow-assist config migrate-theme';
+  if (local.length) {
+    out.push(one(local)
+      ? `${local[0]} is from the old format and is not applied — ${run}`
+      : `${listed(local)} are from the old format and are not applied — ${run}`);
+  }
+  if (json.length) {
+    out.push(one(json)
+      ? `${json[0]} in config.json is from the old format and is not applied — ${run}, then remove it from config.json`
+      : `${listed(json)} in config.json are from the old format and are not applied — ${run}, then remove them from config.json`);
+  }
+  return out;
+}
+
 /**
  * The theme for the scheme on screen. `unknown` is not tuned: the resolved unknown
  * palette, and each plugin's surface from its own defaults (its dark ones) expanded
