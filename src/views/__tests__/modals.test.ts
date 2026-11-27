@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
-import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
+import { buildModels, resolveAppTheme } from '../../playback/theme.js';
+import { CHAT_KEYS } from '../../playback/palette-defaults.js';
 import { chatRows, condenseRuns, diffFileMove, diffFirstItem, diffHunkMove, diffLastItem, diffPanelBody, diffPanelFileKeys, diffPanelItems, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, nextFoldLevel, pagerTitle, pendingChatRows, renderChatModal, renderCommandPanel, renderDiffPanel, renderHelp, renderLogModal, renderReminder, typedLines, type CommandPanelView, type DiffCursor, type RowOpts } from '../modals.js';
 import { renderConsole } from '../../assistant/console-view.js';
 import { changeView, unifiedDiff, CHANGE_DIFF_MAX_BYTES, CHANGE_DRAW_MAX_LINES, fileDiffCounts, type ChangeView } from '../../assistant/diff.js';
@@ -15,6 +16,10 @@ import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
 import type { SessionRow } from '../../assistant/sessions.js';
 import type { ChatMsg } from '../../assistant/conversation-types.js';
+
+// The chat's own keys as the real app resolves them on a dark terminal.
+const DARK_CHAT = resolveAppTheme(buildModels({}, []).models, 'dark').chat!;
+const CHAT_DEFAULTS: Record<string, string> = Object.fromEntries(CHAT_KEYS.map((k) => [k, DARK_CHAT[k]!]));
 
 // The trail condenses a run of one tool ending one way into a count — except a call
 // that returned images, whose marks are what the person looks for.
@@ -33,7 +38,7 @@ test('condenseRuns counts same-name same-outcome calls, and never folds a call t
 const baseChat = {
   width: 80,
   height: 24,
-  theme: { modals: { chat: { userBg: undefined }, log: { bg: undefined }, help: { bg: undefined } } },
+  theme: { chat: { userBg: undefined }, log: { bg: undefined }, base: { bg: undefined } },
   messages: [] as { role: string; content?: string | null }[],
   input: '',
   streaming: false,
@@ -67,7 +72,7 @@ test('chat marks a background result with its own marker and ground, never as th
       // The text a `background` task posts carries no "[background]" prefix: the ◆
       // marker and its own ground are what set it apart from the person's messages.
       // The colours a real app resolves from the theme (baseChat carries none).
-      theme: { modals: { chat: MODAL_COLOR_DEFAULTS.chat } },
+      theme: { chat: CHAT_DEFAULTS },
       messages: [{ role: 'bg', content: 'hello world finished:\nhello world' }],
     }),
     backend,
@@ -92,7 +97,7 @@ test('chat marks a background result with its own marker and ground, never as th
 test('answered question rows carry the ask ground', async () => {
   // Colours the test can tell apart from every other ground and ink the chat ships: the
   // rows take the palette's tokens, whatever a scheme's own values are.
-  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const chat = { ...CHAT_DEFAULTS, askBg: 'blue', askInk: 'yellow' };
   const messages = [
     { role: 'ask', content: 'Which branch?', answer: 'master' },
     { role: 'ask', content: 'Which checks?', answer: 'dismissed', dismissed: true },
@@ -101,7 +106,7 @@ test('answered question rows carry the ask ground', async () => {
   const handle = await render(
     h(renderChatModal, {
       ...baseChat,
-      theme: { modals: { chat } },
+      theme: { chat },
       messages,
     }),
     backend,
@@ -149,7 +154,7 @@ test('answered question rows carry the ask ground', async () => {
   // conversation already has, with no reload.
   const second = new TestBackend(80, 24);
   const again = await render(
-    h(renderChatModal, { ...baseChat, theme: { modals: { chat: { ...chat, askBg: 'red', askInk: 'green' } } }, messages }),
+    h(renderChatModal, { ...baseChat, theme: { chat: { ...chat, askBg: 'red', askInk: 'green' } }, messages }),
     second,
   );
   const repainted = second.lastFrame.split('\n');
@@ -163,12 +168,12 @@ test('answered question rows carry the ask ground', async () => {
 // A question or an answer wider than the column wraps: every row of the pair keeps the
 // band, out to the column's edge — not only the first row of each.
 test('a wrapped question paints the ask ground on every continuation row', async () => {
-  const chat = { ...MODAL_COLOR_DEFAULTS.chat, askBg: 'blue', askInk: 'yellow' };
+  const chat = { ...CHAT_DEFAULTS, askBg: 'blue', askInk: 'yellow' };
   const backend = new TestBackend(80, 24);
   const handle = await render(
     h(renderChatModal, {
       ...baseChat,
-      theme: { modals: { chat } },
+      theme: { chat },
       messages: [{ role: 'ask', content: 'q'.repeat(160), answer: 'a'.repeat(160) }],
     }),
     backend,
@@ -190,7 +195,7 @@ test('a wrapped question paints the ask ground on every continuation row', async
 // The gutter marker on a command block's first row: dim/pulsing while it runs, then
 // coloured for how it ended — never a code to decode, the way the tail beside it reads.
 test("a command block's gutter marker is dim while it runs, ok on exit 0, the error colour otherwise", async () => {
-  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const theme = { chat: CHAT_DEFAULTS, base: { danger: 'red' } };
   const shellMsg = (data: Record<string, unknown>, phase: string) => ({
     role: 'shell', content: '',
     views: [{ kind: 'console', data: { command: 'echo hi', cwd: '~', text: '', ...data }, phase, startedAt: 0 }],
@@ -233,7 +238,7 @@ const shellMsg = (interactive: boolean) => ({
   }],
 });
 const consoleFrame = async (interactive: boolean, open: boolean) => {
-  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const theme = { chat: CHAT_DEFAULTS, base: { danger: 'red' } };
   const backend = new TestBackend(80, 24);
   const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [shellMsg(interactive) as ChatMsg], folds: { open, except: new Set<string>() } }), backend);
   const frame = backend.lastFrame;
@@ -263,7 +268,7 @@ test('the gutter marker draws the interactive run mark, folded and opened', asyn
 // nobody recovered from, yellow for one a later call of the same tool recovered, and
 // the normal colour otherwise — a write never turns it yellow, it only adds its own ✎.
 test("a group line marks a failure in the trail's tone, and a write that showed no diff with ✎", async () => {
-  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const theme = { chat: CHAT_DEFAULTS, base: { danger: 'red' } };
   const marked = async (runs: { name: string; outcome: string }[]) => {
     const backend = new TestBackend(80, 24);
     const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [{ role: 'assistant', content: 'done', parts: [{ kind: 'tools', runs }] }] }), backend);
@@ -297,7 +302,7 @@ test("a group line marks a failure in the trail's tone, and a write that showed 
 // of the same tool recovered is yellow, not red — the record and the stretch's summary
 // above it say the same thing, since a red ✗ under a yellow summary would contradict itself.
 test("a record line takes the trail's tone, a recovered failure included", async () => {
-  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const theme = { chat: CHAT_DEFAULTS, base: { danger: 'red' } };
   const msg = {
     role: 'assistant', content: 'done',
     parts: [{ kind: 'tools', runs: [{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }] }],
@@ -325,7 +330,7 @@ test("a record line takes the trail's tone, a recovered failure included", async
 test('a window paints its own ink on its own ground, not the terminal foreground', async () => {
   // On a light terminal theme the default foreground is black: text with no colour of
   // its own drew black on the black window. The window's `text` reaches it now.
-  const theme = { modals: { bg: 'black', text: 'white', chat: { ...MODAL_COLOR_DEFAULTS.chat, bg: 'black', text: 'white' }, help: { bg: 'black', text: 'white' } } };
+  const theme = { base: { bg: 'black', text: 'white' }, chat: { ...CHAT_DEFAULTS, bg: 'black', text: 'white' } };
   const inkOf = (backend: TestBackend, text: string) => {
     const rows = backend.lastFrame.split('\n');
     const y = rows.findIndex((r) => r.includes(text));
@@ -679,8 +684,8 @@ test('a waiting subagent says so in warn beside the count', async () => {
       ...baseChat,
       width: 140,
       messages: [],
-      // The palette the real app resolves (MODAL_COLOR_DEFAULTS' `warn`); given whole here.
-      theme: { modals: { chat: { warn: 'yellow' } } },
+      // The palette the real app resolves (the chat's `warn`); given whole here.
+      theme: { chat: { warn: 'yellow' } },
       bgCount: 2,
       bgDoor: 2,
       bgWaiting: 1,
@@ -737,7 +742,7 @@ test('the log is as tall as what it holds, says when, and makes a failure stand 
     h(renderLogModal, {
       width: 90,
       height: 30,
-      theme: { error: 'red', modals: { log: { bg: undefined } } },
+      theme: { base: { danger: 'red' }, log: { bg: undefined } },
       logs: ['10:00:01 [chat] hi → 2 chars', '10:00:02 ⚠ glab failed: not installed', '10:00:03 [round 0] finish=stop'],
       logModalRows: 17,
       logScroll: 0,
@@ -801,7 +806,7 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
     h(renderHelp, {
       width: 90,
       height: 20,
-      theme: { modals: { bg: undefined } },
+      theme: { base: { bg: undefined } },
       helpOpen: true,
       commands: COMMANDS,
       keys: { commandLine: [':'], quit: ['q'], chat: ['F'], sessions: ['ctrl+s'], log: ['L'], open: ['return'], disabled: [] },
@@ -839,7 +844,7 @@ test("the diff viewer's keys read as plain words in the help", async () => {
     h(renderHelp, {
       width: 110,
       height: 40,
-      theme: { modals: { bg: undefined } },
+      theme: { base: { bg: undefined } },
       helpOpen: true,
       keys: {
         diffNextHunk: [']'], diffPrevHunk: ['['], diffNextFile: ['down'], diffPrevFile: ['up'],
@@ -886,7 +891,7 @@ test('a key remapped to a wide glyph still lines up the label column in help', a
     h(renderHelp, {
       width: 90,
       height: 20,
-      theme: { modals: { bg: undefined } },
+      theme: { base: { bg: undefined } },
       helpOpen: true,
       // `chat` remapped to a wide grapheme; `log` stays a narrow one.
       keys: { chat: ['笔'], log: ['L'] },
@@ -909,7 +914,7 @@ test('a command usage with a wide glyph still lines up the description column in
   ];
   const backend = new TestBackend(90, 20);
   const handle = await render(
-    h(renderHelp, { width: 90, height: 20, theme: { modals: { bg: undefined } }, helpOpen: true, commands }),
+    h(renderHelp, { width: 90, height: 20, theme: { base: { bg: undefined } }, helpOpen: true, commands }),
     backend,
   );
   const rows = backend.lastFrame.split('\n');
@@ -927,7 +932,7 @@ test('reminder banner shows the text and the dismiss hint, centered', async () =
     h(renderReminder, {
       width: 80,
       height: 24,
-      theme: { modals: { help: { bg: undefined } } },
+      theme: { base: { bg: undefined } },
       text: 'stand up and stretch',
     }),
     backend,
@@ -948,7 +953,7 @@ test('a reminder full of wide glyphs is sized by display width, not code points'
   const text = '日'.repeat(20);
   const backend = new TestBackend(100, 24);
   const handle = await render(
-    h(renderReminder, { width: 100, height: 24, theme: { modals: { help: { bg: undefined } } }, text }),
+    h(renderReminder, { width: 100, height: 24, theme: { base: { bg: undefined } }, text }),
     backend,
   );
   const rows = backend.lastFrame.split('\n').filter((r) => r.includes('日'));
@@ -1181,7 +1186,7 @@ const stripFrame = async (view: CommandPanelView, width = 100, height = 40) => {
 
 // The palette a real app resolves for the chat: the modal base laid under the chat's
 // own colours, so the strip paints a ground and what it covers is hidden.
-const stripTheme = () => ({ modals: { chat: { ...MODAL_COLOR_DEFAULTS.chat, bg: 'black', text: 'white' } } });
+const stripTheme = () => ({ chat: { ...CHAT_DEFAULTS, bg: 'black', text: 'white' } });
 
 test('the bottom look is a fixed 12-row strip at the chat box\'s bottom', async () => {
   const { lines, grid } = await stripFrame(stripView());
@@ -3005,14 +3010,14 @@ test('the ask box draws the tabs strip and the submit page', async () => {
 // `add`/`del` and their grounds — the same the `/diff` panel reads.
 
 test('a change block and a diff the model writes take the chat palette', async () => {
-  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const chat = { ...CHAT_DEFAULTS, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
   const messages = [{
     role: 'assistant',
     content: 'Here:\n```diff\n-old\n+new\n```',
     parts: [{ kind: 'change', change: { title: 'src/a.ts', diff: '@@ -1,1 +1,1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }],
   }];
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { chat }, messages }), backend);
   const lines = backend.lastFrame.split('\n');
   const styleAt = (needle: string) => {
     const y = lines.findIndex((r) => r.includes(needle));
@@ -3031,10 +3036,10 @@ test('a change block and a diff the model writes take the chat palette', async (
 // Review Focus: a palette that names no band draws NO band — the palette is the whole
 // word on what a changed row looks like, and the ink is still the palette's.
 test('a palette without bands draws no band, and the ink is the palette\'s', async () => {
-  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
+  const chat = { ...CHAT_DEFAULTS, add: 'blue', del: 'magenta', addBg: undefined, delBg: undefined };
   const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { chat }, messages }), backend);
   const rows = backend.lastFrame.split('\n');
   const y = rows.findIndex((r) => r.includes('-a'));
   const style = backend.lastBuffer!.get(rows[y]!.indexOf('-a'), y).style;
@@ -3052,7 +3057,7 @@ test('a palette that names none of the diff keys draws no band in either drawer'
   const chat = { accent: 'cyan', bg: 'black', text: 'white' };
   const messages = [{ role: 'assistant', content: 'x', parts: [{ kind: 'change', change: { title: 'a', diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } }] }];
   const backend = new TestBackend(80, 24);
-  const handle = await render(h(renderChatModal, { ...baseChat, theme: { modals: { chat } }, messages }), backend);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme: { chat }, messages }), backend);
   const rows = backend.lastFrame.split('\n');
   const styleOf = (needle: string) => {
     const row = rows.findIndex((r) => r.includes(needle));
@@ -3079,7 +3084,7 @@ test('a palette that names none of the diff keys draws no band in either drawer'
 // Review Focus: a change block inside a stretch opened with `^o` is the same rows —
 // the fold is a filter over rows the palette already painted.
 test('a change block in an opened stretch takes the same palette', () => {
-  const chat = { ...MODAL_COLOR_DEFAULTS.chat, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
+  const chat = { ...CHAT_DEFAULTS, add: 'greenBright', del: 'redBright', addBg: '#123456', delBg: '#654321' };
   const changed = {
     role: 'assistant', content: '',
     parts: [

@@ -60,8 +60,9 @@ import { legacyRootsNote } from '../assistant/shell.js';
 import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
-import { baseInk, resolveAppTheme } from '../playback/theme.js';
-import type { ColorScheme, Theme } from '../playback/theme.js';
+import { baseInk, buildModels, resolveAppTheme } from '../playback/theme.js';
+import type { ColorScheme, ResolvedTheme } from '../playback/theme.js';
+import { oldThemeKeys } from '../playback/palette-config.js';
 import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
@@ -395,20 +396,25 @@ export async function renderApp(
   const site: PluginSite = siteIn ?? { skipped: new Map(), untrusted: untrustedIn };
   // The start screen's untrusted list is the panel's: a plugin trusted there leaves it.
   const untrusted = site.untrusted;
-  // Resolve config.theme into the full per-modal palette BEFORE anything reads it
-  // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
-  // terminal's scheme + user config.theme on top, then resolveModalPalettes lays the
-  // per-modal palettes down and resolvePluginColors adds non-modal plugin palettes.
-  // Without this the modals degrade to empty Flowtty defaults — no borders, no colors.
-  // The person's own theme is kept apart: the scheme can change while the app runs
-  // (App re-resolves then), and their colours go on top of every scheme.
+  // Resolve config.theme into the palette of the scheme on screen BEFORE anything reads
+  // it (createServices, the plugins' `host` and every renderer read `config.theme`):
+  // both schemes' models are built once from the host's surfaces, the plugins' palettes
+  // and the person's `theme.<scheme>` overrides (src/playback/theme.ts). The person's
+  // theme as the files give it is kept apart: the scheme can change while the app runs
+  // (App re-resolves then), and a plugin that joins builds the models again from it.
   // An app starts on an empty session: a value `config set --session` laid over the
   // files belongs to the run that set it (src/config/load.ts).
   resetSessionConfig();
   // The secrets the host knows, from this config and the environment: every choke
   // point that takes them out of text reads this set (src/assistant/secrets.ts).
   refreshSecrets(config);
-  const userTheme = config.theme as Theme | undefined;
+  const userTheme: unknown = config.theme;
+  // What of the person's theme is not applied, said once in the log below.
+  const themeNotes: string[] = [];
+  let themeModels = buildModels(userTheme, plugins);
+  if (themeModels.ignored.length) themeNotes.push(`theme: ${themeModels.ignored.join(', ')} is not a colour the theme takes, and is not applied`);
+  const oldKeys = oldThemeKeys(config);
+  if (oldKeys.length) themeNotes.push(`theme: ${oldKeys.join(', ')} from the old format is not applied — flow-assist config migrate-theme moves it`);
   // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
   // the terminal's own light/dark scheme, `light` and `dark` pin one whatever the
   // terminal says. `seenConfigMode` is what the config last said, so a mode a plugin
@@ -418,15 +424,15 @@ export async function renderApp(
   let pinnedScheme: ThemeMode | null = seenConfigMode ?? 'system';
   let terminalScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
   let themeScheme: ColorScheme = schemeFor(pinnedScheme, terminalScheme);
-  config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
+  config.theme = resolveAppTheme(themeModels.models, themeScheme);
   // The ONE place a resolved palette is laid into the running app's theme object — the
   // same object the plugins and the renderers were given (a plugin may hold the
   // reference), emptied and refilled, never replaced. The resolve above builds it; every
   // later change (a plugin joining, the terminal's scheme, a pinned mode) comes here.
   const applyTheme = (scheme: ColorScheme) => {
     themeScheme = scheme;
-    const theme = config.theme as Theme;
-    const next = resolveAppTheme(userTheme, plugins, config, scheme);
+    const theme = config.theme as Record<string, unknown>;
+    const next = resolveAppTheme(themeModels.models, scheme);
     for (const key of Object.keys(theme)) delete theme[key];
     Object.assign(theme, next);
   };
@@ -445,6 +451,7 @@ export async function renderApp(
   // A config that still sets the roots as `fs.roots` is read, and said once in the log.
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
+  for (const note of themeNotes) services.log.append(`[config] ${note}`);
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
   // A console line reaches the log as soon as it is printed, and an open log shows it:
   // while the log is open the App is asked to redraw, at most once per
@@ -555,6 +562,7 @@ export async function renderApp(
     Object.assign(viewRegistry, buildViewRegistry(plugins));
     commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins, hostCommands));
     // The palette follows the config and the mode, not the timing of a plugin's arrival.
+    themeModels = buildModels(userTheme, plugins);
     applyTheme(schemeFor(pinnedScheme ?? 'system', terminalScheme));
     tools?.refresh?.();
     const aiTools = (services as unknown as HostServices).pluginAiTools;
@@ -1320,11 +1328,11 @@ export async function renderApp(
     // The side with the keyboard is marked: the chat's frame in its accent, or — the
     // plugin's side — the title bar in the same colour.
     const pluginFocused = !!dock && !dock.collapsed && chat?.focus === 'plugin';
-    const chatAccent = ((config.theme as Theme | undefined)?.modals as Record<string, { accent?: string }> | undefined)?.chat?.accent;
-    // The host's own side is not a modal: it reads the abstract base for its ground, its
+    const chatAccent = (config.theme as ResolvedTheme | undefined)?.chat?.accent;
+    // The host's own side is not a modal: it reads the base roles for its ground, its
     // ink and its two accents, and `baseInk` leaves out what the palette left to the
     // terminal — so `ui.theme` reaches the start screen and the `:` line too.
-    const base = baseInk(config.theme as Theme | undefined);
+    const base = baseInk(config.theme as ResolvedTheme | undefined);
     const hints = composeFooterHints(plugins, apiMap, keys).join(' · ');
     const surfaceActive = (p: PluginShape): boolean => {
       const kc = (p as Plugin).keycaps;
@@ -1469,7 +1477,7 @@ export async function renderApp(
         h(Box, panelBox, chatComp ? h(chatComp.Comp as any, { key: chatComp.key }) : null)),
       // The runtime's panel, over the plugin's side — above the chat's window, which the
       // `:` line it was opened from could not have been typed into.
-      hostView ? renderCommandPanel({ width: region.width, height: region.height, theme: config.theme as Theme, panel: hostView }) : null,
+      hostView ? renderCommandPanel({ width: region.width, height: region.height, theme: config.theme as ResolvedTheme, panel: hostView }) : null,
       h(AreaContext.Provider, { value: { width: termWidth, height: termHeight } }, layer('topLeft'), layer('bottomRight')),
     );
   }

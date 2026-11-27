@@ -28,12 +28,6 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     ],
     keys: {},
     views: {},
-    // The panel's own palette (not a modal, so not MODAL_COLOR_DEFAULTS): via the
-    // generic non-modal plugin pass-through it becomes theme.keycaps, like the board
-    // theme.board. Override — config.plugins.keycaps.colors.bg (and .text for the ink;
-    // without it the modal base's text color). A `${token}`, not a literal: the
-    // panel follows the terminal between light and dark.
-    colors: { bg: '${panelBg}' },
     // Schema of the config.plugins.keycaps namespace: enabled — show the panel at
     // startup (read when the panel mounts; `:keycaps on|off` switches it for the run). The
     // model may change `enabled`: a display flag.
@@ -76,15 +70,16 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
             },
           };
           if (!enabled || !recent.length) return null;
-          // Panel fill is its own theme.keycaps palette (colors above), not another
-          // modal's: otherwise an override of config.plugins.log.colors.bg would paint
-          // keycaps for nothing. Without a palette the panel is transparent and the
-          // frame is unreadable. Fallback — the abstract modal base theme.modals.bg.
+          // Panel fill is the host's own `keycaps` surface (`bg = ${base.panelBg}`,
+          // src/playback/palette-defaults.ts), not another modal's: an override of the
+          // log's ground never paints the keycaps. The person sets it at
+          // `theme.<scheme>.keycaps`. Without a palette the panel is transparent and the
+          // frame is unreadable; the fallback is the base ground.
           const cfg = host.config as Record<string, any>;
-          const panelBg = cfg?.theme?.keycaps?.bg ?? cfg?.theme?.modals?.bg;
+          const panelBg = cfg?.theme?.keycaps?.bg ?? cfg?.theme?.base?.bg;
           // The ink goes with the ground: the caps and the frame inherit it, so a light
           // terminal theme does not draw them black on the dark fill.
-          const panelText = cfg?.theme?.keycaps?.text ?? cfg?.theme?.modals?.text;
+          const panelText = cfg?.theme?.keycaps?.text ?? cfg?.theme?.base?.text;
           // flowtty frame prop is `border` (not borderStyle); 'round' is the default,
           // but we set it explicitly. Inner «keys» are also frames, single.
           const caps = recent.map((k, i) =>

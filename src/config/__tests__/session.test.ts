@@ -89,7 +89,7 @@ test('the resolved theme the app holds is never overwritten under it', () => {
   // The app resolves `theme` into the palette every renderer reads; a value laid over
   // it would leave a partial palette. It is written, and read at the next start.
   const file = tempLocal();
-  const palette = { modals: { chat: { accent: 'cyan' } } };
+  const palette = { base: { accent: 'cyan' }, chat: { accent: 'cyan' } };
   const live: Record<string, unknown> = { theme: palette };
   const res = setConfigValue(live, 'theme', { dark: { base: { accent: 'red' } } }, { scope: 'session', filePath: file });
   expect(res.ok).toBe(true);

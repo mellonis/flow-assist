@@ -113,7 +113,7 @@ test('Ctrl+] moves the keyboard between the chat and the plugin, and the side th
   await ui.type('a');
   expect(ui.backend.lastFrame).toContain('› a');
   expect(g.seen).toEqual(['F']);
-  const accent = g.host().config.theme.modals.chat.accent;
+  const accent = g.host().config.theme.chat.accent;
   const corner = () => ui.backend.lastBuffer!.get(104, 0).style.fg;
   const title = () => ui.backend.lastBuffer!.get(1, 1).style.fg;
   expect(corner()).toBe(accent);
@@ -566,7 +566,7 @@ test('collapsing during a y/n keeps it pending; the footer says it waits; expand
   expect(r[y]).toMatch(/^ \? waiting for you · \^\] chat · : commands/);
   expect(r[y]!.match(/chat/g)).toHaveLength(1);
   // In the warn colour.
-  expect(ui.backend.lastBuffer!.get(1, y).style.fg).toBe(g.host().config.theme.modals.chat.warn);
+  expect(ui.backend.lastBuffer!.get(1, y).style.fg).toBe(g.host().config.theme.chat.warn);
   await press(ui, COLLAPSE);
   expect(ui.backend.lastFrame).toContain('Confirm write: notes_write');
   await ui.press('y');

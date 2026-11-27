@@ -11,8 +11,8 @@
 //     plugins' `chatContext` items (`services.chatContext`) — when there are any.
 //   - `renderChatModal` accepts `completions { matches, sel }` and completes a
 //     `/`-command inside the field.
-//   - `theme` may be undefined / lack a resolved `modals` map, so every
-//     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
+//   - `theme` may be undefined or lack a surface, so every `theme.<surface>.<key>`
+//     read is guarded (`m = theme?.chat ?? {}`).
 
 import { askRows, askSubmitRows, askTabs, type AskRow, type AskState, type AskSubmitRow, type AskTab } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
@@ -276,14 +276,14 @@ export function renderCompletionList(list: CompletionList, width: number) {
     list.count ? h(Text, { key: 'n', dim: true, wrap: 'truncate' }, ` ${list.count}`) : null);
 }
 
-// The theme config subtree (`host.config.theme`) — a free-form object. Only `modals`
-// (the per-surface palette) and a few flat keys are read. Typed loosely so a missing/
-// deep-absent key degrades to Flowtty defaults instead of throwing on `undefined`.
+// The resolved theme (`host.config.theme`, src/playback/theme.ts): the base roles at
+// `base`, and per surface (`chat`, `log`) every role plus the surface's own keys.
+// Typed loosely so a missing key degrades to Flowtty defaults instead of throwing on
+// `undefined`.
 interface Theme {
-  // `modals` holds BOTH flat shared palette keys (bg/border/borderBg, read by
-  // renderHelp directly) and nested surface palettes (`.chat`, `.log`).
-  modals?: Record<string, unknown>;
-  error?: string;
+  base?: Record<string, string | undefined>;
+  chat?: Record<string, string | undefined>;
+  log?: Record<string, string | undefined>;
   [k: string]: unknown;
 }
 
@@ -2099,7 +2099,7 @@ export function pagerTitle(rows: readonly ChatRow[], id: string): string {
 // markdown answers unroll to the width. The conversation is <ChatMessages> above — a
 // scroll box that takes the rows the rest of the column leaves; under it sit the
 // error, the status line, the plan, the queue line and the field (or the question /
-// y-n block that replaces it). Palette: theme.modals.chat.
+// y-n block that replaces it). Palette: theme.chat.
 // The item the plan is at: the first in progress, else the first pending, else the
 // last (all done).
 const planFocus = (list: PlanItem[]): number => {
@@ -2482,7 +2482,7 @@ export function renderChatModal({
   const props = { width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel, completion, diffPanel };
   const base = chatRoom(props);
   const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = base;
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
   // The field's own text, a token among it drawn as an attachment. Not dim: in the field
   // dim means "offered, not yours yet".
@@ -2568,7 +2568,7 @@ export function renderChatModal({
     // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and the
     // wheel are the pager's, and the conversation stays where it was left. With `/diff`
     // drawn they are the panel's body's.
-    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
+    h(ChatMessages, { messages, rowOpts: { wrap: chatHalf, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail, askPending }, palette: m, errorColor: theme?.base?.danger, onViewport, scrollTo, keysActive: focused && !pager && !watch && !diffShown, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
     // The pager, in the conversation's place: the block's rows at the conversation's
     // width, with a scroll of their own.
     pager
@@ -2577,7 +2577,7 @@ export function renderChatModal({
           isActive: focused,
           items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
           keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
-          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap: chatHalf, detailsKey }),
+          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.base?.danger, wrap: chatHalf, detailsKey }),
         }))
       : null,
     // A watched child, in the same place: its rows follow the end while the list rests
@@ -2590,7 +2590,7 @@ export function renderChatModal({
           ref: (box: ScrollBoxHandle | null) => { if (watch.toEnd) watch.toEnd.current = box ? () => box.scrollToEnd() : null; },
           items: watch.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
           keyOf: (_row: ChatRow, i: number) => `watch-${i}`,
-          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap: chatHalf, detailsKey }),
+          renderItem: chatRowRenderer({ palette: m, errorColor: theme?.base?.danger, wrap: chatHalf, detailsKey }),
         }))
       : null,
   );
@@ -2610,7 +2610,7 @@ export function renderChatModal({
         // color of its own inherits it (flowtty ≥ 1.0.0-alpha.16). Left to the
         // terminal's foreground, a light terminal theme drew black on black.
         color: m.text,
-        borderBackgroundColor: m.borderBg,
+        borderBackgroundColor: m.bg,
         borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
         // What is on screen, after the name and the model — cut to the border, never
         // wrapped. With the pager up, what it holds.
@@ -2692,7 +2692,7 @@ export function renderChatModal({
             : contextPanel
             ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
             : confirmAsk
-            ? confirmBox(confirmAsk, m.bg, theme?.error)
+            ? confirmBox(confirmAsk, m.bg, theme?.base?.danger)
             // The field is where the person types — its caret, prompt and placeholder are
             // not text to copy, and a drag over it must not pick them up.
             : h(Box, { flexDirection: 'column', width: '100%' },
@@ -2872,7 +2872,7 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
 }) {
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   const groups = pickerGroups(picker);
   // A row takes a click only while the list is what the keys move — not while a
   // rename or a delete asks about the row the cursor is on.
@@ -2959,7 +2959,7 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
       border: 'round',
       backgroundColor: m.bg,
       color: m.text,
-      borderBackgroundColor: m.borderBg,
+      borderBackgroundColor: m.bg,
       borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
       borderTitle: cutStep(heading, headRoom),
       width: boxW,
@@ -3030,7 +3030,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   // the box's (a window is 82% of the area; full and docked are the area itself).
   const chatH = chatBoxHeight(height, fullscreen);
   const boxH = strip ? Math.min(STRIP_ROWS, chatH) : chatH;
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   // A strip draws from border to border; a window keeps its padding.
   const inner = Math.max(1, boxW - (strip ? 2 : 4));
   const message = error ? `⚠ ${error}` : panel.notice;
@@ -3094,7 +3094,7 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
     border: 'round',
     backgroundColor: m.bg,
     color: m.text,
-    borderBackgroundColor: m.borderBg,
+    borderBackgroundColor: m.bg,
     borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
     borderTitle: cutStep(heading, headRoom),
     width: boxW,
@@ -3152,7 +3152,7 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
   // field's place yet, and the strip says which of the two it waits on.
   question?: boolean;
 }) {
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   if (waiting) {
     return h(Text, { key: 'chat-status', color: m.warn, wrap: 'truncate', selectable: false }, `? ${question ? 'a question is waiting' : 'waiting for you'}${keyHint ? ` · ${keyHint}` : ''}`);
   }
@@ -3193,7 +3193,7 @@ export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0
   keyHint?: string;
   unread?: number;
 }) {
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   return h(Box, { width, height: 1, flexDirection: 'row', backgroundColor: m.bg, overflow: 'hidden', selectable: false },
     h(Text, { bold: true, color: m.assistantAccent }, ` ${ASSISTANT_MARK} `),
     h(Text, { bold: true }, 'Flow Assist'),
@@ -3896,7 +3896,7 @@ const frame = (m: Record<string, string | undefined>, title: string, extra: Reco
   backgroundColor: m.bg,
   // Its own ink on its own ground, as in the chat.
   color: m.text,
-  borderBackgroundColor: m.borderBg,
+  borderBackgroundColor: m.bg,
   borderColor: m.border,
   borderTitle: title,
   paddingX: 1,
@@ -3940,7 +3940,7 @@ export function renderLogModal({
   logModalRows: number;
   logScroll: number;
 }) {
-  const m = (theme?.modals?.log ?? {}) as Record<string, string | undefined>;
+  const m = theme?.log ?? {};
   const total = logs.length;
   const maxScroll = Math.max(0, total - logModalRows);
   const scroll = Math.min(logScroll, maxScroll);
@@ -3953,7 +3953,7 @@ export function renderLogModal({
     h(Box, frame(m, title, { width: Math.max(40, Math.floor(width * 0.7)), paddingY: 1, gap: 1 }),
       h(Box, { flexDirection: 'column' },
         visible.length
-          ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.error)))
+          ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.base?.danger)))
           : h(Text, { dim: true }, 'Nothing has happened yet — tool calls, background tasks and errors land here.')),
       h(Text, { dim: true, selectable: false }, `${more ? `${CAP.upDown} ${CAP.page} scroll · Home/End · ` : ''}${CAP.esc} close`),
     ),
@@ -4023,7 +4023,7 @@ export function renderHelp({
   keys?: Record<string, string[]>;
 }) {
   if (!helpOpen) return null;
-  const m = (theme?.modals ?? {}) as unknown as Record<string, string | undefined>;
+  const m = theme?.base ?? {};
   const boxW = Math.min(84, width - 8);
   const inner = boxW - 4;
   const bound = Object.entries(keys).map(([action, binding]) => ({ action, cap: bindingGlyph(binding), label: actionLabel(action) })).filter((k) => k.cap);
@@ -4092,7 +4092,7 @@ export function renderDiffFull({
   confirm?: ConfirmAsk | null;
   askWrap?: number;
 }) {
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const m = theme?.chat ?? {};
   const items = diffPanelItems(view.sections, view.collapsed);
   // The panel's inner width — the frame's border, its padding and the body's scrollbar.
   const wrap = Math.max(10, width - 10);
@@ -4108,7 +4108,7 @@ export function renderDiffFull({
           h(Box, { width: (askWrap ?? wrap) + 2 },
             question
               ? renderAsk(question, m.bg, askWrap ?? wrap)
-              : confirmBox(confirmView(confirm!, askWrap ?? wrap), m.bg, theme?.error)))
+              : confirmBox(confirmView(confirm!, askWrap ?? wrap), m.bg, theme?.base?.danger)))
       : null);
 }
 
@@ -4117,7 +4117,7 @@ export function renderDiffFull({
 // toast. `core.reminder` gates on `services.reminder` (null → not rendered) and
 // calls this with the active text. It is a FLOATING panel (like keycaps), not a
 // blocking modal — it only consumes Esc/Enter to dismiss, and sits above the
-// modals/keycaps (zIndex 20 > 10). Palette: theme.modals (like the other modals).
+// modals/keycaps (zIndex 20 > 10). Palette: theme.base, as the help's.
 export function renderReminder({
   width,
   height,
@@ -4129,7 +4129,7 @@ export function renderReminder({
   theme: Theme | undefined;
   text: string;
 }) {
-  const m = (theme?.modals ?? {}) as Record<string, string | undefined>;
+  const m = theme?.base ?? {};
   // Size to the text (with a small inset), clamped to the terminal; a short note
   // stays small, a long one wraps rather than growing off-screen.
   const w = Math.min(Math.max(40, cellWidth(text) + 8), width - 8);
@@ -4140,7 +4140,7 @@ export function renderReminder({
       border: 'round',
       backgroundColor: m.bg,
       color: m.text,
-      borderBackgroundColor: m.borderBg,
+      borderBackgroundColor: m.bg,
       borderColor: m.border,
       borderTitle: 'reminder',
       width: w,

@@ -28,7 +28,7 @@ import { absentGroupsNote } from '../assistant/agent-start.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
-import { DEFAULT_THEME } from '../playback/theme.js';
+import { ROLES } from '../playback/palette.js';
 import { writtenKey } from '../playback/keys.js';
 import { createPlan, type Plan } from '../assistant/plan.js';
 import type { ToolGroup, ToolDef } from './tools.js';
@@ -139,7 +139,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   // assistant.
   'ai.autoCompact': `enabled: ${AUTO_COMPACT_DEFAULTS.enabled}, threshold: ${AUTO_COMPACT_DEFAULTS.threshold} — before a request that would pass threshold of the window the conversation measures against (ai.models.<id>.contextWindow, else ai.contextWindow; 0.5 to 0.95), the chat compacts the conversation first, as /compact does: the model gets a handoff (goal, done, in progress and the next step, open decisions, facts learned) in place of the old messages, the screen keeps everything, and a "── compacted · auto ──" row marks the place. It happens between two requests, so a tool call and its result are never parted, and it may come in the middle of a long turn. config set ai.autoCompact.enabled false leaves compaction to /compact; config set ai.autoCompact.threshold 0.9 waits longer`,
   cache: 'enabled: true; ON unless config.cache.enabled = false',
-  theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
+  theme: `only what differs from the host's palette, per scheme: theme.dark and theme.light each take base.<role> (the ${ROLES.length} roles: ${ROLES.join(' ')}) and <surface>.<key> (the host's chat, log and keycaps, and each plugin's surface named after it). A value is a colour (named, #rgb, #rrggbb, rgb(r,g,b), ansi256(n), default) or \${base.<role>}, which follows that role on its scheme; a key left out keeps the host's default. ui.theme picks the scheme (system follows the terminal). config set theme.dark.chat.userBg '#373737' sets one`,
   debug: 'logTools: false',
   // Said in full because it answers a question people really ask the assistant:
   // "why can't I select text with the mouse?"

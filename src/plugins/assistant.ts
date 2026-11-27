@@ -780,7 +780,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             detailsKey: firstGlyph(host.keys.details),
             renderers: viewRenderers,
             now: Date.now(),
-            palette: ((host.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
+            palette: ((host.config.theme as { chat?: Record<string, string | undefined> } | undefined)?.chat ?? {}),
             onViewFail,
             // A question waits: the run that led into it is drawn unfolded and lit
             // (a display flag — the folds are not touched). `conv.question` is the
