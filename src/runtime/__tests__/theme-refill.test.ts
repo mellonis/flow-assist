@@ -31,6 +31,10 @@ test('a theme still in the old format is said once at start, and not applied', a
   const lines = ui.services.log.read();
   expect(lines.filter((l) => l.includes('theme.modals is from the old format and is not applied — run flow-assist config migrate-theme'))).toHaveLength(1);
   expect(lines.filter((l) => l.includes('theme.dark.base.bg'))).toHaveLength(1);
+  // One note per old key, worded once: no second copy in another wording.
+  expect(lines.filter((l) => l.includes('theme.modals'))).toHaveLength(1);
+  expect(lines.some((l) => l.includes('theme: theme.'))).toBe(false);
+  expect(ui.backend.lastFrame).not.toContain('theme: theme.');
   // Where the person sees the start: the start screen.
   expect(ui.backend.lastFrame).toContain('theme.modals is from the old format');
   expect(ui.backend.lastFrame).toContain('theme.dark.base.bg is not a colour');

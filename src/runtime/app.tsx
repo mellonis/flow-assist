@@ -422,8 +422,6 @@ export async function renderApp(
     const p = plugins.find((x) => x.name === surface);
     return p ? paletteKeys(p.palette) : null;
   };
-  const oldKeys = oldThemeKeys(config);
-  if (oldKeys.length) themeNotes.push(`theme: ${oldKeys.join(', ')} from the old format is not applied — flow-assist config migrate-theme moves it`);
   // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
   // the terminal's own light/dark scheme, `light` and `dark` pin one whatever the
   // terminal says. `seenConfigMode` is what the config last said, so a mode a plugin
