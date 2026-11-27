@@ -89,3 +89,18 @@ test('provenance on base rows', () => {
   const e = layer(d, { base: { border: '#999999' } });
   expect(provenance(d, e, null, 'border')).toEqual({ value: '#999999', source: 'own' });
 });
+
+test('provenance names only real roles', () => {
+  const d = model();
+  const e = layer(d, { chat: { userBg: '#010203' } });
+  // absent from the surface: the base role of the same name, not the role its value refers to
+  expect(provenance(d, e, 'chat', 'border')).toEqual({ value: '#4c4c4c', source: 'inherit', from: 'border' });
+  // a literal surface default left alone names no role
+  const literal = provenance(d, d, 'chat', 'userBg');
+  expect(literal).toEqual({ value: '#112233', source: 'inherit' });
+  expect('from' in literal).toBe(false);
+  // a key in neither the surface nor base names no role
+  expect('from' in provenance(d, d, 'chat', 'extra')).toBe(false);
+  expect('from' in provenance(d, d, 'chat', 'constructor')).toBe(false);
+  expect(provenance(d, d, 'chat', 'constructor').value).toBe('');
+});

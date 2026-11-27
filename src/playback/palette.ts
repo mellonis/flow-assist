@@ -48,7 +48,7 @@ function follow(base: Record<Role, string>, value: string, seen: ReadonlySet<Rol
   return follow(base, base[role], new Set([...seen, role]));
 }
 
-/** Follows references through the base roles; a cycle returns the value as written at the loop. */
+/** Follows references through the base roles; a cycle returns the first ref that repeats (the value as written when the start is on the loop). */
 export function expand(base: Record<Role, string>, value: string): string {
   return follow(base, value, new Set());
 }
@@ -97,15 +97,23 @@ export function provenance(
   surface: string | null,
   key: string,
 ): { value: string; source: 'own' | 'inherit'; from?: Role } {
+  const isRole = (k: string): k is Role => (ROLES as readonly string[]).includes(k);
   if (surface === null) {
-    const raw = effective.base[key as Role] ?? '';
+    const raw = isRole(key) ? effective.base[key] : '';
     const ref = isRef(raw);
     const value = expand(effective.base, raw);
     return ref === null ? { value, source: 'own' } : { value, source: 'inherit', from: ref };
   }
-  const set = effective.surfaces[surface]?.[key];
-  const raw = set ?? effective.base[key as Role] ?? '';
+  const own = (m: SchemeModel): string | undefined =>
+    Object.hasOwn(m.surfaces[surface] ?? {}, key) ? m.surfaces[surface]?.[key] : undefined;
+  const set = own(effective);
+  const inDefaults = own(defaults);
+  const raw = set ?? inDefaults ?? (isRole(key) ? effective.base[key] : '');
   const value = expand(effective.base, raw);
-  if (set !== undefined && set !== defaults.surfaces[surface]?.[key]) return { value, source: 'own' };
-  return { value, source: 'inherit', from: isRef(raw) ?? (key as Role) };
+  // An override equal to the default reads as `inherit`: the values are compared.
+  if (set !== undefined && set !== inDefaults) return { value, source: 'own' };
+  // A key the surface lacks inherits from the base role of the same name; a
+  // reference in the surface's own default names its role; a literal names none.
+  const from = inDefaults === undefined ? (isRole(key) ? key : null) : isRef(inDefaults);
+  return from === null ? { value, source: 'inherit' } : { value, source: 'inherit', from };
 }
