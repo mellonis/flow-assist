@@ -12,7 +12,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   plugin's own). A value is a colour or `${base.<role>}`, resolved inside its scheme, so
   one role moves every key that refers to it; a key left out inherits the host's default
   for that scheme. The chat's keys now cover what it draws (`pulse`, `thought`, `plan`,
-  the context bar's `ctx…` segments) and are set at `theme.<scheme>.chat`.
+  the context bar's `ctx…` segments) and are set at `theme.<scheme>.chat`. A key is a
+  role or one its surface draws: `config set` refuses any other, a plugin's checked
+  against its manifest's `colors`; a hand-edited value or key the theme cannot take is
+  left out and named on the start screen and in the log, and never keeps the app from
+  starting.
 
 - **Markdown prose in the chat has colours of its own.** `mdHeading`, `mdCode`,
   `mdLink`, `mdList` and `mdQuote` in the chat's palette colour a heading, inline code,
@@ -31,7 +35,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **The old palette format is not applied; `config migrate-theme` moves it.** The flat
   `theme.*` keys, `theme.modals.*` and `plugins.<name>.colors` are ignored, and the
-  start names the command. `flow-assist config migrate-theme` writes what differs from
+  start screen names them and the command (a one-shot prompt, on stderr). `flow-assist config migrate-theme` writes what differs from
   the host's palette under `theme.dark`, with the tokens rewritten as `${base.<role>}`,
   and unsets the old keys (one written in `config.json` is named, not touched).
 
