@@ -1,0 +1,159 @@
+// The host's own palettes, written as the 16 base roles per scheme plus the keys
+// each surface adds. A chat key that means what a role means is written as a
+// reference to it, so changing the role moves the key; the rest are the chat's own
+// literals. `unknown` (a terminal that never said its scheme) is kept as resolved
+// strings: it has no grounds of its own, so nothing in it refers to a role.
+import type { PaletteModel, SchemeModel } from './palette.js';
+
+// The keys the chat surface carries, in the order the tuner lists them.
+export const CHAT_KEYS: readonly string[] = [
+  'accent', 'shell', 'assistantAccent', 'userBg', 'fieldBg', 'bgAccent', 'bgBg', 'warn', 'ok', 'add', 'del',
+  'addBg', 'delBg', 'idleBorder', 'askBg', 'askInk', 'mdHeading', 'mdCode', 'mdLink', 'mdList', 'mdQuote',
+];
+
+const DARK: SchemeModel = {
+  base: {
+    bg: 'black',
+    text: 'white',
+    muted: 'gray',
+    border: 'cyan',
+    accent: 'cyan',
+    selected: 'green',
+    highlight: '#3c3c3c',
+    danger: 'red',
+    ok: 'green',
+    warn: 'yellow',
+    fieldBg: 'gray',
+    fieldText: '${base.text}',
+    fieldBorder: 'cyan',
+    panelBg: '#1a1b26',
+    highlightStrong: '#20456b',
+    highlightText: 'white',
+  },
+  surfaces: {
+    chat: {
+      accent: '${base.accent}',
+      shell: 'magentaBright',
+      assistantAccent: 'green',
+      userBg: '#2b2b40',
+      fieldBg: '#1f1f2e',
+      bgAccent: 'magenta',
+      bgBg: '#2a2438',
+      warn: '${base.warn}',
+      ok: '${base.ok}',
+      add: '${base.ok}',
+      del: '${base.danger}',
+      addBg: '#003b00',
+      delBg: '#3b0000',
+      idleBorder: '${base.muted}',
+      askBg: '#243036',
+      askInk: '#dfe8e6',
+      mdHeading: '${base.accent}',
+      mdCode: '${base.selected}',
+      mdLink: '${base.selected}',
+      mdList: '${base.muted}',
+      mdQuote: '${base.muted}',
+    },
+    log: {},
+    keycaps: { bg: '${base.panelBg}', text: '${base.text}' },
+  },
+};
+
+const LIGHT: SchemeModel = {
+  base: {
+    bg: '#f4f4f6',
+    text: 'black',
+    muted: '#a0a0b0',
+    border: 'blue',
+    accent: 'blue',
+    selected: 'green',
+    highlight: '#e2e2e2',
+    danger: 'red',
+    ok: 'green',
+    warn: '#9a6700',
+    fieldBg: '#e2e2e8',
+    fieldText: '${base.text}',
+    fieldBorder: 'blue',
+    panelBg: '#ececf2',
+    highlightStrong: '#d4e3f5',
+    highlightText: 'black',
+  },
+  surfaces: {
+    chat: {
+      accent: '${base.accent}',
+      shell: 'magenta',
+      assistantAccent: 'green',
+      userBg: '#e4e4f0',
+      fieldBg: '#eaeaf0',
+      bgAccent: 'magenta',
+      bgBg: '#efe4f2',
+      warn: '${base.warn}',
+      ok: '${base.ok}',
+      add: '${base.ok}',
+      del: '#a40000',
+      addBg: '#e6f4e6',
+      delBg: '#fce8e8',
+      idleBorder: '${base.muted}',
+      askBg: '#e3eeec',
+      askInk: '#2b3f3b',
+      mdHeading: '${base.accent}',
+      mdCode: '${base.selected}',
+      mdLink: '${base.selected}',
+      mdList: '${base.muted}',
+      mdQuote: '${base.muted}',
+    },
+    log: {},
+    keycaps: { bg: '${base.panelBg}', text: '${base.text}' },
+  },
+};
+
+export const HOST_PALETTE: PaletteModel = { dark: DARK, light: LIGHT };
+
+// The `unknown` scheme as resolved records: `default` is flowtty's "no colour of the
+// app's own" sentinel, so grounds and inks stay the terminal's; the accents the host
+// names on every scheme stay named.
+export const UNKNOWN_RESOLVED: Record<string, Record<string, string>> = {
+  base: {
+    bg: 'default',
+    text: 'default',
+    muted: 'default',
+    border: 'cyan',
+    accent: 'cyan',
+    selected: 'green',
+    highlight: 'default',
+    danger: 'red',
+    ok: 'green',
+    warn: 'yellow',
+    fieldBg: 'default',
+    fieldText: 'default',
+    fieldBorder: 'cyan',
+    panelBg: 'default',
+    highlightStrong: 'default',
+    highlightText: 'default',
+  },
+  chat: {
+    accent: 'cyan',
+    shell: 'magentaBright',
+    assistantAccent: 'green',
+    userBg: 'default',
+    fieldBg: 'default',
+    bgAccent: 'magenta',
+    bgBg: 'default',
+    warn: 'yellow',
+    ok: 'green',
+    add: 'green',
+    del: 'red',
+    addBg: 'default',
+    delBg: 'default',
+    idleBorder: 'gray',
+    askBg: 'default',
+    askInk: 'default',
+    mdHeading: 'cyan',
+    mdCode: 'green',
+    mdLink: 'green',
+    mdList: 'default',
+    mdQuote: 'default',
+  },
+  log: {},
+  keycaps: { bg: 'default', text: 'default' },
+};
