@@ -204,3 +204,23 @@ test('a config in the old theme shape loads whole, warns of nothing, and refuses
     if (kept === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, kept);
   }
 });
+
+// A hand-edited theme never keeps the app from starting: what the palette cannot take
+// is dropped and said in the start note (src/playback/theme.ts, `buildModels`).
+test('configWarnings says nothing of a bad theme value — the start gate passes', () => {
+  const saved = process.env.LLM_TOKEN;
+  process.env.LLM_TOKEN = 't';
+  try {
+    const ai = { baseUrl: 'b', model: 'm' };
+    for (const theme of [
+      { dark: { chat: { userBg: '#12' } } },
+      { dark: { chat: { userBg: '${base.nope}' } } },
+      { dark: { base: { nope: 'red' } } },
+      { dark: 'red' },
+      'red',
+    ]) expect(configWarnings({ ai, theme } as Record<string, unknown>)).toEqual([]);
+  } finally {
+    if (saved === undefined) delete process.env.LLM_TOKEN;
+    else process.env.LLM_TOKEN = saved;
+  }
+});

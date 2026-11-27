@@ -36,7 +36,7 @@ test('a theme still in the old format is said once at start, and not applied', a
 });
 
 test('a plugin that joins after start gets its surface on the same theme object', async () => {
-  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { colors: { lane: '${base.highlight}' } });
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { colors: { lane: '${base.highlight}', mark: 'blue' } });
   fake.holdHello();
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme: { dark: { fake: { mark: 'red' } } } }, { late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
   const held = ui.config.theme as Record<string, Record<string, string>>;
@@ -47,5 +47,25 @@ test('a plugin that joins after start gets its surface on the same theme object'
   expect(held.fake!.lane).toBe('#3c3c3c');
   // The person's overrides survive the rebuild.
   expect(held.fake!.mark).toBe('red');
+  ui.app.unmount();
+});
+
+test('a configured key no surface draws is said at start; a late plugin\'s, once it joins', async () => {
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { colors: { lane: '${base.highlight}' } });
+  fake.holdHello();
+  const theme = { dark: { chat: { usrBg: '#111111' }, nosuchplugin: { x: 'red' }, fake: { zzz: 'red' } } };
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme }, { late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
+  const undrawn = (path: string) => ui.services.log.read().filter((l) => l.includes(path) && l.includes('not a key that surface draws'));
+  expect(undrawn('theme.dark.chat.usrBg')).toHaveLength(1);
+  expect(undrawn('theme.dark.nosuchplugin.x')).toHaveLength(1);
+  // Still starting: not judged yet.
+  expect(undrawn('theme.dark.fake.zzz')).toHaveLength(0);
+  const held = ui.config.theme as Record<string, Record<string, string>>;
+  fake.answerHello();
+  await settleUntil(() => held.fake?.lane !== undefined, 200, 'the late plugin\'s surface');
+  expect(undrawn('theme.dark.fake.zzz')).toHaveLength(1);
+  expect(held.fake!.zzz).toBeUndefined();
+  // What was said at start is not said again.
+  expect(undrawn('theme.dark.chat.usrBg')).toHaveLength(1);
   ui.app.unmount();
 });

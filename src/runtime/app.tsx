@@ -62,7 +62,7 @@ import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
 import { baseInk, buildModels, resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, ResolvedTheme } from '../playback/theme.js';
-import { oldThemeKeys } from '../playback/palette-config.js';
+import { oldThemeKeys, paletteKeys, type SurfaceKeys } from '../playback/palette-config.js';
 import { schemeFor, type ThemeMode } from '../playback/theme-mode.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
@@ -411,8 +411,19 @@ export async function renderApp(
   const userTheme: unknown = config.theme;
   // What of the person's theme is not applied, said once in the log below.
   const themeNotes: string[] = [];
-  let themeModels = buildModels(userTheme, plugins);
-  if (themeModels.ignored.length) themeNotes.push(`theme: ${themeModels.ignored.join(', ')} is not a colour the theme takes, and is not applied`);
+  // A plugin still starting is judged when it joins (`rebuildFromPlugins`).
+  let themeModels = buildModels(userTheme, plugins, { pending: late.starting() });
+  const badValues = themeModels.ignored.filter((i) => i.why === 'value').map((i) => i.path);
+  const undrawn = themeModels.ignored.filter((i) => i.why === 'key').map((i) => i.path);
+  if (badValues.length) themeNotes.push(`theme: ${badValues.join(', ')} is not a colour the theme takes, and is not applied`);
+  const saidUndrawn = new Set(undrawn);
+  if (undrawn.length) themeNotes.push(`theme: ${undrawn.join(', ')} is not a key that surface draws, and is not applied`);
+  // Which keys a loaded plugin's surface draws, for `:config set theme.*`: its manifest's
+  // `colors` and the roles; a plugin not loaded here is not known, and its key is taken.
+  const loadedSurfaceKeys: SurfaceKeys = (surface) => {
+    const p = plugins.find((x) => x.name === surface);
+    return p ? paletteKeys(p.palette) : null;
+  };
   const oldKeys = oldThemeKeys(config);
   if (oldKeys.length) themeNotes.push(`theme: ${oldKeys.join(', ')} from the old format is not applied — flow-assist config migrate-theme moves it`);
   // The appearance is a MODE (`ui.theme`, src/playback/theme-mode.ts): `system` follows
@@ -562,7 +573,11 @@ export async function renderApp(
     Object.assign(viewRegistry, buildViewRegistry(plugins));
     commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins, hostCommands));
     // The palette follows the config and the mode, not the timing of a plugin's arrival.
-    themeModels = buildModels(userTheme, plugins);
+    themeModels = buildModels(userTheme, plugins, { pending: late.starting() });
+    // A key of a plugin that has joined since is judged now; what was said is not said again.
+    const fresh = themeModels.ignored.filter((i) => i.why === 'key' && !saidUndrawn.has(i.path)).map((i) => i.path);
+    for (const p of fresh) saidUndrawn.add(p);
+    if (fresh.length) services.log.append(`[config] theme: ${fresh.join(', ')} is not a key that surface draws, and is not applied`);
     applyTheme(schemeFor(pinnedScheme ?? 'system', terminalScheme));
     tools?.refresh?.();
     const aiTools = (services as unknown as HostServices).pluginAiTools;
@@ -913,7 +928,7 @@ export async function renderApp(
       // then the session or config.local.json, and the running app's config — so the
       // value is live at once wherever it is read when it is used.
       if (sub === 'set' && key && value !== undefined) {
-        const res = setConfigValue(config, key, parseValue(unquoteValue(value)), { scope: session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+        const res = setConfigValue(config, key, parseValue(unquoteValue(value)), { scope: session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins), surfaceKeys: loadedSurfaceKeys });
         toast.showMessage(res.ok ? `${describeConfigValue(key, res.value, session ? 'session' : 'local')}${res.restart ? ` — ${RESTART_NOTE}` : ''}` : res.error);
         return;
       }

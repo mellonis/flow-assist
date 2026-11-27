@@ -7,7 +7,7 @@
 
 import { expand, layer, resolveSurface, ROLES, SCHEMES, type PaletteModel, type Role, type Scheme } from './palette.js';
 import { HOST_PALETTE, UNKNOWN_RESOLVED } from './palette-defaults.js';
-import { readThemeOverrides } from './palette-config.js';
+import { hostSurfaceKeys, paletteKeys, readThemeOverrides, type IgnoredPath, type Overrides } from './palette-config.js';
 
 // Which scheme the terminal is on, as flowtty reports it (docs/app.md in flowtty —
 // the color scheme). It can change while the app runs: macOS switches its
@@ -32,11 +32,22 @@ export interface ThemeModels {
 /**
  * Both schemes' models: the host's surfaces, each plugin's palette as a surface of its
  * name (never over a host surface), the person's overrides laid on. `defaults` is the
- * same before the overrides; `ignored` lists each override path the theme does not take.
+ * same before the overrides; `ignored` lists each override path the theme does not take:
+ * a value no colour, or a key no surface draws — a host surface's own keys, a plugin's
+ * from its manifest, and a surface no plugin here owns. A plugin still starting
+ * (`pending`) is not judged before it joins: its overrides are kept for it.
  */
-export function buildModels(theme: unknown, plugins: readonly PalettePlugin[]): ThemeModels & { ignored: string[] } {
-  const { overrides, ignored } = readThemeOverrides(theme);
+export function buildModels(
+  theme: unknown,
+  plugins: readonly PalettePlugin[],
+  opts: { pending?: readonly string[] } = {},
+): ThemeModels & { ignored: IgnoredPath[] } {
+  const read = readThemeOverrides(theme);
+  const ignored: IgnoredPath[] = [...read.ignored];
   const taken = new Set(['base', ...Object.keys(HOST_PALETTE.dark.surfaces), ...Object.keys(HOST_PALETTE.light.surfaces)]);
+  const owners = new Map(plugins.filter((p) => !taken.has(p.name)).map((p) => [p.name, paletteKeys(p.palette)]));
+  const pending = new Set(opts.pending ?? []);
+  const drawn = (surface: string): ReadonlySet<string> | null => hostSurfaceKeys(surface) ?? owners.get(surface) ?? null;
   const models = {} as PaletteModel;
   const defaultsOut = {} as PaletteModel;
   for (const scheme of SCHEMES) {
@@ -46,7 +57,22 @@ export function buildModels(theme: unknown, plugins: readonly PalettePlugin[]): 
       if (p.palette !== undefined && !taken.has(p.name)) surfaces[p.name] = { ...p.palette[scheme] };
     }
     defaultsOut[scheme] = { base: defaults.base, surfaces };
-    models[scheme] = layer(defaultsOut[scheme], overrides[scheme as Scheme] ?? {});
+    const over: Overrides = {};
+    for (const [surface, keys] of Object.entries(read.overrides[scheme as Scheme] ?? {})) {
+      if (keys === undefined) continue;
+      const known = surface === 'base' ? null : drawn(surface);
+      if (surface === 'base' || (known === null && pending.has(surface))) {
+        over[surface] = keys;
+        continue;
+      }
+      const kept: Record<string, string> = {};
+      for (const [key, value] of Object.entries(keys)) {
+        if (known?.has(key)) kept[key] = value;
+        else ignored.push({ path: `theme.${scheme}.${surface}.${key}`, why: 'key' });
+      }
+      if (Object.keys(kept).length > 0) over[surface] = kept;
+    }
+    models[scheme] = layer(defaultsOut[scheme], over);
   }
   return { models, defaults: defaultsOut, ignored };
 }

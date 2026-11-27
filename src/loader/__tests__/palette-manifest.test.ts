@@ -5,7 +5,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readManifestPalette } from '../palette-manifest';
+import { manifestSurfaceKeys, readManifestPalette } from '../palette-manifest';
 import { loadEnabledPlugin } from '../build';
 import { THIS_HOST, pluginCompat } from '../compat';
 import { HOST_API } from '../../version';
@@ -71,4 +71,27 @@ test('the loader hands a plugin the palette and preview its manifest declares; a
 
 test('a manifest built for host API 2 is incompatible on this host', () => {
   expect(pluginCompat({ hostApi: 2 }, THIS_HOST)).toEqual({ ok: false, reason: 'incompatible: built for host API 2, host provides 3' });
+});
+
+test('the keys a plugin surface draws come from its manifest, and an unreadable one answers nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-surface-keys-'));
+  const plugin = (name: string, manifest: string) => {
+    mkdirSync(join(dir, name));
+    writeFileSync(join(dir, name, 'manifest.json'), manifest);
+  };
+  plugin('board', JSON.stringify({ colors: { dark: { swimlaneBg: 'red' }, light: { cardBg: 'blue' } } }));
+  plugin('plain', JSON.stringify({ name: 'plain' }));
+  plugin('broken', '{ not json');
+  const keys = manifestSurfaceKeys(dir, ['board', 'plain', 'broken', 'gone']);
+  expect(keys('board')?.has('swimlaneBg')).toBe(true);
+  expect(keys('board')?.has('cardBg')).toBe(true);
+  expect(keys('board')?.has('text')).toBe(true);
+  expect(keys('board')?.has('zzz')).toBe(false);
+  // A manifest with no colors: its surface draws the roles only.
+  expect(keys('plain')?.has('text')).toBe(true);
+  expect(keys('plain')?.has('swimlaneBg')).toBe(false);
+  // Not readable, not installed, not enabled: nothing to check against.
+  expect(keys('broken')).toBeNull();
+  expect(keys('gone')).toBeNull();
+  expect(keys('elsewhere')).toBeNull();
 });

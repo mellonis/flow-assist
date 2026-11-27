@@ -47,7 +47,7 @@ test("a plugin's manifest palette is a surface, resolved on both schemes", () =>
 
 test('a value the theme does not take is left out and listed', () => {
   const { models, defaults, ignored } = buildModels({ dark: { base: { bg: 'not-a-colour' }, chat: { userBg: '#123456' } } }, []);
-  expect(ignored).toEqual(['theme.dark.base.bg']);
+  expect(ignored).toEqual([{ path: 'theme.dark.base.bg', why: 'value' }]);
   expect(resolveAppTheme({ models, defaults }, 'dark').base.bg).toBe(HOST_PALETTE.dark.base.bg);
   expect(resolveAppTheme({ models, defaults }, 'dark').chat!.userBg).toBe('#123456');
 });
@@ -162,4 +162,41 @@ test("an unknown terminal takes no tuned plugin colour: the person's tuning stay
   const theme = { dark: { board: { x: 'red' } } };
   expect(resolved(theme, 'dark', plugins).board!.x).toBe('red');
   expect(resolved(theme, 'unknown', plugins).board!.x).toBe('#123456');
+});
+
+test('each value a hand edit gets wrong is listed, and the rest of the theme still builds', () => {
+  const cases: Array<[unknown, string]> = [
+    [{ dark: { chat: { userBg: '#12' } } }, 'theme.dark.chat.userBg'],
+    [{ dark: { chat: { userBg: '${base.nope}' } } }, 'theme.dark.chat.userBg'],
+    [{ dark: { base: { nope: 'red' } } }, 'theme.dark.base.nope'],
+    [{ dark: 'red' }, 'theme.dark'],
+    ['red', 'theme'],
+  ];
+  for (const [theme, path] of cases) {
+    const built = buildModels(theme, []);
+    expect(built.ignored.map((i) => i.path)).toEqual([path]);
+    expect(resolveAppTheme(built, 'dark').base.bg).toBe(HOST_PALETTE.dark.base.bg);
+  }
+});
+
+test('a configured key no surface draws is left out and listed as such', () => {
+  const plugins = [{ name: 'board', palette: { dark: { swimlaneBg: 'red' }, light: { swimlaneBg: 'red' } } }, { name: 'plain' }];
+  const built = buildModels({
+    dark: { chat: { usrBg: '#111111', userBg: '#111111' }, nosuchplugin: { x: 'red' }, board: { zzz: 'red', swimlaneBg: 'blue', text: 'red' }, plain: { text: 'red', y: 'red' } },
+  }, plugins);
+  expect(built.ignored.filter((i) => i.why === 'key').map((i) => i.path).sort()).toEqual(
+    ['theme.dark.board.zzz', 'theme.dark.chat.usrBg', 'theme.dark.nosuchplugin.x', 'theme.dark.plain.y'],
+  );
+  expect(built.ignored.filter((i) => i.why !== 'key')).toEqual([]);
+  const dark = resolveAppTheme(built, 'dark');
+  expect(dark.chat!.usrBg).toBeUndefined();
+  expect(dark.chat!.userBg).toBe('#111111');
+  expect(dark.board!.swimlaneBg).toBe('blue');
+  expect(dark.nosuchplugin).toBeUndefined();
+});
+
+test('a plugin still starting keeps its overrides and is not judged before it joins', () => {
+  const built = buildModels({ dark: { late: { x: 'red' } } }, [], { pending: ['late'] });
+  expect(built.ignored).toEqual([]);
+  expect(resolveAppTheme(built, 'dark').late!.x).toBe('red');
 });

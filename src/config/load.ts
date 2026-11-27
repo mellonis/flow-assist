@@ -5,6 +5,7 @@ import path from 'node:path';
 import { appliesOnRestart, hostConfigSchema, isLeashKey, modelMaySave, modelMaySet } from './schema.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
+import { hostSurfaceKeys, undrawnThemeKey, type SurfaceKeys } from '../playback/palette-config.js';
 
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
@@ -512,9 +513,9 @@ export function setConfigValue(
   config: Record<string, unknown>,
   key: string,
   value: unknown,
-  opts: { scope: 'session' | 'saved'; rootSchema?: unknown; pluginConfigs?: Record<string, unknown>; filePath?: string },
+  opts: { scope: 'session' | 'saved'; rootSchema?: unknown; pluginConfigs?: Record<string, unknown>; filePath?: string; surfaceKeys?: SurfaceKeys },
 ): ConfigSetResult {
-  const check = validateConfigWriteValue(opts.rootSchema ?? hostConfigSchema, key, value, opts.pluginConfigs);
+  const check = validateConfigWriteValue(opts.rootSchema ?? hostConfigSchema, key, value, opts.pluginConfigs, opts.surfaceKeys);
   if (!check.ok) return check;
   // The layers before anything is laid on `config`: a config built by hand gets them now,
   // so an `unset` later knows what the key falls back to.
@@ -696,26 +697,64 @@ export function configMarks(rootSchema: any, key: string, pluginConfigs?: Record
   return { maySet, maySave, restart };
 }
 
-export function validateConfigWriteValue(rootSchema: any, key: string, value: unknown, pluginConfigs?: Record<string, unknown>): WriteResult {
+// Why a `theme.*` key that resolves to no schema node is refused — the scheme that is
+// not tuned, the old flat format, a key its surface does not draw; null for any other.
+function themeKeyRefusal(key: string): string | null {
+  if (/^theme\.unknown(?:\.|$)/.test(key)) {
+    return `config: ${key} — unknown is not a scheme you tune: it is what the host draws when the terminal never says its scheme; colours live under theme.dark and theme.light`;
+  }
+  const flat = /^theme\.(?!dark\b|light\b)[^.]+/.exec(key)?.[0];
+  if (flat) {
+    return `config: ${key} — ${flat} is the old format; colours live under theme.dark / theme.light — run \`flow-assist config migrate-theme\``;
+  }
+  const m = /^theme\.(?:dark|light)\.([^.]+)\.([^.]+)$/.exec(key);
+  if (m && m[1] === 'base') return `config: ${key} — ${m[2]} is not a base role`;
+  if (m && hostSurfaceKeys(m[1]!)) return `config: ${key} — ${m[2]} is not a key the ${m[1]} surface draws (a base role or one of its own keys)`;
+  return null;
+}
+
+// A refusal for a value that fails the schema somewhere inside it: the key and the value
+// that are wrong, not the type of the record that holds them.
+function nestedRefusal(key: string, value: unknown, issue: { path: PropertyKey[]; code: string; message: string; keys?: string[] }): string | null {
+  const unknownKey = issue.code === 'unrecognized_keys' ? issue.keys?.[0] : undefined;
+  if (!issue.path.length && unknownKey === undefined) return null;
+  const at = [key, ...issue.path.map(String)].join('.');
+  if (unknownKey !== undefined) {
+    return themeKeyRefusal(`${at}.${unknownKey}`) ?? `config: ${at}.${unknownKey} — not a key there`;
+  }
+  const bad = issue.path.reduce<unknown>((v, p) => (v && typeof v === 'object' ? (v as Record<PropertyKey, unknown>)[p] : undefined), value);
+  return `config: ${at} ${JSON.stringify(bad)} — ${issue.message}`;
+}
+
+// `surfaceKeys` answers which keys a plugin's surface draws (its manifest's `colors`),
+// so a `theme.<scheme>.<plugin>.<key>` it does not declare is refused; a surface it
+// cannot answer for is taken.
+export function validateConfigWriteValue(rootSchema: any, key: string, value: unknown, pluginConfigs?: Record<string, unknown>, surfaceKeys?: SurfaceKeys): WriteResult {
   const node = configSchemaAt(rootSchema, key, pluginConfigs);
   if (!node) {
     const plugin = /^plugins\.([^.]+)\./.exec(key)?.[1];
-    const flat = /^theme\.(?!dark\b|light\b)[^.]+/.exec(key)?.[0];
-    if (flat) {
-      return { ok: false, error: `config: ${key} — ${flat} is the old format; colours live under theme.dark / theme.light — run \`flow-assist config migrate-theme\`` };
-    }
+    const theme = key.startsWith('theme.') ? themeKeyRefusal(key) : null;
+    if (theme) return { ok: false, error: theme };
     return { ok: false, error: plugin && !pluginConfigs?.[plugin]
       ? `config: unknown key ${key} — the plugin «${plugin}» is not loaded or declares no settings`
       : `config: unknown key ${key}` };
   }
   const res = node.safeParse(value);
   if (!res.success) {
+    const nested = key === 'theme' || key.startsWith('theme.') ? nestedRefusal(key, value, res.error.issues[0]) : null;
+    if (nested) return { ok: false, error: nested };
     const want = describeSchema(node);
     // The one trap the two theme keys leave: `theme` is the person's own palette
     // record, and the appearance (`system`/`light`/`dark`) is `ui.theme`. Whoever typed
     // the first with a mode word meant the second — the refusal says where it lives.
     const hint = key === 'theme' ? ' — the appearance (system, light, dark) is `ui.theme`' : '';
     return { ok: false, error: `config: ${key} — expected ${want}, got ${JSON.stringify(value)}${hint}` };
+  }
+  if (key === 'theme' || key.startsWith('theme.')) {
+    const undrawn = undrawnThemeKey(key === 'theme' ? res.data : setDeep({}, key, res.data).theme, surfaceKeys);
+    if (undrawn) {
+      return { ok: false, error: `config: ${undrawn.path} — ${undrawn.key} is not a key the ${undrawn.surface} plugin draws (a base role or a key of its manifest's colors)` };
+    }
   }
   return { ok: true, value: res.data };
 }
@@ -852,11 +891,10 @@ export function saveConfigUnset(key: string, filePath: string = configLocalWrite
 // stderr and continues. Returns an empty array when the config looks usable.
 export function configWarnings(config: Record<string, unknown>): string[] {
   const out: string[] = [];
-  // A flat `theme.*` an older version wrote stays in the file for `config migrate-theme`; it is not a malformed value.
-  const theme = config.theme;
-  const checked = typeof theme === 'object' && theme !== null && !Array.isArray(theme)
-    ? { ...config, theme: Object.fromEntries(Object.entries(theme).filter(([k]) => k === 'dark' || k === 'light')) }
-    : config;
+  // `theme` is not checked here: what of a hand-edited palette the host cannot take is
+  // dropped and said in the start note (src/playback/theme.ts, `buildModels`), and an
+  // old-format key waits for `config migrate-theme` — neither keeps the app from starting.
+  const { theme: _theme, ...checked } = config;
   const check = hostConfigSchema.safeParse(checked);
   if (!check.success) {
     for (const issue of check.error.issues) {

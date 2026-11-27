@@ -7,6 +7,7 @@
 import { NAMED_COLORS } from '@flowtty/core';
 import { z } from 'zod';
 import { isRef, ROLES, SCHEMES, type Role, type Scheme } from './palette.js';
+import { CHAT_KEYS, HOST_PALETTE } from './palette-defaults.js';
 
 const NAMED: readonly string[] = NAMED_COLORS;
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -30,8 +31,40 @@ const colorValue = z.string().refine(isColorValue, { message: 'a colour (named, 
 
 const baseShape = Object.fromEntries(ROLES.map((role) => [role, colorValue.optional()])) as Record<Role, z.ZodOptional<typeof colorValue>>;
 
-// `base` names the 16 roles and nothing else; any other key is a surface.
-const schemeOverrides = z.object({ base: z.object(baseShape).strict().optional() }).catchall(z.record(z.string(), colorValue));
+// The surfaces the host draws itself, and the keys each takes: every role, plus its own
+// (the chat's `CHAT_KEYS`, the keycaps' keys of either scheme; the log has none).
+const HOST_SURFACES: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  [...new Set([...Object.keys(HOST_PALETTE.dark.surfaces), ...Object.keys(HOST_PALETTE.light.surfaces)])].map((name) => [
+    name,
+    new Set<string>([
+      ...ROLES,
+      ...(name === 'chat' ? CHAT_KEYS : []),
+      ...Object.keys(HOST_PALETTE.dark.surfaces[name] ?? {}),
+      ...Object.keys(HOST_PALETTE.light.surfaces[name] ?? {}),
+    ]),
+  ]),
+);
+
+/** The keys a surface draws, or null when they cannot be known (a plugin whose manifest cannot be read). */
+export type SurfaceKeys = (surface: string) => ReadonlySet<string> | null;
+
+/** The keys a host surface draws; null for a name that is no host surface. */
+export function hostSurfaceKeys(surface: string): ReadonlySet<string> | null {
+  return HOST_SURFACES.get(surface) ?? null;
+}
+
+/** The keys a plugin's surface draws: every role, plus each key its manifest's `colors` declares on either scheme. */
+export function paletteKeys(palette: { dark: Record<string, string>; light: Record<string, string> } | undefined): ReadonlySet<string> {
+  return new Set<string>([...ROLES, ...Object.keys(palette?.dark ?? {}), ...Object.keys(palette?.light ?? {})]);
+}
+
+// `base` names the 16 roles and nothing else; a host surface names its own keys; any
+// other key is a plugin's surface, whose keys its manifest knows (checked at the write,
+// `validateConfigWriteValue`, when the manifest can be read).
+const hostSurfaceShape = Object.fromEntries(
+  [...HOST_SURFACES].map(([name, keys]) => [name, z.object(Object.fromEntries([...keys].map((k) => [k, colorValue.optional()]))).strict().optional()]),
+);
+const schemeOverrides = z.object({ base: z.object(baseShape).strict().optional(), ...hostSurfaceShape }).catchall(z.record(z.string(), colorValue));
 
 /** `theme` as a write sees it: a scheme per key, nothing else. */
 export const themeSchema = z.object({ dark: schemeOverrides.optional(), light: schemeOverrides.optional() }).strict();
@@ -45,36 +78,65 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** A path of the person's theme that is not applied: its value is no colour the palette takes, or its key is none its surface draws. */
+export interface IgnoredPath {
+  path: string;
+  why: 'value' | 'key';
+}
+
 /** The overrides a hand-edited `theme` holds: bad values are dropped and listed as `theme.dark.chat.userBg`. */
-export function readThemeOverrides(theme: unknown): { overrides: Partial<Record<Scheme, Overrides>>; ignored: string[] } {
+export function readThemeOverrides(theme: unknown): { overrides: Partial<Record<Scheme, Overrides>>; ignored: IgnoredPath[] } {
   const overrides: Partial<Record<Scheme, Overrides>> = {};
-  const ignored: string[] = [];
-  if (!isRecord(theme)) return { overrides, ignored };
+  const ignored: IgnoredPath[] = [];
+  if (theme === undefined) return { overrides, ignored };
+  if (!isRecord(theme)) return { overrides, ignored: [{ path: 'theme', why: 'value' }] };
   for (const scheme of SCHEMES) {
     const node = theme[scheme];
     if (node === undefined) continue;
     if (!isRecord(node)) {
-      ignored.push(`theme.${scheme}`);
+      ignored.push({ path: `theme.${scheme}`, why: 'value' });
       continue;
     }
     const out: Overrides = {};
     for (const [surface, keys] of Object.entries(node)) {
       if (!isRecord(keys)) {
-        ignored.push(`theme.${scheme}.${surface}`);
+        ignored.push({ path: `theme.${scheme}.${surface}`, why: 'value' });
         continue;
       }
       const kept: Record<string, string> = {};
       for (const [key, value] of Object.entries(keys)) {
         const path = `theme.${scheme}.${surface}.${key}`;
-        const known = surface !== 'base' || (ROLES as readonly string[]).includes(key);
-        if (known && typeof value === 'string' && isColorValue(value)) kept[key] = value;
-        else ignored.push(path);
+        if (surface === 'base' && !(ROLES as readonly string[]).includes(key)) ignored.push({ path, why: 'key' });
+        else if (typeof value === 'string' && isColorValue(value)) kept[key] = value;
+        else ignored.push({ path, why: 'value' });
       }
       if (Object.keys(kept).length > 0) out[surface] = kept;
     }
     if (Object.keys(out).length > 0) overrides[scheme] = out;
   }
   return { overrides, ignored };
+}
+
+/**
+ * The first key of a `theme` write that its surface does not draw — `theme.dark.chat.usrBg`
+ * — or null. A host surface's keys are its own; a plugin's are what `keys` says, and a
+ * surface `keys` cannot answer for is taken (the start says it if nothing draws it).
+ */
+export function undrawnThemeKey(theme: unknown, keys: SurfaceKeys = () => null): { path: string; surface: string; key: string } | null {
+  if (!isRecord(theme)) return null;
+  for (const scheme of SCHEMES) {
+    const node = theme[scheme];
+    if (!isRecord(node)) continue;
+    for (const [surface, record] of Object.entries(node)) {
+      if (surface === 'base' || !isRecord(record)) continue;
+      const known = hostSurfaceKeys(surface) ?? keys(surface);
+      if (known === null) continue;
+      for (const key of Object.keys(record)) {
+        if (!known.has(key)) return { path: `theme.${scheme}.${surface}.${key}`, surface, key };
+      }
+    }
+  }
+  return null;
 }
 
 /** Config paths an older version wrote: each top-level `theme.*` that is not a scheme, and each `plugins.<name>.colors`. */

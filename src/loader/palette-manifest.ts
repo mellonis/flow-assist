@@ -10,8 +10,11 @@
 //
 // What the host cannot take is dropped and said in `notes`; the plugin loads without it.
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { checkTree } from '../remote/frame.js';
-import { isColorValue } from '../playback/palette-config.js';
+import { isColorValue, paletteKeys, type SurfaceKeys } from '../playback/palette-config.js';
+import { readPluginManifest } from './compat.js';
 
 export interface ManifestPalette {
   palette?: { dark: Record<string, string>; light: Record<string, string> };
@@ -61,4 +64,22 @@ export function readManifestPalette(manifest: Record<string, unknown>): Manifest
     else out.preview = preview;
   }
   return out;
+}
+
+/**
+ * Which keys each enabled plugin's surface draws, read from its manifest.json in
+ * `enabledDir` — no plugin code runs. A plugin that is not among `enabled`, not there,
+ * or whose manifest cannot be read answers null: nothing to check a key against.
+ */
+export function manifestSurfaceKeys(enabledDir: string, enabled: readonly string[]): SurfaceKeys {
+  const cache = new Map<string, ReadonlySet<string> | null>();
+  return (surface) => {
+    if (!enabled.includes(surface)) return null;
+    if (!cache.has(surface)) {
+      const dir = join(enabledDir, surface);
+      const manifest = existsSync(dir) ? readPluginManifest(dir) : null;
+      cache.set(surface, manifest === null ? null : paletteKeys(readManifestPalette(manifest).palette));
+    }
+    return cache.get(surface) ?? null;
+  };
 }

@@ -26,6 +26,7 @@ import {
 } from './config/load.js';
 import { parseConfigArgs } from './config/commands.js';
 import { droppedReason, migrateTheme } from './playback/palette-migrate.js';
+import { manifestSurfaceKeys } from './loader/palette-manifest.js';
 import { createPluginRepo } from './loader/repo.js';
 import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
@@ -190,7 +191,10 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
     // The one path every `config set` takes (src/config/load.ts). A value is only
     // echoed once it is really on disk: printing it before a failed write would read
     // as "saved".
-    const res = setConfigValue(config, key, parseValue(value), { scope: 'saved', pluginConfigs: schemas });
+    // A key of a plugin's palette is checked against what its manifest declares — read
+    // from the manifest, no plugin code run.
+    const surfaceKeys = (key === 'theme' || key.startsWith('theme.')) && repo ? manifestSurfaceKeys(enabledDir, await repo.enabledPlugins()) : undefined;
+    const res = setConfigValue(config, key, parseValue(value), { scope: 'saved', pluginConfigs: schemas, surfaceKeys });
     if (!res.ok) {
       io.out(res.error);
       process.exitCode = 1;

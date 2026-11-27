@@ -44,6 +44,12 @@ assistant may set or save".
   `mdQuote` — `pulse`, `thought`, `plan`, and the context bar's segments
   (`ctxInstructions`, `ctxTools`, `ctxMemory`, `ctxPlan`, `ctxSummary`, `ctxScreen`,
   `ctxMessages`, `ctxImages`). A plugin's keys live at `theme.<scheme>.<plugin>.<key>`.
+  A surface takes the 16 roles and its own keys — the chat's above, the keycaps' `bg`
+  and `text`, a plugin's the keys its manifest's `colors` declares — and `config set`
+  refuses any other key, naming it; a plugin whose manifest cannot be read (one not
+  installed) is not checked. A hand-edited theme never keeps the app from starting: a
+  value that is no colour, a key its surface does not draw, and a surface nothing draws
+  are left out and said once at start.
   An older config wrote the palette as flat `theme.*` keys, `theme.modals.*` and
   `plugins.<name>.colors`; those are no longer applied, and the start says so.
   `flow-assist config migrate-theme` moves them under `theme.dark` (what differs from
