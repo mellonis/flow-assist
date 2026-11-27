@@ -24,11 +24,6 @@ export type PluginShape = {
   viewRenderers?: Record<string, (data: unknown, ctx: unknown) => unknown>;
   surface?: string;
   modals?: string[];
-  colors?: Record<string, string>;
-  // Per modal the plugin draws, what its palette differs in from the base roles
-  // (`{ relation: { border: 'blue' } }`); resolved into `theme.<modal>`, and
-  // overridable by the person at `theme.<scheme>.<modal>`.
-  modalColors?: Record<string, Record<string, string>>;
   configSchema?: unknown;
   components?: Record<string, (api: unknown) => unknown>;
   tools?: unknown[];
@@ -127,8 +122,11 @@ export interface Plugin {
   // `<plugin>:<kind>` by the host (docs/plugins.md, "Showing what a tool does").
   viewRenderers?: Record<string, (data: unknown, ctx: unknown) => unknown>;
   surface?: string;
-  colors?: Record<string, string>;
-  modalColors?: Record<string, Record<string, string>>;
+  // The defaults of the plugin's surface per scheme and its specimen, set by the loader
+  // from the plugin's manifest.json (`colors`, `preview` — ./palette-manifest.ts); a
+  // plugin's code does not set them. The surface resolves into `theme.<plugin>`.
+  palette?: { dark: Record<string, string>; light: Record<string, string> };
+  preview?: unknown;
   configSchema?: unknown;
   components?: Record<string, (api: unknown) => unknown>;
   tools?: unknown[];

@@ -3,7 +3,7 @@
 // are requests the plugin makes, what changes by itself is a notification the host
 // sends. The number is the host API's: a plugin built for one host API speaks that
 // host's protocol, and a change a plugin would break on bumps both.
-export const PROTOCOL_HOST_API = 2;
+export const PROTOCOL_HOST_API = 3;
 
 // ─── The tree ─────────────────────────────────────────────────────────────────
 // A node is `[type, props, ...children]`: `type` a component name from the host's
@@ -50,8 +50,6 @@ export interface HelloResult {
   tools?: ToolGroupDecl[];
   aiTools?: ToolDecl[];
   configSchema?: Record<string, unknown>; // JSON Schema
-  colors?: Record<string, string>;
-  modalColors?: Record<string, Record<string, string>>;
   usesCache?: boolean;
 }
 

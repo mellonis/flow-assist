@@ -36,7 +36,7 @@ test('a theme still in the old format is said once at start, and not applied', a
 });
 
 test('a plugin that joins after start gets its surface on the same theme object', async () => {
-  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'], colors: { lane: '${highlightBg}' } });
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { colors: { lane: '${base.highlight}' } });
   fake.holdHello();
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { theme: { dark: { fake: { mark: 'red' } } } }, { late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
   const held = ui.config.theme as Record<string, Record<string, string>>;

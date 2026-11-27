@@ -15,7 +15,7 @@ test('a request is answered; a notification is heard; an unknown method is -3260
   plugin.onRequest('hello', (params) => ({ hostApi: (params as { hostApi: number }).hostApi, name: 'fake' }));
   const heard: unknown[] = [];
   plugin.onNotify('key', (p) => heard.push(p));
-  expect(await host.request('hello', { hostApi: 2 })).toEqual({ hostApi: 2, name: 'fake' });
+  expect(await host.request('hello', { hostApi: 3 })).toEqual({ hostApi: 3, name: 'fake' });
   host.notify('key', { name: 'a' });
   await new Promise((r) => setTimeout(r, 0));
   expect(heard).toEqual([{ name: 'a' }]);

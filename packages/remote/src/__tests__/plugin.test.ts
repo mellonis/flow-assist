@@ -25,7 +25,7 @@ test('runPlugin answers hello with the def, draws init\'s frame, updates on even
     tools: { count: (_a, m) => `n is ${m.n}` },
     commands: { reset: () => ({ n: 0 }) },
   }, pluginIo);
-  expect(await host.request('hello', { hostApi: 2, config: {} })).toMatchObject({ hostApi: 2, name: 'counter', keys: { up: 'k' }, commands: [{ name: 'reset' }], tools: [{ id: 'counter', tools: [{ function: { name: 'count' } }] }] });
+  expect(await host.request('hello', { hostApi: 3, config: {} })).toMatchObject({ hostApi: 3, name: 'counter', keys: { up: 'k' }, commands: [{ name: 'reset' }], tools: [{ id: 'counter', tools: [{ function: { name: 'count' } }] }] });
   await tick();
   expect(frames.at(-1)).toMatchObject({ surface: ['Text', {}, 'n=0'] });
   host.notify('key', { name: 'k', id: 'k', action: 'up' });
@@ -51,7 +51,7 @@ test('an update may be async and call host services; a throwing tool is an error
     view: (m) => ({ surface: ['Text', {}, m.ok ? 'in' : 'out'] }),
     tools: { fail: () => { throw new Error('no'); } },
   }, pluginIo);
-  await host.request('hello', { hostApi: 2, config: {} });
+  await host.request('hello', { hostApi: 3, config: {} });
   host.notify('submitted', { id: 'pass', value: 'x' });
   await tick(); await tick();
   expect(shown).toEqual(['Signed in']);
@@ -91,7 +91,7 @@ test('shutdown waits, bounded, for an update already in flight to finish its own
     },
     view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
   }, pluginIo);
-  await host.request('hello', { hostApi: 2, config: {} });
+  await host.request('hello', { hostApi: 3, config: {} });
   host.notify('afterWrite'); // starts the update; nothing else is awaiting a host reply
   await tick(); // the update is now mid-flight, awaiting its own 150 ms timer
   await host.request('shutdown'); // answered at once — it does not wait on the drain
@@ -115,7 +115,7 @@ test('over stdio, an update in flight gets the same bounded chance to finish whe
     },
     view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
   }, stdioIo(input as unknown as NodeJS.ReadableStream, output as unknown as NodeJS.WritableStream));
-  emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { hostApi: 2, config: {} } })}\n`);
+  emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { hostApi: 3, config: {} } })}\n`);
   await tick();
   emit('data', `${JSON.stringify({ jsonrpc: '2.0', method: 'afterWrite' })}\n`);
   await tick(); // the update is mid-flight
@@ -145,7 +145,7 @@ test('a throwing update is caught: the model stays, stderr gets one line, no fra
     view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
   }, pluginIo);
   try {
-    await host.request('hello', { hostApi: 2, config: {} });
+    await host.request('hello', { hostApi: 3, config: {} });
     await tick();
     const framesAfterHello = frames.length;
     host.notify('afterWrite'); // the failing update
@@ -178,7 +178,7 @@ test('a command whose handler throws answers an error, and the connection keeps 
     commands: { boom: () => { throw new Error('cmd nope'); } },
   }, pluginIo);
   try {
-    await host.request('hello', { hostApi: 2, config: {} });
+    await host.request('hello', { hostApi: 3, config: {} });
     await expect(host.request('command.run', { name: 'boom', arg: '' })).rejects.toThrow('cmd nope');
     expect(stderr.some((l) => l.includes('[flaky-cmd] update failed: cmd nope'))).toBe(true);
     host.notify('afterWrite'); // the connection still serves after the failed command
@@ -210,7 +210,7 @@ test('a throwing view fails the whole step, not just the update: the model stays
     },
   }, pluginIo);
   try {
-    await host.request('hello', { hostApi: 2, config: {} });
+    await host.request('hello', { hostApi: 3, config: {} });
     await tick();
     const framesAfterHello = frames.length;
     host.notify('afterWrite'); // update succeeds (n: 0 -> 1), but view throws
@@ -244,7 +244,7 @@ test('a view that throws on the first frame or on host.redraw() is caught the sa
       update: (e, m, h) => { redraw = h.redraw; return e.type === 'key' ? { n: m.n + 1 } : m; },
       view: (m) => { if (broken) throw new Error('first draw'); return { surface: ['Text', {}, `n=${m.n}`] }; },
     }, pluginIo);
-    await host.request('hello', { hostApi: 2, config: {} });
+    await host.request('hello', { hostApi: 3, config: {} });
     await tick();
     expect(frames).toEqual([]);
     expect(stderr.filter((l) => l.includes('[shaky] update failed: first draw'))).toHaveLength(1);

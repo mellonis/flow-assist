@@ -34,7 +34,7 @@ async function handleConnection(io: PeerIo): Promise<void> {
     peer.onRequest('hello', () => {
       me = ++shared;
       setTimeout(() => peer.notify('frame', ['Text', {}, `client ${me} shared ${shared}`]), 0);
-      return { hostApi: 2, name: 'fake' };
+      return { hostApi: 3, name: 'fake' };
     });
     peer.onNotify('key', () => { shared++; });
     peer.onRequest('tool.run', () => ({ result: `shared=${shared}` }));
@@ -50,8 +50,8 @@ test('two clients get their own hello and frames; what the process holds is seen
     const a = await client(p); const b = await client(p);
     const aFrames: unknown[] = []; const bFrames: unknown[] = [];
     a.peer.onNotify('frame', (f) => aFrames.push(f)); b.peer.onNotify('frame', (f) => bFrames.push(f));
-    expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 })).toMatchObject({ name: 'fake' });
-    expect(await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 60_000 })).toMatchObject({ name: 'fake' });
+    expect(await a.peer.request('hello', { hostApi: 3, config: {}, idleMs: 50 })).toMatchObject({ name: 'fake' });
+    expect(await b.peer.request('hello', { hostApi: 3, config: {}, idleMs: 60_000 })).toMatchObject({ name: 'fake' });
     await wait(20);
     expect(JSON.stringify(aFrames.at(-1))).toContain('client 1');
     expect(JSON.stringify(bFrames.at(-1))).toContain('client 2');
@@ -75,7 +75,7 @@ test('a stale socket file is replaced, and ending leaves no signal listener behi
     const listening = new Promise<void>((r) => { serveConnections(handleConnection, p, { onListening: r, defaultIdleMs: 30 }); });
     await listening;
     const c = await client(p);
-    expect(await c.peer.request('hello', { hostApi: 2, config: {} })).toMatchObject({ name: 'fake' });
+    expect(await c.peer.request('hello', { hostApi: 3, config: {} })).toMatchObject({ name: 'fake' });
     c.end();
     await wait(100);
     expect(process.listenerCount('SIGTERM')).toBe(before.term);
@@ -102,7 +102,7 @@ test('a live server keeps its socket: a second serveConnections on the same path
     await listening;
     await expect(serveConnections(handleConnection, p, { defaultIdleMs: 50 })).rejects.toThrow(`${p} is already served`);
     const c = await client(p);
-    expect(await c.peer.request('hello', { hostApi: 2, config: {} })).toMatchObject({ name: 'fake' });
+    expect(await c.peer.request('hello', { hostApi: 3, config: {} })).toMatchObject({ name: 'fake' });
     c.end();
     await wait(100);
     await expect(Bun.connect({ unix: p, socket: { data() {}, open() {}, close() {}, error() {} } })).rejects.toThrow();
@@ -121,8 +121,8 @@ test('a stop with clients still attached ends cleanly and leaves no dangling idl
     const finished = serveConnections(handleConnection, p, { onListening: () => resolveListening(), defaultIdleMs: 60_000, signal: stop.signal });
     await listening;
     const a = await client(p); const b = await client(p);
-    await a.peer.request('hello', { hostApi: 2, config: {} });
-    await b.peer.request('hello', { hostApi: 2, config: {} });
+    await a.peer.request('hello', { hostApi: 3, config: {} });
+    await b.peer.request('hello', { hostApi: 3, config: {} });
     const callsBefore = setTimeoutSpy.mock.calls.length;
     // The stop seam runs the same `finish` a signal does, without signalling this test
     // process (a real SIGTERM would re-raise and end it); the signal path itself is
@@ -159,7 +159,7 @@ test('a --serve plugin that holds a handle of its own still exits once its idle 
   try {
     await listeningOn(p);
     const c = await client(p);
-    await c.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 });
+    await c.peer.request('hello', { hostApi: 3, config: {}, idleMs: 50 });
     c.end();
     expect(await exitOf(proc)).toEqual({ r: 'exited', code: 0, signal: null });
     expect(fs.existsSync(p)).toBe(false);
@@ -191,7 +191,7 @@ test("a client that drops without shutdown ends its servePlugin, so the server d
       void serveConnections((io) => servePlugin({ hello: { name: 'drop' }, init: () => ({}), update: (_e, m) => m, view: () => ({ surface: null }) }, io).then(() => { ended++; }), p, { onListening: r, signal: stop.signal });
     });
     const c = await client(p);
-    expect(await c.peer.request('hello', { hostApi: 2, config: {} })).toMatchObject({ name: 'drop' });
+    expect(await c.peer.request('hello', { hostApi: 3, config: {} })).toMatchObject({ name: 'drop' });
     c.end(); // gone, no `shutdown`
     for (let i = 0; i < 200 && ended === 0; i++) await Bun.sleep(10);
     expect(ended).toBe(1);

@@ -495,8 +495,6 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     tools: toolGroups,
     aiTools,
     viewRenderers: viewRenderers as Plugin['viewRenderers'],
-    colors: registration.colors,
-    modalColors: registration.modalColors,
     usesCache: registration.usesCache ?? false,
     configSchema: registration.schema,
     components,

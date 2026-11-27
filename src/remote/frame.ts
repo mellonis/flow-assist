@@ -19,7 +19,10 @@ export function normalizeNode(n: unknown): { type: string; props: Props; childre
   return { type, props: hasProps ? (second as Props) : {}, children };
 }
 
-function checkTree(t: unknown, depth: number, where: string): string | null {
+// Why a tree is not one the renderer can draw — a node at every level, no deeper than
+// the cap — named after `where`; null for a tree it can draw, and for no tree at all. A
+// frame's surface and modals are checked with it, and so is a manifest's `preview`.
+export function checkTree(t: unknown, depth: number, where: string): string | null {
   if (t === null || t === undefined) return null;
   if (depth > FRAME_MAX_DEPTH) return `${where} is more than ${FRAME_MAX_DEPTH} deep`;
   const node = normalizeNode(t);

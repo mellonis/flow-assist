@@ -70,9 +70,10 @@ plugin's `main`: it answers `hello`, folds every event into the model through
 
 - **`hello`** — the plugin's registration, sent back as `hello`'s answer: `name`,
   `keys` (an action and its default binding), `entry` (the actions that lead in from
-  the host's start screen), `commands`, `tools`, `aiTools`, `configSchema`, `colors`,
-  `modalColors`, `usesCache` — the same shape a plugin in the host's own process
-  declares (docs/plugins.md). `hostApi` is filled in for you
+  the host's start screen), `commands`, `tools`, `aiTools`, `configSchema`,
+  `usesCache` — the same shape a plugin in the host's own process declares
+  (docs/plugins.md). Its palette is not here: it is the `colors` of its manifest.json,
+  as for any plugin. `hostApi` is filled in for you
   (`PROTOCOL_HOST_API`); `commands` and `tools` are built from the maps below unless
   given here directly.
 - **`init(params: HelloParams): Model`** — the model, built once, from the host's own
@@ -140,7 +141,7 @@ A remote plugin's `manifest.json` names the process instead of an entry module �
 or `connect` for a shared server (below) — and is enabled the same way any plugin is:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 3, "flowtty": ">=1.0.0-alpha.42 <1.0.0-alpha.43",
   "run": ["bun", "src/index.ts"] }
 ```
 

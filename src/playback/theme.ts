@@ -17,56 +17,10 @@ export type ColorScheme = 'light' | 'dark' | 'unknown';
 /** What the renderers read: the base roles and, per surface, every role plus its own keys. */
 export type ResolvedTheme = { base: Record<Role, string> } & Record<string, Record<string, string>>;
 
-/** A plugin as the palette sees it: its name and the palette its manifest declares. */
+/** A plugin as the palette sees it: its name and the palette its manifest declares, per scheme. */
 export interface PalettePlugin {
   name: string;
   palette?: { dark: Record<string, string>; light: Record<string, string> };
-}
-
-// The palette a plugin's shape carries in code: `colors` for the surface named after
-// the plugin, `modalColors` per modal it draws.
-interface ShapeColors {
-  colors?: Record<string, string>;
-  modalColors?: Record<string, Record<string, string>>;
-}
-
-// A shape's `${token}` names the theme's tokens; each one means a base role.
-const SHAPE_TOKENS: Record<string, Role> = {
-  panelBg: 'panelBg',
-  highlightBg: 'highlight',
-  accentBg: 'highlightStrong',
-  highlightText: 'highlightText',
-  selected: 'selected',
-  error: 'danger',
-  success: 'ok',
-};
-
-function fromShapeValue(value: string): string {
-  return value.replace(/\$\{([^}]+)\}/g, (ref, token: string) => {
-    const role = SHAPE_TOKENS[token];
-    return role === undefined ? ref : `\${base.${role}}`;
-  });
-}
-
-// A plugin that declares no manifest palette is drawn from its shape's colors: the
-// surface named after the plugin takes `colors`, and each modal in `modalColors` is a
-// surface of its own — the first plugin to name a modal keeps it, and a host surface
-// is never replaced. The same values stand on both schemes.
-function shapeSurfaces(plugins: readonly (PalettePlugin & ShapeColors)[], taken: ReadonlySet<string>): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
-  const add = (name: string, keys: Record<string, string>) => {
-    out[name] = { ...out[name], ...Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, fromShapeValue(v)])) };
-  };
-  for (const p of plugins) {
-    if (p.palette !== undefined) continue;
-    for (const [modal, keys] of Object.entries(p.modalColors ?? {})) {
-      if (!taken.has(modal) && out[modal] === undefined) add(modal, keys);
-    }
-  }
-  for (const p of plugins) {
-    if (p.palette === undefined && p.colors !== undefined && !taken.has(p.name)) add(p.name, p.colors);
-  }
-  return out;
 }
 
 /** Both schemes' models with the person's overrides laid on, and the defaults they were laid on. */
@@ -80,10 +34,9 @@ export interface ThemeModels {
  * name (never over a host surface), the person's overrides laid on. `defaults` is the
  * same before the overrides; `ignored` lists each override path the theme does not take.
  */
-export function buildModels(theme: unknown, plugins: readonly (PalettePlugin & ShapeColors)[]): ThemeModels & { ignored: string[] } {
+export function buildModels(theme: unknown, plugins: readonly PalettePlugin[]): ThemeModels & { ignored: string[] } {
   const { overrides, ignored } = readThemeOverrides(theme);
   const taken = new Set(['base', ...Object.keys(HOST_PALETTE.dark.surfaces), ...Object.keys(HOST_PALETTE.light.surfaces)]);
-  const bridged = shapeSurfaces(plugins, taken);
   const models = {} as PaletteModel;
   const defaultsOut = {} as PaletteModel;
   for (const scheme of SCHEMES) {
@@ -92,7 +45,6 @@ export function buildModels(theme: unknown, plugins: readonly (PalettePlugin & S
     for (const p of plugins) {
       if (p.palette !== undefined && !taken.has(p.name)) surfaces[p.name] = { ...p.palette[scheme] };
     }
-    for (const [name, keys] of Object.entries(bridged)) surfaces[name] ??= keys;
     defaultsOut[scheme] = { base: defaults.base, surfaces };
     models[scheme] = layer(defaultsOut[scheme], overrides[scheme as Scheme] ?? {});
   }

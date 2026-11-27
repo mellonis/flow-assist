@@ -17,7 +17,7 @@ const enabled = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-late-exit-'));
 const helpers = path.resolve(import.meta.dir);
 fs.mkdirSync(path.join(enabled, 'fake'));
 // `run` resolves against the plugin's own directory: a path back to the fake.
-fs.writeFileSync(path.join(enabled, 'fake', 'manifest.json'), JSON.stringify({ name: 'fake', hostApi: 2, run: ['bun', path.join(helpers, 'remote-fake-plugin.ts')] }));
+fs.writeFileSync(path.join(enabled, 'fake', 'manifest.json'), JSON.stringify({ name: 'fake', hostApi: 3, run: ['bun', path.join(helpers, 'remote-fake-plugin.ts')] }));
 const late = createLatePlugins();
 const repo = { enabledPlugins: async () => ['fake'], list: async () => [] } as never;
 await loadPlugins({ config: {}, repo, enabledDir: enabled, late });

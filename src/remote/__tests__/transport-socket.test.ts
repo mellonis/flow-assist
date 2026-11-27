@@ -37,10 +37,10 @@ test('the first host starts the server, the second connects to it; frames do not
   try {
     await a.t.start();
     const pid1 = fs.readFileSync(pidfile, 'utf8');
-    expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
+    expect(await a.peer.request('hello', { hostApi: 3, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
     await b.t.start();
     expect(fs.readFileSync(pidfile, 'utf8')).toBe(pid1); // no second process
-    expect(await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
+    expect(await b.peer.request('hello', { hostApi: 3, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
     const af: unknown[] = []; const bf: unknown[] = [];
     a.peer.onNotify('frame', (f) => af.push(f)); b.peer.onNotify('frame', (f) => bf.push(f));
     a.peer.notify('key', { name: 'b', id: 'b', action: 'bump' });
@@ -66,7 +66,7 @@ test('a dead socket file is replaced by a fresh server', async () => {
   const a = host(sock, pidfile);
   try {
     await a.t.start();
-    expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000)).toMatchObject({ name: 'fake' });
+    expect(await a.peer.request('hello', { hostApi: 3, config: {}, idleMs: 50 }, 5_000)).toMatchObject({ name: 'fake' });
     await a.t.close(100);
     await serverGone(pidfile);
   } finally {
@@ -99,7 +99,7 @@ test('close() fires onClose once, host-initiated; a second close() does not fire
   const a = host(sock, pidfile);
   try {
     await a.t.start();
-    await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000);
+    await a.peer.request('hello', { hostApi: 3, config: {}, idleMs: 50 }, 5_000);
     const closes: unknown[] = [];
     a.t.onClose((w) => closes.push(w));
     await a.t.close(0);
@@ -155,7 +155,7 @@ test("a server's stderr goes to its log file beside the socket, so it outlives t
   try {
     const b = host(sock, pidfile);
     await b.t.start();
-    await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000);
+    await b.peer.request('hello', { hostApi: 3, config: {}, idleMs: 100 }, 5_000);
     b.peer.notify('key', { name: 'x', id: 'x' });
     await until(() => fs.existsSync(`${sock}.log`) && fs.readFileSync(`${sock}.log`, 'utf8').includes('stderr on key x'), 'the line in the log file');
     expect(fs.statSync(`${sock}.log`).mode & 0o777).toBe(0o600);
@@ -196,7 +196,7 @@ test('a server that starts listening between the probe and the lock is connected
     void serveConnections(async (io) => {
       const peer = createPeer(io);
       await new Promise<void>((leave) => {
-        peer.onRequest('hello', () => ({ hostApi: 2, name: 'in-process' }));
+        peer.onRequest('hello', () => ({ hostApi: 3, name: 'in-process' }));
         io.onClose?.(leave);
       });
     }, sock, { onListening: r, signal: stop.signal });
@@ -210,7 +210,7 @@ test('a server that starts listening between the probe and the lock is connected
   const peer = createPeer({ send: (l) => t.send(l), onLine: (f) => t.onLine(f) });
   try {
     await t.start();
-    expect(await peer.request('hello', { hostApi: 2, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
+    expect(await peer.request('hello', { hostApi: 3, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
     expect(log.some((l) => l.includes('started'))).toBe(false);
     expect(fs.existsSync(pidfile)).toBe(false);
     expect(fs.existsSync(`${sock}.lock`)).toBe(false);
@@ -243,12 +243,12 @@ test('a host that finds the start lock held waits for the server the holder star
     await new Promise<void>((r) => {
       void serveConnections(async (io) => {
         const p = createPeer(io);
-        await new Promise<void>((leave) => { p.onRequest('hello', () => ({ hostApi: 2, name: 'in-process' })); io.onClose?.(leave); });
+        await new Promise<void>((leave) => { p.onRequest('hello', () => ({ hostApi: 3, name: 'in-process' })); io.onClose?.(leave); });
       }, sock, { onListening: r, signal: stop.signal });
     });
     fs.rmSync(`${sock}.lock`);
     await starting;
-    expect(await peer.request('hello', { hostApi: 2, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
+    expect(await peer.request('hello', { hostApi: 3, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
     expect(log.some((l) => l.includes('started'))).toBe(false);
     expect(fs.existsSync(pidfile)).toBe(false);
   } finally {

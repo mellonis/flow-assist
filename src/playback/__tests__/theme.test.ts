@@ -59,30 +59,6 @@ test('a theme still in the old format applies nothing of it', () => {
   expect(out.modals).toBeUndefined();
 });
 
-test("a plugin that declares no manifest palette is drawn from its shape's colors", () => {
-  const boards = {
-    name: 'boards',
-    colors: { lane: '${highlightBg}', pick: '${accentBg}' },
-    modalColors: { move: { border: 'blue' }, drop: { border: '${error}', selected: '${success}' }, chat: { userBg: '#ffffff' } },
-  };
-  const other = { name: 'other', modalColors: { move: { border: 'red' } } };
-  for (const scheme of ['dark', 'light'] as const) {
-    const out = resolved({}, scheme, [boards, other]);
-    const base = HOST_PALETTE[scheme].base;
-    expect(out.boards!.lane).toBe(base.highlight);
-    expect(out.boards!.pick).toBe(base.highlightStrong);
-    // The first plugin to name a modal keeps it; the rest of its palette is the base.
-    expect(out.move!.border).toBe('blue');
-    expect(out.move!.bg).toBe(base.bg);
-    expect(out.drop!.border).toBe(base.danger);
-    expect(out.drop!.selected).toBe(base.ok);
-    // A host surface is never restyled by a plugin's palette.
-    expect(out.chat!.userBg).toBe(HOST_PALETTE[scheme].surfaces.chat!.userBg);
-  }
-  // The person's override for the modal is laid on its scheme.
-  expect(resolved({ dark: { drop: { border: '${base.warn}' } } }, 'dark', [boards]).drop!.border).toBe('yellow');
-});
-
 test('an unknown terminal gets the resolved unknown palette, plugin surfaces resolved against it', () => {
   const plugins = [{ name: 'board', palette: { dark: { lane: '${base.highlight}', mark: '#123456' }, light: { lane: '${base.highlight}', mark: '#123456' } } }];
   const out = resolved({ dark: { base: { bg: '#010203' } } }, 'unknown', plugins);
@@ -186,7 +162,4 @@ test("an unknown terminal takes no tuned plugin colour: the person's tuning stay
   const theme = { dark: { board: { x: 'red' } } };
   expect(resolved(theme, 'dark', plugins).board!.x).toBe('red');
   expect(resolved(theme, 'unknown', plugins).board!.x).toBe('#123456');
-  // A bridged shape surface is the same: its default, not the person's tuning.
-  const shaped = [{ name: 'lanes', colors: { y: '${highlightBg}' } }];
-  expect(resolved({ dark: { lanes: { y: 'red' } } }, 'unknown', shaped).lanes!.y).toBe('default');
 });

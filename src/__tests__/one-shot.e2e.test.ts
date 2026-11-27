@@ -22,7 +22,7 @@ const toolResults = (m: ScriptedModel) => (m.requests.at(-1)!.messages as Sent).
 function fakeShellPlugin(enabledDir: string, ranFile: string) {
   const dir = path.join(enabledDir, 'fakesh');
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ name: 'fakesh', version: '0.1.0', hostApi: 2, tools: ['fakesh'] }));
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ name: 'fakesh', version: '0.1.0', hostApi: 3, tools: ['fakesh'] }));
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fakesh', version: '0.1.0', type: 'module', main: './index.mjs' }));
   fs.writeFileSync(path.join(dir, 'index.mjs'), `import fs from 'node:fs';
 export default function ({ make }) {

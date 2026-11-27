@@ -40,6 +40,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
+import { readManifestPalette } from './palette-manifest.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
 import { skipLine, type LatePlugins } from './late.js';
@@ -193,7 +194,7 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
     const transport = (remoteTransport ?? transportFor)(manifest, at, { log: say });
     const remote = await remotePlugin({ manifest, transport, config, make, log: say });
     remote.dir = at;
-    return remote;
+    return withManifestPalette(remote, name, manifest, say);
   }
   // Import the entry FILE (not the symlinked directory), so the compiled binary and the
   // runtime resolve plugins the same way — see resolvePluginEntry.
@@ -209,6 +210,17 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
   // unless the shape says it itself.
   plugin.description ??= manifestDescription(at);
   plugin.dir = at;
+  return withManifestPalette(plugin, name, manifest ?? {}, log ?? ((line) => console.warn(line)));
+}
+
+// The palette and the preview a plugin's manifest declares, laid on the loaded plugin
+// whatever its code said; what the manifest holds that the host cannot take is said
+// on `say`, and the plugin loads without it.
+function withManifestPalette(plugin: Plugin, name: string, manifest: Record<string, unknown>, say: (line: string) => void): Plugin {
+  const { palette, preview, notes } = readManifestPalette(manifest);
+  plugin.palette = palette;
+  plugin.preview = preview;
+  for (const line of notes) say(`[plugins] ${name} ${line}`);
   return plugin;
 }
 

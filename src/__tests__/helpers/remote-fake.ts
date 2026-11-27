@@ -35,7 +35,7 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
     onRestart: (f) => { restarts.push(f); },
   };
   const peer = createPeer({ send: (l) => queueMicrotask(() => toHost.forEach((f) => f(l))), onLine: (f) => { toPlugin.push(f); } });
-  const full: HelloResult = { hostApi: 2, ...hello };
+  const full: HelloResult = { hostApi: 3, ...hello };
   let held: { answer: () => void; refuse: (e: Error) => void } | null = null;
   let holding = false;
   let hellos = 0;
@@ -49,7 +49,7 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
   for (const m of ['key', 'changed', 'submitted', 'cancelled', 'toggled', 'resize', 'focus', 'blur', 'visible', 'store', 'cache.flushed', 'afterWrite']) peer.onNotify(m, (p) => events.push([m, p]));
   return {
     transport, peer, events, hello: full, hellos: () => hellos,
-    manifest: { name: 'fake', hostApi: 2, run: ['fake'], ...manifest },
+    manifest: { name: 'fake', hostApi: 3, run: ['fake'], ...manifest },
     frame: (f) => peer.notify('frame', f),
     crash: () => closes.forEach((f) => f({ code: 1 })),
     restart: () => restarts.forEach((f) => f()),

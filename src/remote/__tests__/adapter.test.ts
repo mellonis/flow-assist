@@ -23,25 +23,25 @@ function fakeTransport(): { transport: RestartingTransport; plugin: Peer; closeF
   const plugin = createPeer({ send: (l) => queueMicrotask(() => toHost.forEach((f) => f(l))), onLine: (f) => { toPlugin.push(f); } });
   return { transport, plugin, closeFromPlugin: () => closes.forEach((f) => f({ code: 1 })), restart: () => restarts.forEach((f) => f()), get started() { return state.started; }, closedWith };
 }
-const manifest = { name: 'fake', hostApi: 2, run: ['fake'] };
-const hello = (plugin: Peer, extra: Record<string, unknown> = {}) => plugin.onRequest('hello', () => ({ hostApi: 2, keys: { open: 'o' }, entry: ['open'], commands: [{ name: 'lesson', usage: 'lesson <n>', values: ['1', '2'] }], tools: [{ id: 'tutor', tools: [{ type: 'function', function: { name: 'check', description: 'Check', parameters: { type: 'object', properties: {} } } }] }], configSchema: { type: 'object', properties: { lessons: { type: 'string' } } }, ...extra }));
+const manifest = { name: 'fake', hostApi: 3, run: ['fake'] };
+const hello = (plugin: Peer, extra: Record<string, unknown> = {}) => plugin.onRequest('hello', () => ({ hostApi: 3, keys: { open: 'o' }, entry: ['open'], commands: [{ name: 'lesson', usage: 'lesson <n>', values: ['1', '2'] }], tools: [{ id: 'tutor', tools: [{ type: 'function', function: { name: 'check', description: 'Check', parameters: { type: 'object', properties: {} } } }] }], configSchema: { type: 'object', properties: { lessons: { type: 'string' } } }, ...extra }));
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
 test('hello registers what the manifest does not say, and the plugin is an ordinary Plugin', async () => {
   const { transport, plugin } = fakeTransport();
   const seen: unknown[] = [];
-  plugin.onRequest('hello', (p) => { seen.push(p); return { hostApi: 2, keys: { open: 'o' }, entry: ['open'] }; });
+  plugin.onRequest('hello', (p) => { seen.push(p); return { hostApi: 3, keys: { open: 'o' }, entry: ['open'] }; });
   const p = await remotePlugin({ manifest, transport, config: { plugins: { fake: { lessons: 'x' } } }, make: makeFactory({}), env: { LANG: 'ru_RU.UTF-8' } });
   expect(p.name).toBe('fake');
   expect(p.keys).toEqual({ open: ['o'] });
   expect(p.entry).toEqual(['open']);
-  expect(seen[0]).toMatchObject({ hostApi: 2, config: { lessons: 'x' }, locale: 'ru-RU', idleMs: 60_000 });
+  expect(seen[0]).toMatchObject({ hostApi: 3, config: { lessons: 'x' }, locale: 'ru-RU', idleMs: 60_000 });
   expect(typeof p.components?.view).toBe('function');
 });
 
 test('the frame feeds keycaps and chatContext synchronously; a frame before hello is kept', async () => {
   const { transport, plugin } = fakeTransport();
-  plugin.onRequest('hello', () => { plugin.notify('frame', { surface: ['Text', {}, 'early'], keycaps: ['x quit'], context: [{ label: 'L', text: 't' }] }); return { hostApi: 2 }; });
+  plugin.onRequest('hello', () => { plugin.notify('frame', { surface: ['Text', {}, 'early'], keycaps: ['x quit'], context: [{ label: 'L', text: 't' }] }); return { hostApi: 3 }; });
   const p = await remotePlugin({ manifest, transport, config: {}, make: makeFactory({}) });
   await tick();
   expect(p.keycaps!({} as never)).toEqual(['x quit']);
@@ -133,7 +133,7 @@ test('hello that never comes stops the transport and rejects', async () => {
 test('a close draws "plugin stopped" and a restart says hello again', async () => {
   const t = fakeTransport();
   let hellos = 0;
-  t.plugin.onRequest('hello', () => { hellos++; return { hostApi: 2 }; });
+  t.plugin.onRequest('hello', () => { hellos++; return { hostApi: 3 }; });
   const p = await remotePlugin({ manifest, transport: t.transport, config: {}, make: makeFactory({}) });
   t.plugin.notify('frame', { surface: ['Text', {}, 'alive'], keycaps: ['x'] });
   await tick();
@@ -184,7 +184,7 @@ test('a tool in flight when the process goes throws "plugin stopped"; after a re
 test('a malformed registration fails the handshake: the transport is stopped and the error says hello:', async () => {
   for (const bad of [{ tools: 'x' }, { configSchema: 42 }, { configSchema: { type: 'nonsense' } }]) {
     const t = fakeTransport();
-    t.plugin.onRequest('hello', () => ({ hostApi: 2, ...bad }));
+    t.plugin.onRequest('hello', () => ({ hostApi: 3, ...bad }));
     await expect(remotePlugin({ manifest, transport: t.transport, config: {}, make: makeFactory({}) })).rejects.toThrow(/^hello: /);
     expect(t.closedWith).toEqual([3_000]);
   }
@@ -193,7 +193,7 @@ test('a malformed registration fails the handshake: the transport is stopped and
 test('a restarted process that refuses hello is stopped, and the plugin stays stopped', async () => {
   const t = fakeTransport();
   let hellos = 0;
-  t.plugin.onRequest('hello', () => ({ hostApi: ++hellos === 1 ? 2 : 1, tools: [{ id: 'tutor', tools: [{ type: 'function', function: { name: 'check', description: 'Check', parameters: {} } }] }] }));
+  t.plugin.onRequest('hello', () => ({ hostApi: ++hellos === 1 ? HOST_API : 1, tools: [{ id: 'tutor', tools: [{ type: 'function', function: { name: 'check', description: 'Check', parameters: {} } }] }] }));
   t.plugin.onRequest('tool.run', () => ({ result: 'ran' }));
   const p = await remotePlugin({ manifest, transport: t.transport, config: {}, make: makeFactory({}) });
   t.closeFromPlugin();
@@ -241,7 +241,7 @@ test('a store write is told to the App\'s other remote plugins as their store ev
   const plugins: Record<string, { t: ReturnType<typeof fakeTransport> }> = {};
   for (const [n, store] of [['a', one.store], ['b', one.store], ['c', other.store]] as const) {
     const t = fakeTransport();
-    t.plugin.onRequest('hello', () => ({ hostApi: 2 }));
+    t.plugin.onRequest('hello', () => ({ hostApi: 3 }));
     t.plugin.onNotify('store', (p) => heard[n]!.push(p));
     const p = await loaderRemotePlugin({ manifest: { ...manifest, name: n }, transport: t.transport, config: {}, make: makeFactory({}) });
     p.setup!(app(store));

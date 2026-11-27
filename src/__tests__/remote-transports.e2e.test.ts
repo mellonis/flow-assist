@@ -24,7 +24,7 @@ const FAKE_DIR = path.resolve(import.meta.dir, 'helpers');
 const RUN = ['bun', 'remote-fake-plugin.ts'];
 
 test('a child that crashes says plugin stopped, and comes back after the backoff', async () => {
-  const manifest = { name: 'fake', hostApi: 2, run: RUN };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN };
   const log: string[] = [];
   const transport = transportFor(manifest, FAKE_DIR, { log: (l) => log.push(l) });
   process.env.FAKE_CRASH_ON_KEY = 'b';
@@ -50,7 +50,7 @@ test('a child that crashes says plugin stopped, and comes back after the backoff
 test('two hosts share one server: one process, frames apart, state shared', async () => {
   const pidfile = `${socketPath('shared.sock')}.pid`;
   process.env.FAKE_PIDFILE = pidfile;
-  const manifest = { name: 'fake', hostApi: 2, run: RUN, connect: 'unix:shared.sock' };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN, connect: 'unix:shared.sock' };
   const t1 = transportFor(manifest, FAKE_DIR, { log: () => {} });
   const t2 = transportFor(manifest, FAKE_DIR, { log: () => {} });
   try {
@@ -94,7 +94,7 @@ test('two hosts share one server: one process, frames apart, state shared', asyn
 });
 
 test("the host's own stop lets the child exit cleanly, not by a signal", async () => {
-  const manifest = { name: 'fake', hostApi: 2, run: RUN };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN };
   const log: string[] = [];
   let closedWith: TransportClose | undefined;
   // `transportFor` itself hides the underlying stdio transport behind the supervisor,
@@ -128,7 +128,7 @@ test("the host's own stop lets the child exit cleanly, not by a signal", async (
 
 test('a shared server whose process holds a handle of its own still ends on its idle', async () => {
   const sock = socketPath('keepalive.sock'); const pidfile = `${sock}.pid`;
-  const manifest = { name: 'fake', hostApi: 2, run: RUN, connect: 'unix:keepalive.sock' };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN, connect: 'unix:keepalive.sock' };
   process.env.FAKE_PIDFILE = pidfile;
   process.env.FAKE_KEEPALIVE = '1';
   const t = transportFor(manifest, FAKE_DIR, { log: () => {} });
@@ -137,7 +137,7 @@ test('a shared server whose process holds a handle of its own still ends on its 
     await t.start();
     pid = Number(fs.readFileSync(pidfile, 'utf8'));
     const peer = createPeer({ send: (l) => t.send(l), onLine: (f) => t.onLine(f) });
-    await peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000);
+    await peer.request('hello', { hostApi: 3, config: {}, idleMs: 100 }, 5_000);
     await t.close(0);
     await until(() => !isAlive(pid), 'the server to end on its idle');
     expect(fs.existsSync(sock)).toBe(false);
@@ -151,7 +151,7 @@ test('a shared server whose process holds a handle of its own still ends on its 
 
 test('a shared server that crashes under two hosts: both see the stop, both come back, and exactly one new server starts', async () => {
   const sock = socketPath('crash.sock'); const pidfile = `${sock}.pid`;
-  const manifest = { name: 'fake', hostApi: 2, run: RUN, connect: 'unix:crash.sock' };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN, connect: 'unix:crash.sock' };
   process.env.FAKE_PIDFILE = pidfile;
   process.env.FAKE_CRASH_ON_KEY = 'b';
   const logA: string[] = []; const logB: string[] = [];
@@ -193,7 +193,7 @@ test('a shared server that crashes under two hosts: both see the stop, both come
 });
 
 test("a crash draws the stop with the last lines the plugin wrote to stderr", async () => {
-  const manifest = { name: 'fake', hostApi: 2, run: RUN };
+  const manifest = { name: 'fake', hostApi: 3, run: RUN };
   const log: string[] = [];
   const transport = transportFor(manifest, FAKE_DIR, { log: (l) => log.push(l) });
   process.env.FAKE_CRASH_ON_KEY = 'b';

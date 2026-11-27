@@ -40,7 +40,7 @@ if (process.env.FAKE_NO_HELLO) {
         self = { n: 0, client: ++shared };
         const m = self;
         setTimeout(() => peer.notify('frame', frame(m)), 0);
-        return { hostApi: 2, name: 'fake', keys: { bump: 'b' } };
+        return { hostApi: 3, name: 'fake', keys: { bump: 'b' } };
       });
       // A deferred resolve: `peer`'s own answer to this request is itself queued as a
       // microtask right after this handler returns, and resolving synchronously here

@@ -20,7 +20,7 @@ test('start, talk, shutdown: hello is answered, a frame arrives, the child ends 
   let closed: unknown = null; t.onClose((w) => { closed = w; });
   await t.start();
   expect(t.pid()).toBeGreaterThan(0);
-  expect(await peer.request('hello', { hostApi: 2, config: {} }, 5_000)).toMatchObject({ name: 'fake' });
+  expect(await peer.request('hello', { hostApi: 3, config: {} }, 5_000)).toMatchObject({ name: 'fake' });
   await wait(50);
   expect(frames.length).toBe(1);
   await peer.request('shutdown', {}, 2_000);
@@ -33,7 +33,7 @@ test('a crash closes with its exit code; stderr goes to the log line by line; st
   const { t, peer, log } = boot({ FAKE_CRASH_AFTER_HELLO: '1', FAKE_STDERR: 'warming up', FAKE_STDOUT_NOISE: '1' });
   const closed = new Promise((r) => t.onClose(r));
   await t.start();
-  expect(await peer.request('hello', { hostApi: 2, config: {} }, 5_000)).toMatchObject({ name: 'fake' });
+  expect(await peer.request('hello', { hostApi: 3, config: {} }, 5_000)).toMatchObject({ name: 'fake' });
   expect(await closed).toEqual({ code: 3, stderr: ['warming up'] });
   expect(log).toContain('[fake] warming up');
 });
@@ -43,7 +43,7 @@ test("a crash's close carries the last five lines of stderr, 200 characters each
   const { t, peer, log } = boot({ FAKE_CRASH_AFTER_HELLO: '1', FAKE_STDERR: ['one', 'two', 'three', 'four', long, 'six'].join('\n'), FAKE_CRASH_SAYS: 'fatal: last words' });
   const closed = new Promise((r) => t.onClose(r));
   await t.start();
-  await peer.request('hello', { hostApi: 2, config: {} }, 5_000);
+  await peer.request('hello', { hostApi: 3, config: {} }, 5_000);
   expect(await closed).toEqual({ code: 3, stderr: ['three', 'four', 'x'.repeat(200), 'six', 'fatal: last words'] });
   expect(log).toContain('[fake] fatal: last words');
 });
@@ -69,7 +69,7 @@ test('a send after the child is gone is a no-op, never an unhandled error', asyn
   const { t, peer } = boot({ FAKE_CRASH_AFTER_HELLO: '1' });
   const closed = new Promise((r) => t.onClose(r));
   await t.start();
-  await peer.request('hello', { hostApi: 2, config: {} }, 5_000);
+  await peer.request('hello', { hostApi: 3, config: {} }, 5_000);
   await closed;
   for (let i = 0; i < 5; i++) t.send('{"jsonrpc":"2.0","method":"key"}');
 });
