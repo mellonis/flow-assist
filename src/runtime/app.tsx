@@ -924,6 +924,10 @@ export async function renderApp(
         toast.showMessage(res.ok ? `config: unset ${key} — now ${describeConfigValue(key, res.value, configSource(config, key))}${res.restart ? ` — ${RESTART_NOTE}` : ''}` : res.error);
         return;
       }
+      if (sub === 'migrate-theme') {
+        toast.showMessage('config: migrate-theme runs from a shell — flow-assist config migrate-theme');
+        return;
+      }
       const paths = flattenConfigPaths(config);
       toast.showMessage(paths.length ? paths.map((p) => `${p.path}=${JSON.stringify(p.value)}`).join('  ') : 'no config keys');
     };

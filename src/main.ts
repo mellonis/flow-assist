@@ -25,6 +25,7 @@ import {
   configWarnings,
 } from './config/load.js';
 import { parseConfigArgs } from './config/commands.js';
+import { droppedReason, migrateTheme } from './playback/palette-migrate.js';
 import { createPluginRepo } from './loader/repo.js';
 import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
@@ -212,7 +213,45 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
     return;
   }
 
+  if (sub === 'migrate-theme') {
+    runMigrateTheme(config, io);
+    return;
+  }
+
   printConfigHelp();
+}
+
+// `config migrate-theme`: the old flat `theme.*` and each plugin's `colors` move under
+// `theme.dark`, through the host's own write path. An old key is unset where it was
+// written; one in config.json is not the host's to change — it is named, not touched.
+function runMigrateTheme(config: Record<string, unknown>, io: ConfigIo): void {
+  const plan = migrateTheme(config);
+  if (!plan.set.length && !plan.unset.length && !plan.dropped.length) {
+    io.out('nothing to migrate');
+    return;
+  }
+  const fail = (error: string): void => {
+    io.out(error);
+    process.exitCode = 1;
+  };
+  for (const [key, value] of plan.set) {
+    const res = setConfigValue(config, key, value, { scope: 'saved' });
+    if (!res.ok) return fail(res.error);
+    io.out(`set ${key} ${value}`);
+  }
+  for (const key of plan.dropped) io.out(`dropped ${key} (${droppedReason(key)})`);
+  // Sources first: an unset changes what `configSource` answers.
+  const sources = new Map(plan.unset.map((key) => [key, configSource(config, key)]));
+  for (const key of plan.unset) {
+    if (sources.get(key) === 'config') {
+      io.out(`kept ${key} (written in config.json — remove it there by hand)`);
+      continue;
+    }
+    const res = unsetConfigValue(config, key, { scope: 'saved' });
+    if (!res.ok) return fail(res.error);
+    io.out(`unset ${key}`);
+  }
+  if (inModelShell()) io.err(MODEL_SHELL_NOTE);
 }
 
 // ─── plugins subcommand ───────────────────────────────────────────────────────
@@ -568,6 +607,7 @@ function printConfigHelp(): void {
       '  config set <key> <value>    Save a value to config.local.json (validated against the schema)',
       '                              Inside the app, :config set --session <key> <value> sets it for that run only',
       '  config unset <key>          Remove a key from config.local.json',
+      '  config migrate-theme        Move the old flat theme and each plugin\'s colors into theme.dark',
       '  config help                 Show this help',
       '',
       'Example keys: ai.model, ai.baseUrl, cache.enabled, debug.logTools, memory.file',

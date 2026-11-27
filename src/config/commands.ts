@@ -201,12 +201,13 @@ export function completeConfigArgs(text: string, config?: unknown, configSchema:
   return completeConfigValue(keyHead, valueHead, nodes);
 }
 
-// Subcommands of `config get|set|unset|help` — there is no bare `config <key>` form.
-const CONFIG_SUBS = ['get', 'set', 'unset', 'help'];
+// Subcommands of `config get|set|unset|migrate-theme|help` — there is no bare `config <key>` form.
+const CONFIG_SUBS = ['get', 'set', 'unset', 'migrate-theme', 'help'];
 const CONFIG_SUB_DETAILS: Record<string, string> = {
   get: 'a key and where its value comes from',
   set: 'a key, in config.local.json or with --session for this run',
   unset: 'a key back to its default',
+  'migrate-theme': 'the old flat theme and plugin colors into theme.dark',
   help: 'what the keys are',
 };
 const detailsOf = (names: string[], all: Record<string, string>): Record<string, string> =>
